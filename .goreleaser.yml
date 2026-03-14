@@ -1,0 +1,34 @@
+version: 2
+
+builds:
+  - main: ./cmd/agmon
+    binary: agmon
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+
+brews:
+  - repository:
+      owner: tt-a1i
+      name: homebrew-tap
+    homepage: "https://github.com/tt-a1i/agmon"
+    description: "Real-time observability for AI coding agents"
+    install: |
+      bin.install "agmon"
