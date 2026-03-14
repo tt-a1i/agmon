@@ -1,0 +1,488 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/tt-a1i/agmon/internal/collector"
+	"github.com/tt-a1i/agmon/internal/daemon"
+	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/agmon/internal/tui"
+)
+
+const version = "0.1.0"
+
+func main() {
+	if len(os.Args) < 2 {
+		runTUI()
+		return
+	}
+
+	switch os.Args[1] {
+	case "daemon":
+		runDaemon()
+	case "emit":
+		runEmit()
+	case "setup":
+		runSetup()
+	case "uninstall":
+		runUninstall()
+	case "status":
+		runStatus()
+	case "report":
+		runReport()
+	case "cost":
+		runCost()
+	case "version":
+		fmt.Printf("agmon v%s\n", version)
+	case "help", "-h", "--help":
+		printHelp()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
+		printHelp()
+		os.Exit(1)
+	}
+}
+
+func runTUI() {
+	db, err := storage.Open(storage.DefaultDBPath())
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	sockPath := daemon.DefaultSocketPath()
+
+	// If daemon already running, connect TUI only
+	if running, _ := daemon.IsRunning(); running {
+		tuiCh := make(chan tui.EventMsg, 1)
+		m := tui.NewModel(db, tuiCh)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			log.Fatalf("tui error: %v", err)
+		}
+		return
+	}
+
+	// Start embedded daemon
+	d := daemon.New(db, sockPath)
+	if err := d.Start(); err != nil {
+		log.Fatalf("start daemon: %v", err)
+	}
+	defer d.Stop()
+	daemon.WritePID()
+	defer daemon.RemovePID()
+
+	// Start Codex watcher
+	codexWatcher := collector.NewCodexWatcher(func(ev event.Event) {
+		d.ProcessExternalEvent(ev)
+	})
+	codexWatcher.Start()
+	defer codexWatcher.Stop()
+
+	eventCh := d.Subscribe()
+	defer d.Unsubscribe(eventCh)
+
+	// Forward daemon events to TUI
+	tuiCh := make(chan tui.EventMsg, 256)
+	go func() {
+		for range eventCh {
+			tuiCh <- tui.EventMsg{}
+		}
+		close(tuiCh)
+	}()
+
+	m := tui.NewModel(db, tuiCh)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		log.Fatalf("tui error: %v", err)
+	}
+}
+
+func runDaemon() {
+	if err := daemon.EnsureNotRunning(); err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	db, err := storage.Open(storage.DefaultDBPath())
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	sockPath := daemon.DefaultSocketPath()
+	d := daemon.New(db, sockPath)
+	if err := d.Start(); err != nil {
+		log.Fatalf("start daemon: %v", err)
+	}
+	daemon.WritePID()
+	defer daemon.RemovePID()
+
+	// Start Codex watcher
+	codexWatcher := collector.NewCodexWatcher(func(ev event.Event) {
+		d.ProcessExternalEvent(ev)
+	})
+	codexWatcher.Start()
+	defer codexWatcher.Stop()
+
+	fmt.Printf("agmon daemon running (socket: %s)\n", sockPath)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	d.Stop()
+	fmt.Println("\ndaemon stopped")
+}
+
+func runEmit() {
+	hookEvent, err := collector.ParseClaudeHookStdin()
+	if err != nil {
+		// Silently exit if no valid input (hook might send empty data)
+		os.Exit(0)
+	}
+
+	callID := fmt.Sprintf("%s-%d", hookEvent.ToolName, time.Now().UnixNano())
+	ev := collector.ClaudeHookToEvent(hookEvent, callID)
+
+	sockPath := daemon.DefaultSocketPath()
+	if err := collector.EmitEvent(sockPath, ev); err != nil {
+		// Daemon not running, silently fail
+		os.Exit(0)
+	}
+}
+
+func runSetup() {
+	home, _ := os.UserHomeDir()
+	settingsPath := home + "/.claude/settings.json"
+
+	// Read existing settings
+	var settings map[string]any
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = make(map[string]any)
+	}
+
+	// Find agmon binary path
+	agmonPath, _ := os.Executable()
+	if agmonPath == "" {
+		agmonPath = "agmon"
+	}
+
+	emitCmd := fmt.Sprintf("%s emit", agmonPath)
+
+	// Merge hooks (don't overwrite existing ones)
+	hooks, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		hooks = make(map[string]any)
+	}
+
+	for _, hookName := range []string{"PreToolUse", "PostToolUse", "Notification"} {
+		hookEntry := map[string]any{
+			"type":    "command",
+			"command": emitCmd,
+		}
+
+		existing, ok := hooks[hookName].([]any)
+		if ok {
+			// Check if agmon hook already exists
+			found := false
+			for _, h := range existing {
+				if hm, ok := h.(map[string]any); ok {
+					if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "agmon") {
+						found = true
+						break
+					}
+				}
+			}
+			if !found {
+				hooks[hookName] = append(existing, hookEntry)
+			}
+		} else {
+			hooks[hookName] = []any{hookEntry}
+		}
+	}
+
+	settings["hooks"] = hooks
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		log.Fatalf("marshal settings: %v", err)
+	}
+
+	if err := os.MkdirAll(home+"/.claude", 0o755); err != nil {
+		log.Fatalf("create claude dir: %v", err)
+	}
+
+	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
+		log.Fatalf("write settings: %v", err)
+	}
+
+	fmt.Println("✓ Claude Code hooks configured")
+	fmt.Printf("  Settings: %s\n", settingsPath)
+	fmt.Printf("  Command:  %s\n", emitCmd)
+	fmt.Println()
+	fmt.Println("Run `agmon` to start monitoring.")
+}
+
+func runUninstall() {
+	home, _ := os.UserHomeDir()
+	settingsPath := home + "/.claude/settings.json"
+
+	// Remove hooks from Claude Code settings
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		var settings map[string]any
+		if json.Unmarshal(data, &settings) == nil {
+			if hooks, ok := settings["hooks"].(map[string]any); ok {
+				for _, hookName := range []string{"PreToolUse", "PostToolUse", "Notification"} {
+					if existing, ok := hooks[hookName].([]any); ok {
+						var filtered []any
+						for _, h := range existing {
+							if hm, ok := h.(map[string]any); ok {
+								if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "agmon") {
+									continue // skip agmon hooks
+								}
+							}
+							filtered = append(filtered, h)
+						}
+						if len(filtered) > 0 {
+							hooks[hookName] = filtered
+						} else {
+							delete(hooks, hookName)
+						}
+					}
+				}
+				settings["hooks"] = hooks
+
+				out, _ := json.MarshalIndent(settings, "", "  ")
+				os.WriteFile(settingsPath, out, 0o644)
+			}
+		}
+	}
+
+	// Stop daemon if running
+	if running, pid := daemon.IsRunning(); running {
+		proc, err := os.FindProcess(pid)
+		if err == nil {
+			proc.Signal(syscall.SIGTERM)
+			fmt.Printf("✓ Stopped daemon (pid %d)\n", pid)
+		}
+	}
+
+	fmt.Println("✓ Removed Claude Code hooks")
+	fmt.Println()
+	fmt.Println("Data preserved at ~/.agmon/")
+	fmt.Println("To remove all data: rm -rf ~/.agmon")
+}
+
+func runReport() {
+	db, err := storage.Open(storage.DefaultDBPath())
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	sessions, err := db.ListSessions()
+	if err != nil {
+		log.Fatalf("list sessions: %v", err)
+	}
+
+	if len(sessions) == 0 {
+		fmt.Println("No sessions recorded.")
+		return
+	}
+
+	// If session ID provided, show that one; otherwise show most recent
+	var target storage.SessionRow
+	if len(os.Args) > 2 {
+		sid := os.Args[2]
+		for _, s := range sessions {
+			if strings.HasPrefix(s.SessionID, sid) {
+				target = s
+				break
+			}
+		}
+		if target.SessionID == "" {
+			log.Fatalf("session not found: %s", sid)
+		}
+	} else {
+		target = sessions[0]
+	}
+
+	fmt.Printf("Session: %s\n", target.SessionID)
+	fmt.Printf("Platform: %s\n", target.Platform)
+	fmt.Printf("Status: %s\n", target.Status)
+	fmt.Printf("Started: %s\n", target.StartTime.Format("2006-01-02 15:04:05"))
+	if target.EndTime != nil {
+		fmt.Printf("Ended: %s\n", target.EndTime.Format("2006-01-02 15:04:05"))
+		fmt.Printf("Duration: %s\n", target.EndTime.Sub(target.StartTime).Round(time.Second))
+	}
+	fmt.Printf("Tokens: %d input + %d output = %d total\n",
+		target.TotalInputTokens, target.TotalOutputTokens,
+		target.TotalInputTokens+target.TotalOutputTokens)
+	fmt.Printf("Cost: $%.4f\n", target.TotalCostUSD)
+	fmt.Println()
+
+	// Agents
+	agents, _ := db.ListAgents(target.SessionID)
+	if len(agents) > 0 {
+		fmt.Println("Agents:")
+		for _, a := range agents {
+			prefix := "  "
+			if a.ParentAgentID != "" {
+				prefix = "    └─ "
+			}
+			status := "●"
+			if a.Status == "ended" {
+				status = "✓"
+			}
+			role := a.Role
+			if role == "" {
+				role = "main"
+			}
+			fmt.Printf("%s%s %s  %s\n", prefix, status, role, a.AgentID)
+		}
+		fmt.Println()
+	}
+
+	// Tool calls
+	toolCalls, _ := db.ListToolCalls(target.SessionID, 50)
+	if len(toolCalls) > 0 {
+		fmt.Println("Tool Calls (last 50):")
+		fmt.Printf("  %-8s %-15s %8s  %s\n", "TIME", "TOOL", "DURATION", "STATUS")
+		for _, tc := range toolCalls {
+			dur := fmt.Sprintf("%.1fs", float64(tc.DurationMs)/1000)
+			if tc.DurationMs == 0 {
+				dur = "-"
+			}
+			status := "✓"
+			switch tc.Status {
+			case "fail":
+				status = "✗"
+			case "pending":
+				status = "…"
+			case "retry":
+				status = "↻"
+			}
+			fmt.Printf("  %-8s %-15s %8s  %s\n",
+				tc.StartTime.Format("15:04:05"), tc.ToolName, dur, status)
+		}
+		fmt.Println()
+	}
+
+	// File changes
+	fileChanges, _ := db.ListFileChanges(target.SessionID)
+	if len(fileChanges) > 0 {
+		fmt.Println("File Changes:")
+		for _, fc := range fileChanges {
+			icon := "~"
+			switch fc.ChangeType {
+			case "create":
+				icon = "+"
+			case "delete":
+				icon = "-"
+			}
+			fmt.Printf("  %s %s\n", icon, fc.FilePath)
+		}
+	}
+}
+
+func runStatus() {
+	db, err := storage.Open(storage.DefaultDBPath())
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	sessions, err := db.ListSessions()
+	if err != nil {
+		log.Fatalf("list sessions: %v", err)
+	}
+
+	activeCount := 0
+	for _, s := range sessions {
+		if s.Status == "active" {
+			activeCount++
+		}
+	}
+
+	todayCost, _ := db.GetTodayCost()
+
+	fmt.Printf("Active sessions: %d\n", activeCount)
+	fmt.Printf("Today's cost:    $%.2f\n", todayCost)
+	fmt.Println()
+
+	if len(sessions) == 0 {
+		fmt.Println("No sessions recorded.")
+		return
+	}
+
+	fmt.Printf("%-24s %-8s %10s %8s  %s\n", "SESSION", "PLATFORM", "TOKENS", "COST", "STATUS")
+	for _, s := range sessions {
+		tokens := s.TotalInputTokens + s.TotalOutputTokens
+		status := "●"
+		if s.Status == "ended" {
+			status = "◌"
+		}
+		sid := s.SessionID
+		if len(sid) > 24 {
+			sid = sid[:24]
+		}
+		fmt.Printf("%-24s %-8s %10d %8.2f  %s\n",
+			sid, s.Platform, tokens, s.TotalCostUSD, status)
+	}
+}
+
+func runCost() {
+	db, err := storage.Open(storage.DefaultDBPath())
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	period := "today"
+	if len(os.Args) > 2 {
+		period = os.Args[2]
+	}
+
+	switch period {
+	case "today":
+		cost, _ := db.GetTodayCost()
+		fmt.Printf("Today: $%.2f\n", cost)
+	case "week":
+		cost, _ := db.GetWeekCost()
+		fmt.Printf("This week: $%.2f\n", cost)
+	default:
+		cost, _ := db.GetTodayCost()
+		fmt.Printf("Today: $%.2f\n", cost)
+	}
+}
+
+func printHelp() {
+	fmt.Printf(`agmon v%s - AI Agent Monitor
+
+Usage:
+  agmon                   Start TUI (auto-starts daemon)
+  agmon daemon            Start daemon only
+  agmon emit              Emit event from hook (reads stdin)
+  agmon setup             Configure Claude Code hooks
+  agmon uninstall         Remove hooks and stop daemon
+  agmon status            Show active sessions summary
+  agmon report [session]  Detailed session report
+  agmon cost [today|week] Cost statistics
+  agmon version           Show version
+  agmon help              Show this help
+`, version)
+}
