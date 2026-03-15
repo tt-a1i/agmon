@@ -21,7 +21,6 @@ type CodexWatcher struct {
 
 func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
 	home, _ := os.UserHomeDir()
-	// Codex stores session logs under ~/.codex/sessions/YYYY/MM/DD/*.jsonl
 	baseDir := filepath.Join(home, ".codex", "sessions")
 	return &CodexWatcher{
 		baseDir: baseDir,
@@ -54,7 +53,6 @@ func (w *CodexWatcher) pollLoop() {
 }
 
 func (w *CodexWatcher) scanLogs() {
-	// Walk the sessions directory recursively to find .jsonl files
 	filepath.Walk(w.baseDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -88,13 +86,16 @@ func (w *CodexWatcher) processFile(path string) {
 		f.Seek(offset, 0)
 	}
 
+	// Extract session ID from filename: rollout-...-<uuid>.jsonl
+	sessionID := extractSessionID(filepath.Base(path))
+
 	dec := json.NewDecoder(f)
 	for dec.More() {
 		var raw codexLogEntry
 		if err := dec.Decode(&raw); err != nil {
 			break
 		}
-		for _, ev := range parseCodexEntry(raw) {
+		for _, ev := range parseCodexEntry(raw, sessionID) {
 			w.emitFn(ev)
 		}
 	}
@@ -103,41 +104,65 @@ func (w *CodexWatcher) processFile(path string) {
 	w.seen[path] = newOffset
 }
 
-// codexLogEntry matches the actual Codex JSONL format:
-// {"timestamp":"...","type":"response_item|session_meta","payload":{...}}
+// extractSessionID pulls the UUID from a filename like:
+// rollout-2026-01-14T20-03-54-d4430cef-110d-42e0-924a-bfceeba0c4e1.jsonl
+func extractSessionID(filename string) string {
+	name := strings.TrimSuffix(filename, ".jsonl")
+	// The UUID is the last 36 chars (8-4-4-4-12)
+	if len(name) >= 36 {
+		candidate := name[len(name)-36:]
+		// Quick check it looks like a UUID
+		if len(candidate) == 36 && candidate[8] == '-' {
+			return candidate
+		}
+	}
+	return name
+}
+
+// --- Codex log entry types matching actual JSONL format ---
+
+// Top-level entry: {"timestamp":"...","type":"session_meta|response_item|event_msg","payload":{...}}
 type codexLogEntry struct {
 	Timestamp string          `json:"timestamp"`
 	Type      string          `json:"type"`
 	Payload   json.RawMessage `json:"payload"`
 }
 
+// session_meta payload
 type codexSessionMeta struct {
-	ID        string `json:"id"`
-	Timestamp string `json:"timestamp"`
-	CWD       string `json:"cwd"`
-	Model     string `json:"model_provider"`
+	ID string `json:"id"`
 }
 
-type codexResponseItem struct {
-	Type    string              `json:"type"`
-	Role    string              `json:"role,omitempty"`
-	Name    string              `json:"name,omitempty"`
-	CallID  string              `json:"call_id,omitempty"`
-	Content []codexContentBlock `json:"content,omitempty"`
-	Output  string              `json:"output,omitempty"`
-	Status  string              `json:"status,omitempty"`
-}
-
-type codexContentBlock struct {
+// response_item payload — covers function_call, function_call_output, and message types.
+// For function_call: name, arguments, call_id are at payload root.
+// For function_call_output: call_id, output are at payload root.
+type codexResponsePayload struct {
 	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
+	Output    string `json:"output,omitempty"`
+	Status    string `json:"status,omitempty"`
 }
 
-func parseCodexEntry(entry codexLogEntry) []event.Event {
-	var events []event.Event
+// event_msg payload for token_count
+type codexEventMsg struct {
+	Type string             `json:"type"`
+	Info *codexTokenInfo    `json:"info,omitempty"`
+}
+
+type codexTokenInfo struct {
+	LastTokenUsage codexTokenUsage `json:"last_token_usage"`
+}
+
+type codexTokenUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
+func parseCodexEntry(entry codexLogEntry, sessionID string) []event.Event {
+	ts := parseTimestamp(entry.Timestamp)
 
 	switch entry.Type {
 	case "session_meta":
@@ -145,62 +170,85 @@ func parseCodexEntry(entry codexLogEntry) []event.Event {
 		if json.Unmarshal(entry.Payload, &meta) != nil {
 			return nil
 		}
-		ev := event.Event{
-			ID:        fmt.Sprintf("codex-session-%s", meta.ID),
-			Type:      event.EventSessionStart,
-			SessionID: meta.ID,
-			Platform:  event.PlatformCodex,
-			Timestamp: parseTimestamp(entry.Timestamp),
+		sid := meta.ID
+		if sid == "" {
+			sid = sessionID
 		}
-		events = append(events, ev)
+		return []event.Event{{
+			ID:        fmt.Sprintf("codex-session-%s", sid),
+			Type:      event.EventSessionStart,
+			SessionID: sid,
+			Platform:  event.PlatformCodex,
+			Timestamp: ts,
+		}}
 
 	case "response_item":
-		var item codexResponseItem
-		if json.Unmarshal(entry.Payload, &item) != nil {
+		var payload codexResponsePayload
+		if json.Unmarshal(entry.Payload, &payload) != nil {
 			return nil
 		}
 
-		ts := parseTimestamp(entry.Timestamp)
-
-		// Extract function calls from content blocks
-		for _, block := range item.Content {
-			switch block.Type {
-			case "function_call":
-				ev := event.Event{
-					ID:        block.CallID,
-					Type:      event.EventToolCallStart,
-					SessionID: "", // will be inferred from file context
-					Platform:  event.PlatformCodex,
-					Timestamp: ts,
-					Data: event.EventData{
-						ToolName:   block.Name,
-						ToolParams: truncate(block.Arguments, 500),
-					},
-				}
-				events = append(events, ev)
-			}
-		}
-
-		// Function call output
-		if item.Type == "function_call_output" {
-			ev := event.Event{
-				ID:        item.CallID,
-				Type:      event.EventToolCallEnd,
+		switch payload.Type {
+		case "function_call":
+			// name, arguments, call_id are at payload root
+			return []event.Event{{
+				ID:        payload.CallID,
+				Type:      event.EventToolCallStart,
+				SessionID: sessionID,
 				Platform:  event.PlatformCodex,
 				Timestamp: ts,
 				Data: event.EventData{
-					ToolResult: truncate(item.Output, 500),
-					ToolStatus: event.StatusSuccess,
+					ToolName:   payload.Name,
+					ToolParams: truncate(payload.Arguments, 500),
 				},
+			}}
+
+		case "function_call_output":
+			status := event.StatusSuccess
+			if payload.Status == "error" || payload.Status == "failed" {
+				status = event.StatusFail
 			}
-			if item.Status == "error" || item.Status == "failed" {
-				ev.Data.ToolStatus = event.StatusFail
+			return []event.Event{{
+				ID:        payload.CallID,
+				Type:      event.EventToolCallEnd,
+				SessionID: sessionID,
+				Platform:  event.PlatformCodex,
+				Timestamp: ts,
+				Data: event.EventData{
+					ToolResult: truncate(payload.Output, 500),
+					ToolStatus: status,
+				},
+			}}
+		}
+
+	case "event_msg":
+		var msg codexEventMsg
+		if json.Unmarshal(entry.Payload, &msg) != nil {
+			return nil
+		}
+
+		if msg.Type == "token_count" && msg.Info != nil {
+			usage := msg.Info.LastTokenUsage
+			if usage.TotalTokens == 0 {
+				return nil
 			}
-			events = append(events, ev)
+			cost := estimateCodexCost(usage.InputTokens, usage.OutputTokens, "")
+			return []event.Event{{
+				ID:        fmt.Sprintf("codex-tokens-%d", ts.UnixNano()),
+				Type:      event.EventTokenUsage,
+				SessionID: sessionID,
+				Platform:  event.PlatformCodex,
+				Timestamp: ts,
+				Data: event.EventData{
+					InputTokens:  usage.InputTokens,
+					OutputTokens: usage.OutputTokens,
+					CostUSD:      cost,
+				},
+			}}
 		}
 	}
 
-	return events
+	return nil
 }
 
 func parseTimestamp(s string) time.Time {
