@@ -124,14 +124,14 @@ func (d *Daemon) handleConn(conn net.Conn) {
 }
 
 func (d *Daemon) processEvent(ev event.Event) error {
-	// Auto-create session if we see any event for an unknown session
-	if ev.SessionID != "" && ev.Type != event.EventSessionStart && ev.Type != event.EventSessionEnd {
+	// Auto-create session for any event with a session ID
+	if ev.SessionID != "" && ev.Type != event.EventSessionEnd {
 		d.db.UpsertSession(ev.SessionID, ev.Platform, ev.Timestamp)
 	}
 
 	switch ev.Type {
 	case event.EventSessionStart:
-		return d.db.UpsertSession(ev.SessionID, ev.Platform, ev.Timestamp)
+		return nil // already handled above
 
 	case event.EventSessionEnd:
 		return d.db.EndSession(ev.SessionID, ev.Timestamp)
@@ -174,6 +174,3 @@ func (d *Daemon) ProcessExternalEvent(ev event.Event) {
 	d.broadcast(ev)
 }
 
-func (d *Daemon) DB() *storage.DB {
-	return d.db
-}

@@ -183,14 +183,6 @@ func (s *DB) GetActiveSessionCount() (int, error) {
 	return count, err
 }
 
-func (s *DB) GetSessionTokenSummary(sessionID string) (inputTokens, outputTokens int, costUSD float64, err error) {
-	err = s.db.QueryRow(`
-		SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cost_usd), 0)
-		FROM token_usage WHERE session_id = ?
-	`, sessionID).Scan(&inputTokens, &outputTokens, &costUSD)
-	return
-}
-
 func (s *DB) GetAgentTokenSummary(agentID string) (inputTokens, outputTokens int, costUSD float64, err error) {
 	err = s.db.QueryRow(`
 		SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cost_usd), 0)

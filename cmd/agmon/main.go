@@ -20,6 +20,20 @@ import (
 
 const version = "0.2.0"
 
+var agmonHookNames = []string{
+	"SessionStart", "SessionEnd", "Stop",
+	"PreToolUse", "PostToolUse", "PostToolUseFailure",
+	"SubagentStart", "SubagentStop",
+}
+
+func mustOpenDB() *storage.DB {
+	db, err := storage.Open(storage.DefaultDBPath())
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	return db
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		runTUI()
@@ -53,10 +67,7 @@ func main() {
 }
 
 func runTUI() {
-	db, err := storage.Open(storage.DefaultDBPath())
-	if err != nil {
-		log.Fatalf("open db: %v", err)
-	}
+	db := mustOpenDB()
 	defer db.Close()
 
 	sockPath := daemon.DefaultSocketPath()
@@ -112,10 +123,7 @@ func runDaemon() {
 		log.Fatalf("%v", err)
 	}
 
-	db, err := storage.Open(storage.DefaultDBPath())
-	if err != nil {
-		log.Fatalf("open db: %v", err)
-	}
+	db := mustOpenDB()
 	defer db.Close()
 
 	sockPath := daemon.DefaultSocketPath()
@@ -188,14 +196,7 @@ func runSetup() {
 		hooks = make(map[string]any)
 	}
 
-	// Hook events we need to capture
-	hookNames := []string{
-		"SessionStart", "SessionEnd", "Stop",
-		"PreToolUse", "PostToolUse", "PostToolUseFailure",
-		"SubagentStart", "SubagentStop",
-	}
-
-	for _, hookName := range hookNames {
+	for _, hookName := range agmonHookNames {
 		addHookEntry(hooks, hookName, emitCmd)
 	}
 
@@ -217,7 +218,7 @@ func runSetup() {
 	fmt.Println("✓ Claude Code hooks configured")
 	fmt.Printf("  Settings: %s\n", settingsPath)
 	fmt.Printf("  Command:  %s\n", emitCmd)
-	fmt.Printf("  Events:   %s\n", strings.Join(hookNames, ", "))
+	fmt.Printf("  Events:   %s\n", strings.Join(agmonHookNames, ", "))
 	fmt.Println()
 	fmt.Println("Run `agmon` to start monitoring.")
 }
@@ -261,18 +262,12 @@ func runUninstall() {
 	home, _ := os.UserHomeDir()
 	settingsPath := home + "/.claude/settings.json"
 
-	hookNames := []string{
-		"SessionStart", "SessionEnd", "Stop",
-		"PreToolUse", "PostToolUse", "PostToolUseFailure",
-		"SubagentStart", "SubagentStop",
-	}
-
 	data, err := os.ReadFile(settingsPath)
 	if err == nil {
 		var settings map[string]any
 		if json.Unmarshal(data, &settings) == nil {
 			if hooks, ok := settings["hooks"].(map[string]any); ok {
-				for _, hookName := range hookNames {
+				for _, hookName := range agmonHookNames {
 					removeAgmonHook(hooks, hookName)
 				}
 				settings["hooks"] = hooks
@@ -343,10 +338,7 @@ func removeAgmonHook(hooks map[string]any, hookName string) {
 }
 
 func runReport() {
-	db, err := storage.Open(storage.DefaultDBPath())
-	if err != nil {
-		log.Fatalf("open db: %v", err)
-	}
+	db := mustOpenDB()
 	defer db.Close()
 
 	sessions, err := db.ListSessions()
@@ -451,10 +443,7 @@ func runReport() {
 }
 
 func runStatus() {
-	db, err := storage.Open(storage.DefaultDBPath())
-	if err != nil {
-		log.Fatalf("open db: %v", err)
-	}
+	db := mustOpenDB()
 	defer db.Close()
 
 	sessions, err := db.ListSessions()
@@ -497,10 +486,7 @@ func runStatus() {
 }
 
 func runCost() {
-	db, err := storage.Open(storage.DefaultDBPath())
-	if err != nil {
-		log.Fatalf("open db: %v", err)
-	}
+	db := mustOpenDB()
 	defer db.Close()
 
 	period := "today"
