@@ -124,6 +124,11 @@ func (d *Daemon) handleConn(conn net.Conn) {
 }
 
 func (d *Daemon) processEvent(ev event.Event) error {
+	// Auto-create session if we see any event for an unknown session
+	if ev.SessionID != "" && ev.Type != event.EventSessionStart && ev.Type != event.EventSessionEnd {
+		d.db.UpsertSession(ev.SessionID, ev.Platform, ev.Timestamp)
+	}
+
 	switch ev.Type {
 	case event.EventSessionStart:
 		return d.db.UpsertSession(ev.SessionID, ev.Platform, ev.Timestamp)

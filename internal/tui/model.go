@@ -280,7 +280,7 @@ func (m Model) viewAgentTree(width int) string {
 			role = "agent"
 		}
 
-		inputTok, outputTok, cost, _ := m.db.GetSessionTokenSummary(a.AgentID)
+		inputTok, outputTok, cost, _ := m.db.GetAgentTokenSummary(a.AgentID)
 		tokens := formatTokens(inputTok + outputTok)
 
 		line := fmt.Sprintf("%s%s %s  %s  %s",

@@ -191,6 +191,14 @@ func (s *DB) GetSessionTokenSummary(sessionID string) (inputTokens, outputTokens
 	return
 }
 
+func (s *DB) GetAgentTokenSummary(agentID string) (inputTokens, outputTokens int, costUSD float64, err error) {
+	err = s.db.QueryRow(`
+		SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cost_usd), 0)
+		FROM token_usage WHERE agent_id = ?
+	`, agentID).Scan(&inputTokens, &outputTokens, &costUSD)
+	return
+}
+
 func (s *DB) GetWeekCost() (float64, error) {
 	weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
 	var cost float64

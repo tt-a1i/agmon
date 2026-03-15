@@ -18,7 +18,7 @@ import (
 	"github.com/tt-a1i/agmon/internal/tui"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -146,25 +146,28 @@ func runDaemon() {
 func runEmit() {
 	hookEvent, err := collector.ParseClaudeHookStdin()
 	if err != nil {
-		// Silently exit if no valid input (hook might send empty data)
 		os.Exit(0)
 	}
 
-	callID := fmt.Sprintf("%s-%d", hookEvent.ToolName, time.Now().UnixNano())
-	ev := collector.ClaudeHookToEvent(hookEvent, callID)
+	// Use ClaudeHookToEvents which produces properly correlated events
+	// using tool_use_id from Claude Code for Pre/Post matching
+	events := collector.ClaudeHookToEvents(hookEvent)
 
 	sockPath := daemon.DefaultSocketPath()
-	if err := collector.EmitEvent(sockPath, ev); err != nil {
-		// Daemon not running, silently fail
-		os.Exit(0)
+	for _, ev := range events {
+		if err := collector.EmitEvent(sockPath, ev); err != nil {
+			// Daemon not running, silently fail
+			os.Exit(0)
+		}
 	}
 }
 
+// agmon setup hook format:
+// Claude Code settings.json uses: [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }]
 func runSetup() {
 	home, _ := os.UserHomeDir()
 	settingsPath := home + "/.claude/settings.json"
 
-	// Read existing settings
 	var settings map[string]any
 	data, err := os.ReadFile(settingsPath)
 	if err == nil {
@@ -174,44 +177,26 @@ func runSetup() {
 		settings = make(map[string]any)
 	}
 
-	// Find agmon binary path
 	agmonPath, _ := os.Executable()
 	if agmonPath == "" {
 		agmonPath = "agmon"
 	}
-
 	emitCmd := fmt.Sprintf("%s emit", agmonPath)
 
-	// Merge hooks (don't overwrite existing ones)
 	hooks, ok := settings["hooks"].(map[string]any)
 	if !ok {
 		hooks = make(map[string]any)
 	}
 
-	for _, hookName := range []string{"PreToolUse", "PostToolUse", "Notification"} {
-		hookEntry := map[string]any{
-			"type":    "command",
-			"command": emitCmd,
-		}
+	// Hook events we need to capture
+	hookNames := []string{
+		"SessionStart", "SessionEnd", "Stop",
+		"PreToolUse", "PostToolUse", "PostToolUseFailure",
+		"SubagentStart", "SubagentStop",
+	}
 
-		existing, ok := hooks[hookName].([]any)
-		if ok {
-			// Check if agmon hook already exists
-			found := false
-			for _, h := range existing {
-				if hm, ok := h.(map[string]any); ok {
-					if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "agmon") {
-						found = true
-						break
-					}
-				}
-			}
-			if !found {
-				hooks[hookName] = append(existing, hookEntry)
-			}
-		} else {
-			hooks[hookName] = []any{hookEntry}
-		}
+	for _, hookName := range hookNames {
+		addHookEntry(hooks, hookName, emitCmd)
 	}
 
 	settings["hooks"] = hooks
@@ -232,47 +217,71 @@ func runSetup() {
 	fmt.Println("✓ Claude Code hooks configured")
 	fmt.Printf("  Settings: %s\n", settingsPath)
 	fmt.Printf("  Command:  %s\n", emitCmd)
+	fmt.Printf("  Events:   %s\n", strings.Join(hookNames, ", "))
 	fmt.Println()
 	fmt.Println("Run `agmon` to start monitoring.")
+}
+
+// addHookEntry adds an agmon hook entry in the correct Claude Code format:
+// [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }]
+func addHookEntry(hooks map[string]any, hookName, emitCmd string) {
+	agmonHook := map[string]any{
+		"type":    "command",
+		"command": emitCmd,
+	}
+
+	matcherEntry := map[string]any{
+		"matcher": "",
+		"hooks":   []any{agmonHook},
+	}
+
+	existing, ok := hooks[hookName].([]any)
+	if ok {
+		// Check if agmon hook already exists in any matcher entry
+		for _, entry := range existing {
+			if entryMap, ok := entry.(map[string]any); ok {
+				if innerHooks, ok := entryMap["hooks"].([]any); ok {
+					for _, h := range innerHooks {
+						if hm, ok := h.(map[string]any); ok {
+							if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "agmon") {
+								return // already installed
+							}
+						}
+					}
+				}
+			}
+		}
+		hooks[hookName] = append(existing, matcherEntry)
+	} else {
+		hooks[hookName] = []any{matcherEntry}
+	}
 }
 
 func runUninstall() {
 	home, _ := os.UserHomeDir()
 	settingsPath := home + "/.claude/settings.json"
 
-	// Remove hooks from Claude Code settings
+	hookNames := []string{
+		"SessionStart", "SessionEnd", "Stop",
+		"PreToolUse", "PostToolUse", "PostToolUseFailure",
+		"SubagentStart", "SubagentStop",
+	}
+
 	data, err := os.ReadFile(settingsPath)
 	if err == nil {
 		var settings map[string]any
 		if json.Unmarshal(data, &settings) == nil {
 			if hooks, ok := settings["hooks"].(map[string]any); ok {
-				for _, hookName := range []string{"PreToolUse", "PostToolUse", "Notification"} {
-					if existing, ok := hooks[hookName].([]any); ok {
-						var filtered []any
-						for _, h := range existing {
-							if hm, ok := h.(map[string]any); ok {
-								if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "agmon") {
-									continue // skip agmon hooks
-								}
-							}
-							filtered = append(filtered, h)
-						}
-						if len(filtered) > 0 {
-							hooks[hookName] = filtered
-						} else {
-							delete(hooks, hookName)
-						}
-					}
+				for _, hookName := range hookNames {
+					removeAgmonHook(hooks, hookName)
 				}
 				settings["hooks"] = hooks
-
 				out, _ := json.MarshalIndent(settings, "", "  ")
 				os.WriteFile(settingsPath, out, 0o644)
 			}
 		}
 	}
 
-	// Stop daemon if running
 	if running, pid := daemon.IsRunning(); running {
 		proc, err := os.FindProcess(pid)
 		if err == nil {
@@ -285,6 +294,52 @@ func runUninstall() {
 	fmt.Println()
 	fmt.Println("Data preserved at ~/.agmon/")
 	fmt.Println("To remove all data: rm -rf ~/.agmon")
+}
+
+// removeAgmonHook removes agmon entries from the nested hook format.
+func removeAgmonHook(hooks map[string]any, hookName string) {
+	existing, ok := hooks[hookName].([]any)
+	if !ok {
+		return
+	}
+
+	var filtered []any
+	for _, entry := range existing {
+		entryMap, ok := entry.(map[string]any)
+		if !ok {
+			filtered = append(filtered, entry)
+			continue
+		}
+
+		innerHooks, ok := entryMap["hooks"].([]any)
+		if !ok {
+			filtered = append(filtered, entry)
+			continue
+		}
+
+		// Filter out agmon hooks from this matcher entry
+		var cleanHooks []any
+		for _, h := range innerHooks {
+			if hm, ok := h.(map[string]any); ok {
+				if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "agmon") {
+					continue
+				}
+			}
+			cleanHooks = append(cleanHooks, h)
+		}
+
+		if len(cleanHooks) > 0 {
+			entryMap["hooks"] = cleanHooks
+			filtered = append(filtered, entryMap)
+		}
+		// If no hooks left in this matcher entry, drop the whole entry
+	}
+
+	if len(filtered) > 0 {
+		hooks[hookName] = filtered
+	} else {
+		delete(hooks, hookName)
+	}
 }
 
 func runReport() {
@@ -304,7 +359,6 @@ func runReport() {
 		return
 	}
 
-	// If session ID provided, show that one; otherwise show most recent
 	var target storage.SessionRow
 	if len(os.Args) > 2 {
 		sid := os.Args[2]
@@ -335,7 +389,6 @@ func runReport() {
 	fmt.Printf("Cost: $%.4f\n", target.TotalCostUSD)
 	fmt.Println()
 
-	// Agents
 	agents, _ := db.ListAgents(target.SessionID)
 	if len(agents) > 0 {
 		fmt.Println("Agents:")
@@ -357,7 +410,6 @@ func runReport() {
 		fmt.Println()
 	}
 
-	// Tool calls
 	toolCalls, _ := db.ListToolCalls(target.SessionID, 50)
 	if len(toolCalls) > 0 {
 		fmt.Println("Tool Calls (last 50):")
@@ -382,7 +434,6 @@ func runReport() {
 		fmt.Println()
 	}
 
-	// File changes
 	fileChanges, _ := db.ListFileChanges(target.SessionID)
 	if len(fileChanges) > 0 {
 		fmt.Println("File Changes:")
