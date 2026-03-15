@@ -13,20 +13,22 @@ import (
 
 // CodexWatcher watches Codex session log directory for new logs and parses them.
 type CodexWatcher struct {
-	baseDir string
-	emitFn  func(event.Event)
-	done    chan struct{}
-	seen    map[string]int64 // file -> last read offset
+	baseDir        string
+	emitFn         func(event.Event)
+	done           chan struct{}
+	seen           map[string]int64  // file -> last read offset
+	lastTokenUsage map[string]string // sessionID -> "input:output" dedup key
 }
 
 func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
 	home, _ := os.UserHomeDir()
 	baseDir := filepath.Join(home, ".codex", "sessions")
 	return &CodexWatcher{
-		baseDir: baseDir,
-		emitFn:  emitFn,
-		done:    make(chan struct{}),
-		seen:    make(map[string]int64),
+		baseDir:        baseDir,
+		emitFn:         emitFn,
+		done:           make(chan struct{}),
+		seen:           make(map[string]int64),
+		lastTokenUsage: make(map[string]string),
 	}
 }
 
@@ -96,6 +98,14 @@ func (w *CodexWatcher) processFile(path string) {
 			break
 		}
 		for _, ev := range parseCodexEntry(raw, sessionID) {
+			// Dedup repeated token_count events with same last_token_usage
+			if ev.Type == event.EventTokenUsage {
+				key := fmt.Sprintf("%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens)
+				if w.lastTokenUsage[sessionID] == key {
+					continue
+				}
+				w.lastTokenUsage[sessionID] = key
+			}
 			w.emitFn(ev)
 		}
 	}

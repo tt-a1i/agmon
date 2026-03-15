@@ -2,6 +2,7 @@ package collector
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/tt-a1i/agmon/internal/event"
@@ -169,6 +170,49 @@ func TestParseCodexEntry_UnknownType(t *testing.T) {
 	events := parseCodexEntry(entry, "test-session")
 	if len(events) != 0 {
 		t.Errorf("unknown type should return nil, got %d", len(events))
+	}
+}
+
+func TestCodexWatcher_DedupsRepeatedTokenCount(t *testing.T) {
+	var emitted []event.Event
+	w := &CodexWatcher{
+		lastTokenUsage: make(map[string]string),
+		emitFn:         func(ev event.Event) { emitted = append(emitted, ev) },
+	}
+
+	// Simulate 3 token_count entries: first two have same values, third is different
+	entries := []codexLogEntry{
+		{Timestamp: "2026-01-14T12:07:16.785Z", Type: "event_msg",
+			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":12879,"output_tokens":57,"total_tokens":12936}}}`)},
+		{Timestamp: "2026-01-14T12:07:19.661Z", Type: "event_msg",
+			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":12879,"output_tokens":57,"total_tokens":12936}}}`)},
+		{Timestamp: "2026-01-14T12:07:21.533Z", Type: "event_msg",
+			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":12983,"output_tokens":20,"total_tokens":13003}}}`)},
+	}
+
+	sessionID := "test-dedup"
+	for _, entry := range entries {
+		for _, ev := range parseCodexEntry(entry, sessionID) {
+			if ev.Type == event.EventTokenUsage {
+				key := fmt.Sprintf("%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens)
+				if w.lastTokenUsage[sessionID] == key {
+					continue
+				}
+				w.lastTokenUsage[sessionID] = key
+			}
+			w.emitFn(ev)
+		}
+	}
+
+	// Should only emit 2 events (first unique + third unique), not 3
+	if len(emitted) != 2 {
+		t.Fatalf("expected 2 deduplicated token events, got %d", len(emitted))
+	}
+	if emitted[0].Data.InputTokens != 12879 {
+		t.Errorf("first event input: got %d, want 12879", emitted[0].Data.InputTokens)
+	}
+	if emitted[1].Data.InputTokens != 12983 {
+		t.Errorf("second event input: got %d, want 12983", emitted[1].Data.InputTokens)
 	}
 }
 
