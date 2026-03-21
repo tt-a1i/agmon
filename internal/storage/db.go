@@ -28,10 +28,13 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=10000")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+	// SQLite allows only one writer at a time. A single connection serializes
+	// all access and eliminates SQLITE_BUSY when multiple goroutines write concurrently.
+	db.SetMaxOpenConns(1)
 
 	s := &DB{db: db}
 	if err := s.migrate(); err != nil {
