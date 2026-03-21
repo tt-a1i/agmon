@@ -71,7 +71,10 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		       total_input_tokens, total_output_tokens, total_cost_usd,
 		       cwd, git_branch, latest_context_tokens, model,
 		       total_cache_read_tokens, total_cache_creation_tokens
-		FROM sessions ORDER BY start_time DESC LIMIT 50
+		FROM sessions
+		WHERE total_input_tokens > 0 OR total_output_tokens > 0
+		   OR start_time > datetime('now', '-1 hour')
+		ORDER BY start_time DESC LIMIT 50
 	`)
 	if err != nil {
 		return nil, err

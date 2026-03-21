@@ -191,21 +191,21 @@ func TestCleanOldSessions(t *testing.T) {
 	now := time.Now()
 
 	// Old ended session (10 days ago) — should be deleted.
-	if err := db.UpsertSession("old-ended", event.PlatformClaude, now.AddDate(0, 0, -10)); err != nil {
-		t.Fatal(err)
-	}
+	db.UpsertSession("old-ended", event.PlatformClaude, now.AddDate(0, 0, -10))
+	db.InsertTokenUsage("a1", "old-ended", 100, 50, 0, 0, "sonnet", 0.01, now.AddDate(0, 0, -10), "src-old")
+	db.UpdateSessionTokens("old-ended")
 	db.EndSession("old-ended", now.AddDate(0, 0, -10))
 
 	// Recent ended session (2 days ago) — should survive.
-	if err := db.UpsertSession("recent-ended", event.PlatformClaude, now.AddDate(0, 0, -2)); err != nil {
-		t.Fatal(err)
-	}
+	db.UpsertSession("recent-ended", event.PlatformClaude, now.AddDate(0, 0, -2))
+	db.InsertTokenUsage("a1", "recent-ended", 200, 100, 0, 0, "sonnet", 0.02, now.AddDate(0, 0, -2), "src-recent")
+	db.UpdateSessionTokens("recent-ended")
 	db.EndSession("recent-ended", now.AddDate(0, 0, -2))
 
 	// Old but still active session — must NOT be deleted regardless of age.
-	if err := db.UpsertSession("old-active", event.PlatformClaude, now.AddDate(0, 0, -10)); err != nil {
-		t.Fatal(err)
-	}
+	db.UpsertSession("old-active", event.PlatformClaude, now.AddDate(0, 0, -10))
+	db.InsertTokenUsage("a1", "old-active", 300, 150, 0, 0, "sonnet", 0.03, now.AddDate(0, 0, -10), "src-active")
+	db.UpdateSessionTokens("old-active")
 
 	n, err := db.CleanOldSessions(7)
 	if err != nil {
