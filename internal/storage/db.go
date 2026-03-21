@@ -187,7 +187,7 @@ func (s *DB) EndAgent(agentID string, endTime time.Time) error {
 
 func (s *DB) InsertToolCallStart(callID, agentID, sessionID, toolName, params string, startTime time.Time) error {
 	_, err := s.db.Exec(`
-		INSERT INTO tool_calls (call_id, agent_id, session_id, tool_name, params_summary, start_time)
+		INSERT OR IGNORE INTO tool_calls (call_id, agent_id, session_id, tool_name, params_summary, start_time)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, callID, agentID, sessionID, toolName, params, startTime.Format(time.RFC3339))
 	return err
