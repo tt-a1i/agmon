@@ -625,16 +625,12 @@ func (m Model) viewAgentTree(width int) string {
 			role = "agent"
 		}
 
-		inputTok, outputTok, _, _ := m.db.GetAgentTokenSummary(a.AgentID)
-		tokens := formatTokens(inputTok + outputTok)
-
 		idLen := len(a.AgentID)
 		if idLen > 8 {
 			idLen = 8
 		}
-		line := fmt.Sprintf("%s%s %s  %s  %s",
-			prefix, role, mutedStyle.Render(a.AgentID[:idLen]),
-			tokens, status)
+		line := fmt.Sprintf("%s%s %s  %s",
+			prefix, role, mutedStyle.Render(a.AgentID[:idLen]), status)
 
 		if i == m.selectedRow {
 			line = selectedStyle.Render(line)
