@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -55,6 +57,8 @@ func main() {
 		runReport()
 	case "cost":
 		runCost()
+	case "clean":
+		runClean()
 	case "version":
 		fmt.Printf("agmon v%s\n", version)
 	case "help", "-h", "--help":
@@ -99,6 +103,13 @@ func runTUI() {
 	codexWatcher.Start()
 	defer codexWatcher.Stop()
 
+	// Start Claude log watcher
+	claudeLogWatcher := collector.NewClaudeLogWatcher(func(ev event.Event) {
+		d.ProcessExternalEvent(ev)
+	})
+	claudeLogWatcher.Start()
+	defer claudeLogWatcher.Stop()
+
 	eventCh := d.Subscribe()
 	defer d.Unsubscribe(eventCh)
 
@@ -140,6 +151,13 @@ func runDaemon() {
 	})
 	codexWatcher.Start()
 	defer codexWatcher.Stop()
+
+	// Start Claude log watcher
+	claudeLogWatcher := collector.NewClaudeLogWatcher(func(ev event.Event) {
+		d.ProcessExternalEvent(ev)
+	})
+	claudeLogWatcher.Start()
+	defer claudeLogWatcher.Stop()
 
 	fmt.Printf("agmon daemon running (socket: %s)\n", sockPath)
 
@@ -367,18 +385,24 @@ func runReport() {
 		target = sessions[0]
 	}
 
-	fmt.Printf("Session: %s\n", target.SessionID)
+	name := target.SessionID
+	if target.GitBranch != "" {
+		name = target.GitBranch
+	} else if target.CWD != "" {
+		name = filepath.Base(target.CWD)
+	}
+	fmt.Printf("Session:  %s\n", name)
+	fmt.Printf("ID:       %s\n", target.SessionID)
 	fmt.Printf("Platform: %s\n", target.Platform)
-	fmt.Printf("Status: %s\n", target.Status)
+	fmt.Printf("Status:   %s\n", target.Status)
 	fmt.Printf("Started: %s\n", target.StartTime.Format("2006-01-02 15:04:05"))
 	if target.EndTime != nil {
 		fmt.Printf("Ended: %s\n", target.EndTime.Format("2006-01-02 15:04:05"))
 		fmt.Printf("Duration: %s\n", target.EndTime.Sub(target.StartTime).Round(time.Second))
 	}
-	fmt.Printf("Tokens: %d input + %d output = %d total\n",
+	fmt.Printf("Tokens: %d in + %d out = %d total\n",
 		target.TotalInputTokens, target.TotalOutputTokens,
 		target.TotalInputTokens+target.TotalOutputTokens)
-	fmt.Printf("Cost: $%.4f\n", target.TotalCostUSD)
 	fmt.Println()
 
 	agents, _ := db.ListAgents(target.SessionID)
@@ -458,10 +482,9 @@ func runStatus() {
 		}
 	}
 
-	todayCost, _ := db.GetTodayCost()
-
+	todayIn, todayOut, _ := db.GetTodayTokens()
 	fmt.Printf("Active sessions: %d\n", activeCount)
-	fmt.Printf("Today's cost:    $%.2f\n", todayCost)
+	fmt.Printf("Today's tokens:  %s in / %s out\n", fmtTokens(todayIn), fmtTokens(todayOut))
 	fmt.Println()
 
 	if len(sessions) == 0 {
@@ -469,19 +492,26 @@ func runStatus() {
 		return
 	}
 
-	fmt.Printf("%-24s %-8s %10s %8s  %s\n", "SESSION", "PLATFORM", "TOKENS", "COST", "STATUS")
+	fmt.Printf("%-24s %-8s %8s %8s  %s\n", "SESSION", "PLATFORM", "IN", "OUT", "STATUS")
 	for _, s := range sessions {
-		tokens := s.TotalInputTokens + s.TotalOutputTokens
 		status := "●"
-		if s.Status == "ended" {
+		switch s.Status {
+		case "ended":
 			status = "◌"
+		case "stale":
+			status = "?"
 		}
-		sid := s.SessionID
-		if len(sid) > 24 {
-			sid = sid[:24]
+		name := s.SessionID
+		if s.GitBranch != "" {
+			name = s.GitBranch
+		} else if s.CWD != "" {
+			name = filepath.Base(s.CWD)
 		}
-		fmt.Printf("%-24s %-8s %10d %8.2f  %s\n",
-			sid, s.Platform, tokens, s.TotalCostUSD, status)
+		if len(name) > 24 {
+			name = name[:24]
+		}
+		fmt.Printf("%-24s %-8s %8s %8s  %s\n",
+			name, s.Platform, fmtTokens(s.TotalInputTokens), fmtTokens(s.TotalOutputTokens), status)
 	}
 }
 
@@ -495,31 +525,61 @@ func runCost() {
 	}
 
 	switch period {
-	case "today":
-		cost, _ := db.GetTodayCost()
-		fmt.Printf("Today: $%.2f\n", cost)
 	case "week":
-		cost, _ := db.GetWeekCost()
-		fmt.Printf("This week: $%.2f\n", cost)
+		in, out, _ := db.GetWeekTokens()
+		fmt.Printf("This week: %d in + %d out = %d total tokens\n", in, out, in+out)
 	default:
-		cost, _ := db.GetTodayCost()
-		fmt.Printf("Today: $%.2f\n", cost)
+		in, out, _ := db.GetTodayTokens()
+		fmt.Printf("Today: %d in + %d out = %d total tokens\n", in, out, in+out)
 	}
+}
+
+func runClean() {
+	days := 7
+	if len(os.Args) > 2 {
+		if d, err := strconv.Atoi(os.Args[2]); err == nil && d > 0 {
+			days = d
+		}
+	}
+
+	db := mustOpenDB()
+	defer db.Close()
+
+	n, err := db.CleanOldSessions(days)
+	if err != nil {
+		log.Fatalf("clean: %v", err)
+	}
+	if n == 0 {
+		fmt.Printf("No sessions older than %d days to remove.\n", days)
+	} else {
+		fmt.Printf("Removed %d session(s) older than %d days.\n", n, days)
+	}
+}
+
+func fmtTokens(n int) string {
+	if n >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	}
+	if n >= 1_000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 func printHelp() {
 	fmt.Printf(`agmon v%s - AI Agent Monitor
 
 Usage:
-  agmon                   Start TUI (auto-starts daemon)
-  agmon daemon            Start daemon only
-  agmon emit              Emit event from hook (reads stdin)
-  agmon setup             Configure Claude Code hooks
-  agmon uninstall         Remove hooks and stop daemon
-  agmon status            Show active sessions summary
-  agmon report [session]  Detailed session report
-  agmon cost [today|week] Cost statistics
-  agmon version           Show version
-  agmon help              Show this help
+  agmon                    Start TUI (auto-starts daemon)
+  agmon daemon             Start daemon only
+  agmon emit               Emit event from hook (reads stdin)
+  agmon setup              Configure Claude Code hooks
+  agmon uninstall          Remove hooks and stop daemon
+  agmon status             Show active sessions summary
+  agmon report [session]   Detailed session report
+  agmon cost [today|week]  Token usage statistics
+  agmon clean [days]       Remove sessions older than N days (default: 7)
+  agmon version            Show version
+  agmon help               Show this help
 `, version)
 }

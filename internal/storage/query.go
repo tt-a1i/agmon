@@ -13,6 +13,8 @@ type SessionRow struct {
 	TotalInputTokens  int
 	TotalOutputTokens int
 	TotalCostUSD      float64
+	CWD               string
+	GitBranch         string
 }
 
 type AgentRow struct {
@@ -62,7 +64,8 @@ func parseTimePtr(s *string) *time.Time {
 func (s *DB) ListSessions() ([]SessionRow, error) {
 	rows, err := s.db.Query(`
 		SELECT session_id, platform, start_time, end_time, status,
-		       total_input_tokens, total_output_tokens, total_cost_usd
+		       total_input_tokens, total_output_tokens, total_cost_usd,
+		       cwd, git_branch
 		FROM sessions ORDER BY start_time DESC
 	`)
 	if err != nil {
@@ -76,7 +79,8 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		var startStr string
 		var endStr *string
 		if err := rows.Scan(&r.SessionID, &r.Platform, &startStr, &endStr,
-			&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD); err != nil {
+			&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD,
+			&r.CWD, &r.GitBranch); err != nil {
 			return nil, err
 		}
 		r.StartTime = parseTime(startStr)
@@ -168,13 +172,22 @@ func (s *DB) ListFileChanges(sessionID string) ([]FileChangeRow, error) {
 	return result, rows.Err()
 }
 
-func (s *DB) GetTodayCost() (float64, error) {
+func (s *DB) GetTodayTokens() (input, output int, err error) {
 	today := time.Now().Format("2006-01-02")
-	var cost float64
-	err := s.db.QueryRow(`
-		SELECT COALESCE(SUM(cost_usd), 0) FROM token_usage WHERE timestamp >= ?
-	`, today+"T00:00:00Z").Scan(&cost)
-	return cost, err
+	err = s.db.QueryRow(`
+		SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		FROM token_usage WHERE timestamp >= ?
+	`, today+"T00:00:00Z").Scan(&input, &output)
+	return
+}
+
+func (s *DB) GetWeekTokens() (input, output int, err error) {
+	weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+	err = s.db.QueryRow(`
+		SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+		FROM token_usage WHERE timestamp >= ?
+	`, weekAgo+"T00:00:00Z").Scan(&input, &output)
+	return
 }
 
 func (s *DB) GetActiveSessionCount() (int, error) {
@@ -191,11 +204,3 @@ func (s *DB) GetAgentTokenSummary(agentID string) (inputTokens, outputTokens int
 	return
 }
 
-func (s *DB) GetWeekCost() (float64, error) {
-	weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
-	var cost float64
-	err := s.db.QueryRow(`
-		SELECT COALESCE(SUM(cost_usd), 0) FROM token_usage WHERE timestamp >= ?
-	`, weekAgo+"T00:00:00Z").Scan(&cost)
-	return cost, err
-}

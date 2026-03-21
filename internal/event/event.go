@@ -72,4 +72,8 @@ type EventData struct {
 	// File change fields
 	FilePath   string         `json:"file_path,omitempty"`
 	ChangeType FileChangeType `json:"change_type,omitempty"`
+
+	// Session metadata fields
+	CWD       string `json:"cwd,omitempty"`
+	GitBranch string `json:"git_branch,omitempty"`
 }

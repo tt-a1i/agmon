@@ -55,14 +55,13 @@ var (
 			Foreground(colorSuccess).
 			SetString("✓")
 
-	costStyle = lipgloss.NewStyle().
-			Foreground(colorWarning).
-			Bold(true)
-
 	mutedStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
 	selectedStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#2D2D4F")).
 			Bold(true)
+
+	errorStyle = lipgloss.NewStyle().
+			Foreground(colorError)
 )

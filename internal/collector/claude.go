@@ -43,6 +43,9 @@ type ClaudeHookEvent struct {
 	// Stop/SubagentStop
 	Reason               string `json:"reason,omitempty"`
 	AgentTranscriptPath  string `json:"agent_transcript_path,omitempty"`
+
+	// SessionStart
+	GitBranch string `json:"gitBranch,omitempty"`
 }
 
 // ParseClaudeHookStdin reads and parses Claude Code hook input from stdin.
@@ -73,6 +76,10 @@ func ClaudeHookToEvents(hook *ClaudeHookEvent) []event.Event {
 		ev := base
 		ev.ID = fmt.Sprintf("session-start-%s", hook.SessionID)
 		ev.Type = event.EventSessionStart
+		ev.Data = event.EventData{
+			CWD:       hook.CWD,
+			GitBranch: hook.GitBranch,
+		}
 		events = append(events, ev)
 
 	case "SessionEnd", "Stop":

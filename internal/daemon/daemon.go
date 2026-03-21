@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/tt-a1i/agmon/internal/event"
 	"github.com/tt-a1i/agmon/internal/storage"
@@ -80,6 +81,11 @@ func (d *Daemon) Start() error {
 	d.listener = ln
 	log.Printf("daemon listening on %s", d.sockPath)
 
+	// Clean up sessions that never received a SessionEnd (e.g. process killed).
+	if err := d.db.MarkStaleSessionsEnded(24 * time.Hour); err != nil {
+		log.Printf("stale session cleanup: %v", err)
+	}
+
 	go d.acceptLoop()
 	return nil
 }
@@ -131,9 +137,13 @@ func (d *Daemon) processEvent(ev event.Event) error {
 
 	switch ev.Type {
 	case event.EventSessionStart:
-		return nil // already handled above
+		if ev.Data.CWD != "" || ev.Data.GitBranch != "" {
+			d.db.UpdateSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch)
+		}
+		return nil
 
 	case event.EventSessionEnd:
+		d.db.MarkPendingToolCallsInterrupted(ev.SessionID)
 		return d.db.EndSession(ev.SessionID, ev.Timestamp)
 
 	case event.EventAgentStart:
@@ -155,7 +165,7 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		return nil
 
 	case event.EventTokenUsage:
-		if err := d.db.InsertTokenUsage(ev.AgentID, ev.SessionID, ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.Model, ev.Data.CostUSD, ev.Timestamp); err != nil {
+		if err := d.db.InsertTokenUsage(ev.AgentID, ev.SessionID, ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.Model, ev.Data.CostUSD, ev.Timestamp, ev.ID); err != nil {
 			return err
 		}
 		return d.db.UpdateSessionTokens(ev.SessionID)

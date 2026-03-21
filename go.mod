@@ -1,6 +1,6 @@
 module github.com/tt-a1i/agmon
 
-go 1.26.1
+go 1.24.2
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0

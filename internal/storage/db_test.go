@@ -103,13 +103,13 @@ func TestToolCallCRUD(t *testing.T) {
 	}
 }
 
-func TestTokenUsageAndCost(t *testing.T) {
+func TestTokenUsage(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()
 
 	db.UpsertSession("s1", event.PlatformClaude, now)
 
-	if err := db.InsertTokenUsage("a1", "s1", 1000, 500, "sonnet", 0.0225, now); err != nil {
+	if err := db.InsertTokenUsage("a1", "s1", 1000, 500, "sonnet", 0, now, "test-src-1"); err != nil {
 		t.Fatalf("insert token usage: %v", err)
 	}
 
@@ -125,9 +125,23 @@ func TestTokenUsageAndCost(t *testing.T) {
 		t.Errorf("output tokens: got %d, want 500", sessions[0].TotalOutputTokens)
 	}
 
-	cost, _ := db.GetTodayCost()
-	if cost < 0.02 {
-		t.Errorf("today cost: got %f, want >= 0.02", cost)
+	in, out, err := db.GetTodayTokens()
+	if err != nil {
+		t.Fatalf("get today tokens: %v", err)
+	}
+	if in != 1000 {
+		t.Errorf("today input: got %d, want 1000", in)
+	}
+	if out != 500 {
+		t.Errorf("today output: got %d, want 500", out)
+	}
+
+	// Dedup: inserting same source_id again should be a no-op.
+	db.InsertTokenUsage("a1", "s1", 999, 999, "sonnet", 0, now, "test-src-1")
+	db.UpdateSessionTokens("s1")
+	sessions, _ = db.ListSessions()
+	if sessions[0].TotalInputTokens != 1000 {
+		t.Errorf("dedup failed: input tokens changed to %d", sessions[0].TotalInputTokens)
 	}
 }
 
@@ -169,6 +183,46 @@ func TestFileChanges(t *testing.T) {
 	}
 	if changes[0].ChangeType != "create" {
 		t.Errorf("change type: got %q, want %q", changes[0].ChangeType, "create")
+	}
+}
+
+func TestCleanOldSessions(t *testing.T) {
+	db := testDB(t)
+	now := time.Now()
+
+	// Old ended session (10 days ago) — should be deleted.
+	if err := db.UpsertSession("old-ended", event.PlatformClaude, now.AddDate(0, 0, -10)); err != nil {
+		t.Fatal(err)
+	}
+	db.EndSession("old-ended", now.AddDate(0, 0, -10))
+
+	// Recent ended session (2 days ago) — should survive.
+	if err := db.UpsertSession("recent-ended", event.PlatformClaude, now.AddDate(0, 0, -2)); err != nil {
+		t.Fatal(err)
+	}
+	db.EndSession("recent-ended", now.AddDate(0, 0, -2))
+
+	// Old but still active session — must NOT be deleted regardless of age.
+	if err := db.UpsertSession("old-active", event.PlatformClaude, now.AddDate(0, 0, -10)); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := db.CleanOldSessions(7)
+	if err != nil {
+		t.Fatalf("clean: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 session deleted, got %d", n)
+	}
+
+	sessions, _ := db.ListSessions()
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions remaining, got %d", len(sessions))
+	}
+	for _, s := range sessions {
+		if s.SessionID == "old-ended" {
+			t.Errorf("old-ended session should have been deleted")
+		}
 	}
 }
 

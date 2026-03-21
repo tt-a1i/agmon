@@ -1,21 +1,21 @@
 # agmon
 
-Real-time observability for AI coding agents. See what your agents are doing, how much they cost, and where they fail.
+Real-time observability for AI coding agents. See what your agents are doing, how many tokens they consume, and where they fail.
 
 ```
 ╭─ agmon ──────────────────────────────────────────╮
-│ Active: 3 sessions  Today: $1.24                 │
+│ Active: 3 sessions  Today: 42.1k in / 8.3k out  │
 │                                                  │
-│ SESSION          PLATFORM  TOKENS    COST  STATUS│
-│ feat/auth        claude    42.1k    $0.83   ●    │
-│ fix/nav-bug      claude    12.3k    $0.24   ●    │
-│ refactor/api     codex      8.7k    $0.17   ◌    │
+│ SESSION          PLATFORM       IN      OUT STATUS│
+│ feat/auth        claude      32.1k    8.3k   ●   │
+│ fix/nav-bug      claude       8.7k    2.1k   ●   │
+│ refactor/api     codex        1.3k    0.9k   ◌   │
 ╰──────────────────────────────────────────────────╯
 ```
 
 ## Features
 
-- **Token & cost tracking** — per agent, per session, real-time USD estimates
+- **Token tracking** — per agent, per session, input + cache tokens in real time
 - **Tool call traces** — who called what, params, result, duration
 - **Agent hierarchy** — main agent → subagent tree visualization
 - **Success/failure/retry** — spot failing tools instantly
@@ -54,14 +54,15 @@ That's it. Use Claude Code normally — agmon captures everything in the backgro
 ## Commands
 
 ```
-agmon                   Start TUI (auto-starts daemon)
-agmon daemon            Start daemon only
-agmon status            Quick session summary
-agmon report [session]  Detailed text report for a session
-agmon cost [today|week] Cost statistics
-agmon setup             Configure Claude Code hooks
-agmon uninstall         Remove hooks and stop daemon
-agmon version           Show version
+agmon                    Start TUI (auto-starts daemon)
+agmon daemon             Start daemon only
+agmon status             Quick session summary
+agmon report [session]   Detailed text report for a session
+agmon cost [today|week]  Token usage statistics
+agmon clean [days]       Remove sessions older than N days (default: 7)
+agmon setup              Configure Claude Code hooks
+agmon uninstall          Remove hooks and stop daemon
+agmon version            Show version
 ```
 
 ## TUI Views
@@ -70,7 +71,7 @@ agmon version           Show version
 
 | View | What it shows |
 |------|---------------|
-| **Dashboard** | Active sessions, cost summary, session list |
+| **Dashboard** | Active sessions, today's token summary, session list |
 | **Agent Tree** | Main agent → subagent hierarchy with token counts |
 | **Tool Calls** | Real-time tool call stream with duration and status |
 | **Timeline** | Chronological events: agent lifecycle, tool calls, file changes |
@@ -81,8 +82,10 @@ agmon version           Show version
 |-----|--------|
 | `Tab` / `Shift+Tab` | Switch view |
 | `j` / `k` | Navigate up/down |
-| `Enter` | Select session / expand details |
-| `/` | Search / filter |
+| `Enter` | Select session / expand tool call details |
+| `[` / `]` | Switch session (any view) |
+| `/` | Filter current list |
+| `Esc` | Clear filter |
 | `q` | Quit |
 
 ## Architecture
@@ -96,7 +99,8 @@ Codex log watcher ──→                      ↓
 - **Daemon** receives events via Unix socket, stores to SQLite, broadcasts to subscribers
 - **TUI** connects to daemon, polls database, renders real-time views
 - **PID lock** prevents multiple daemon instances
-- **Codex watcher** polls log directory every 3s for new entries
+- **Claude log watcher** polls `~/.claude/projects/` every 3s for token usage
+- **Codex watcher** polls `~/.codex/sessions/` every 3s for new entries
 
 ## Data
 
