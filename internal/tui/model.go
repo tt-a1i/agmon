@@ -428,11 +428,20 @@ func buildTimeline(agents []storage.AgentRow, toolCalls []storage.ToolCallRow, f
 }
 
 func sessionDisplayName(s storage.SessionRow) string {
-	if s.GitBranch != "" {
-		return s.GitBranch
-	}
+	project := ""
 	if s.CWD != "" {
-		return filepath.Base(s.CWD)
+		project = filepath.Base(s.CWD)
+	}
+	branch := s.GitBranch
+
+	if project != "" && branch != "" {
+		return project + "/" + branch
+	}
+	if project != "" {
+		return project
+	}
+	if branch != "" {
+		return branch
 	}
 	if len(s.SessionID) > 20 {
 		return s.SessionID[:20]
@@ -526,7 +535,7 @@ func (m Model) viewDashboard(width int) string {
 		return b.String()
 	}
 
-	hdr := fmt.Sprintf("  %-20s %-8s %8s  %7s %8s  %s", "SESSION", "AGE", "COST", "CTX", "OUT", "STATUS")
+	hdr := fmt.Sprintf("  %-20s %-14s %8s  %7s %8s  %s", "SESSION", "STARTED", "COST", "CTX", "OUT", "STATUS")
 	b.WriteString(headerStyle.Render(hdr) + "\n")
 
 	visible := m.visibleRows() - 4
@@ -551,11 +560,11 @@ func (m Model) viewDashboard(width int) string {
 			name = name[:20]
 		}
 
-		age := relativeTime(s.StartTime)
+		started := formatStartTime(s.StartTime)
 		costStr := fmt.Sprintf("$%.2f", s.TotalCostUSD)
 		ctxStr := formatTokens(s.LatestContextTokens)
-		line := fmt.Sprintf("  %-20s %-8s %8s  %7s %8s  %s",
-			name, age, costStr, ctxStr,
+		line := fmt.Sprintf("  %-20s %-14s %8s  %7s %8s  %s",
+			name, started, costStr, ctxStr,
 			formatTokens(s.TotalOutputTokens),
 			status)
 
@@ -780,6 +789,15 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// formatStartTime shows "13:25" for today, "03/20 15:07" for older.
+func formatStartTime(t time.Time) string {
+	now := time.Now()
+	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		return t.Format("15:04")
+	}
+	return t.Format("01/02 15:04")
 }
 
 // relativeTime formats a time as "2m ago", "3h ago", "2d ago", etc.
