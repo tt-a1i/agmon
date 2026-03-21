@@ -168,7 +168,7 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		if ev.Data.GitBranch != "" || ev.Data.CWD != "" {
 			d.db.UpdateSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch)
 		}
-		if err := d.db.InsertTokenUsage(ev.AgentID, ev.SessionID, ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.Model, ev.Data.CostUSD, ev.Timestamp, ev.ID); err != nil {
+		if err := d.db.InsertTokenUsage(ev.AgentID, ev.SessionID, ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheCreationTokens, ev.Data.CacheReadTokens, ev.Data.Model, ev.Data.CostUSD, ev.Timestamp, ev.ID); err != nil {
 			return err
 		}
 		return d.db.UpdateSessionTokens(ev.SessionID)

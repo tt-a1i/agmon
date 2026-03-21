@@ -7,12 +7,12 @@ import (
 
 func TestEstimateClaudeCost(t *testing.T) {
 	tests := []struct {
-		name         string
-		input        int
-		output       int
-		model        string
-		wantMinUSD   float64
-		wantMaxUSD   float64
+		name       string
+		input      int
+		output     int
+		model      string
+		wantMinUSD float64
+		wantMaxUSD float64
 	}{
 		{
 			name: "sonnet small", input: 1000, output: 500,
@@ -34,7 +34,7 @@ func TestEstimateClaudeCost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cost := EstimateClaudeCost(tt.input, tt.output, tt.model)
+			cost := EstimateClaudeCost(tt.input, tt.output, 0, 0, tt.model)
 			if cost < tt.wantMinUSD || cost > tt.wantMaxUSD {
 				t.Errorf("cost = %f, want between %f and %f", cost, tt.wantMinUSD, tt.wantMaxUSD)
 			}
@@ -43,8 +43,23 @@ func TestEstimateClaudeCost(t *testing.T) {
 }
 
 func TestEstimateClaudeCostZero(t *testing.T) {
-	cost := EstimateClaudeCost(0, 0, "anything")
+	cost := EstimateClaudeCost(0, 0, 0, 0, "anything")
 	if math.Abs(cost) > 0.0001 {
 		t.Errorf("zero tokens should yield zero cost, got %f", cost)
+	}
+}
+
+func TestEstimateClaudeCostCacheTokens(t *testing.T) {
+	// Cache creation tokens (sonnet: $3.75/M) should cost more than regular input ($3/M).
+	costWithCache := EstimateClaudeCost(0, 0, 1_000_000, 0, "claude-sonnet-4-6")
+	costWithInput := EstimateClaudeCost(1_000_000, 0, 0, 0, "claude-sonnet-4-6")
+	if costWithCache <= costWithInput {
+		t.Errorf("cache creation ($%.6f) should cost more than regular input ($%.6f)", costWithCache, costWithInput)
+	}
+
+	// Cache read tokens (sonnet: $0.30/M) should cost less than regular input ($3/M).
+	costCacheRead := EstimateClaudeCost(0, 0, 0, 1_000_000, "claude-sonnet-4-6")
+	if costCacheRead >= costWithInput {
+		t.Errorf("cache read ($%.6f) should cost less than regular input ($%.6f)", costCacheRead, costWithInput)
 	}
 }

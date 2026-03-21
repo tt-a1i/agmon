@@ -28,6 +28,8 @@ const (
 
 var tabNames = []string{"Dashboard", "Agent Tree", "Tool Calls", "Timeline"}
 
+const claudeContextWindow = 200_000
+
 type timelineEntry struct {
 	time   time.Time
 	kind   string
@@ -52,6 +54,7 @@ type Model struct {
 	filterText      string
 	todayInput      int
 	todayOutput     int
+	todayCost       float64
 	width           int
 	height          int
 	activeCount     int
@@ -344,6 +347,7 @@ func (m *Model) refresh() {
 	m.sessions, m.err = m.db.ListSessions()
 	m.activeCount, _ = m.db.GetActiveSessionCount()
 	m.todayInput, m.todayOutput, _ = m.db.GetTodayTokens()
+	m.todayCost, _ = m.db.GetTodayCost()
 
 	if len(m.sessions) > 0 {
 		if m.selectedSession >= len(m.sessions) {
@@ -491,10 +495,11 @@ func (m Model) View() string {
 func (m Model) viewDashboard(width int) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("Active: %s  Today: %s in / %s out\n\n",
+	b.WriteString(fmt.Sprintf("Active: %s  Today: %s in / %s out  Cost: %s\n\n",
 		headerStyle.Render(fmt.Sprintf("%d sessions", m.activeCount)),
 		mutedStyle.Render(formatTokens(m.todayInput)),
 		mutedStyle.Render(formatTokens(m.todayOutput)),
+		costStyle.Render(fmt.Sprintf("$%.4f", m.todayCost)),
 	))
 
 	filtered := m.filteredSessions()
@@ -513,7 +518,7 @@ func (m Model) viewDashboard(width int) string {
 		return b.String()
 	}
 
-	hdr := fmt.Sprintf("  %-20s %-8s %8s %8s  %s", "SESSION", "PLATFORM", "IN", "OUT", "STATUS")
+	hdr := fmt.Sprintf("  %-20s %-8s %8s %8s  %8s  %s", "SESSION", "PLATFORM", "IN", "OUT", "COST", "STATUS")
 	b.WriteString(headerStyle.Render(hdr) + "\n")
 
 	visible := m.visibleRows() - 4
@@ -538,10 +543,12 @@ func (m Model) viewDashboard(width int) string {
 			name = name[:20]
 		}
 
-		line := fmt.Sprintf("  %-20s %-8s %8s %8s  %s",
+		costStr := fmt.Sprintf("$%.2f", s.TotalCostUSD)
+		line := fmt.Sprintf("  %-20s %-8s %8s %8s  %8s  %s",
 			name, s.Platform,
 			formatTokens(s.TotalInputTokens),
 			formatTokens(s.TotalOutputTokens),
+			costStr,
 			status)
 
 		if i == m.selectedRow {
@@ -565,7 +572,11 @@ func (m Model) viewAgentTree(width int) string {
 	}
 
 	s := m.sessions[m.selectedSession]
-	b.WriteString(headerStyle.Render(fmt.Sprintf("  Session: %s", sessionDisplayName(s))) + "\n\n")
+	b.WriteString(headerStyle.Render(fmt.Sprintf("  Session: %s  │  Context: %s  │  %s",
+		sessionDisplayName(s),
+		contextPercent(s.LatestContextTokens),
+		costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)),
+	)) + "\n\n")
 
 	filtered := m.filteredAgents()
 	if len(filtered) == 0 {
@@ -628,12 +639,21 @@ func (m Model) viewAgentTree(width int) string {
 func (m Model) viewToolCalls(width int) string {
 	var b strings.Builder
 
+	if len(m.sessions) > 0 {
+		s := m.sessions[m.selectedSession]
+		b.WriteString(headerStyle.Render(fmt.Sprintf("  Session: %s  │  Context: %s  │  %s",
+			sessionDisplayName(s),
+			contextPercent(s.LatestContextTokens),
+			costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)),
+		)) + "\n\n")
+	}
+
 	filtered := m.filteredToolCalls()
 	if len(filtered) == 0 {
 		if len(m.toolCalls) == 0 {
-			return mutedStyle.Render("  No tool calls recorded")
+			return b.String() + mutedStyle.Render("  No tool calls recorded")
 		}
-		return mutedStyle.Render(fmt.Sprintf("  No tool calls match %q", m.filterText))
+		return b.String() + mutedStyle.Render(fmt.Sprintf("  No tool calls match %q", m.filterText))
 	}
 
 	hdr := fmt.Sprintf("  %-8s %-12s %-30s %8s  %s", "TIME", "TOOL", "TARGET", "DURATION", "STATUS")
@@ -707,12 +727,19 @@ func (m Model) viewTimeline(width int) string {
 		return mutedStyle.Render("  No sessions")
 	}
 
+	s := m.sessions[m.selectedSession]
+	b.WriteString(headerStyle.Render(fmt.Sprintf("  Session: %s  │  Context: %s  │  %s",
+		sessionDisplayName(s),
+		contextPercent(s.LatestContextTokens),
+		costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)),
+	)) + "\n\n")
+
 	filtered := m.filteredTimeline()
 	if len(filtered) == 0 {
 		if len(m.timelineEntries) == 0 {
-			return mutedStyle.Render("  No events recorded")
+			return b.String() + mutedStyle.Render("  No events recorded")
 		}
-		return mutedStyle.Render(fmt.Sprintf("  No events match %q", m.filterText))
+		return b.String() + mutedStyle.Render(fmt.Sprintf("  No events match %q", m.filterText))
 	}
 
 	visible := m.visibleRows()
@@ -757,6 +784,20 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// contextPercent formats the context window usage as "45.2k / 200k (22%)" with color.
+func contextPercent(latest int) string {
+	pct := float64(latest) / float64(claudeContextWindow) * 100
+	text := fmt.Sprintf("%s / 200k (%.0f%%)", formatTokens(latest), pct)
+	switch {
+	case pct >= 80:
+		return contextDangerStyle.Render(text)
+	case pct >= 50:
+		return contextWarnStyle.Render(text)
+	default:
+		return contextOkStyle.Render(text)
+	}
 }
 
 func truncate(s string, maxLen int) string {

@@ -109,7 +109,7 @@ func TestTokenUsage(t *testing.T) {
 
 	db.UpsertSession("s1", event.PlatformClaude, now)
 
-	if err := db.InsertTokenUsage("a1", "s1", 1000, 500, "sonnet", 0, now, "test-src-1"); err != nil {
+	if err := db.InsertTokenUsage("a1", "s1", 1000, 500, 0, 0, "sonnet", 0, now, "test-src-1"); err != nil {
 		t.Fatalf("insert token usage: %v", err)
 	}
 
@@ -137,7 +137,7 @@ func TestTokenUsage(t *testing.T) {
 	}
 
 	// Dedup: inserting same source_id again should be a no-op.
-	db.InsertTokenUsage("a1", "s1", 999, 999, "sonnet", 0, now, "test-src-1")
+	db.InsertTokenUsage("a1", "s1", 999, 999, 0, 0, "sonnet", 0, now, "test-src-1")
 	db.UpdateSessionTokens("s1")
 	sessions, _ = db.ListSessions()
 	if sessions[0].TotalInputTokens != 1000 {

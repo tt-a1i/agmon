@@ -62,9 +62,11 @@ type EventData struct {
 	AgentRole     string `json:"agent_role,omitempty"`
 
 	// Token fields
-	InputTokens  int    `json:"input_tokens,omitempty"`
-	OutputTokens int    `json:"output_tokens,omitempty"`
-	Model        string `json:"model,omitempty"`
+	InputTokens         int    `json:"input_tokens,omitempty"`
+	OutputTokens        int    `json:"output_tokens,omitempty"`
+	CacheCreationTokens int    `json:"cache_creation_tokens,omitempty"`
+	CacheReadTokens     int    `json:"cache_read_tokens,omitempty"`
+	Model               string `json:"model,omitempty"`
 
 	// Cost fields
 	CostUSD float64 `json:"cost_usd,omitempty"`

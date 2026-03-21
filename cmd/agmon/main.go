@@ -483,8 +483,10 @@ func runStatus() {
 	}
 
 	todayIn, todayOut, _ := db.GetTodayTokens()
+	todayCost, _ := db.GetTodayCost()
 	fmt.Printf("Active sessions: %d\n", activeCount)
 	fmt.Printf("Today's tokens:  %s in / %s out\n", fmtTokens(todayIn), fmtTokens(todayOut))
+	fmt.Printf("Today's cost:    $%.4f\n", todayCost)
 	fmt.Println()
 
 	if len(sessions) == 0 {
@@ -492,7 +494,7 @@ func runStatus() {
 		return
 	}
 
-	fmt.Printf("%-24s %-8s %8s %8s  %s\n", "SESSION", "PLATFORM", "IN", "OUT", "STATUS")
+	fmt.Printf("%-24s %-8s %8s %8s  %8s  %s\n", "SESSION", "PLATFORM", "IN", "OUT", "COST", "STATUS")
 	for _, s := range sessions {
 		status := "●"
 		switch s.Status {
@@ -510,8 +512,9 @@ func runStatus() {
 		if len(name) > 24 {
 			name = name[:24]
 		}
-		fmt.Printf("%-24s %-8s %8s %8s  %s\n",
-			name, s.Platform, fmtTokens(s.TotalInputTokens), fmtTokens(s.TotalOutputTokens), status)
+		fmt.Printf("%-24s %-8s %8s %8s  %8s  %s\n",
+			name, s.Platform, fmtTokens(s.TotalInputTokens), fmtTokens(s.TotalOutputTokens),
+			fmt.Sprintf("$%.2f", s.TotalCostUSD), status)
 	}
 }
 
@@ -527,10 +530,16 @@ func runCost() {
 	switch period {
 	case "week":
 		in, out, _ := db.GetWeekTokens()
-		fmt.Printf("This week: %d in + %d out = %d total tokens\n", in, out, in+out)
+		cost, _ := db.GetWeekCost()
+		fmt.Printf("This week:\n")
+		fmt.Printf("  Tokens: %s in + %s out = %s total\n", fmtTokens(in), fmtTokens(out), fmtTokens(in+out))
+		fmt.Printf("  Cost:   $%.4f\n", cost)
 	default:
 		in, out, _ := db.GetTodayTokens()
-		fmt.Printf("Today: %d in + %d out = %d total tokens\n", in, out, in+out)
+		cost, _ := db.GetTodayCost()
+		fmt.Printf("Today:\n")
+		fmt.Printf("  Tokens: %s in + %s out = %s total\n", fmtTokens(in), fmtTokens(out), fmtTokens(in+out))
+		fmt.Printf("  Cost:   $%.4f\n", cost)
 	}
 }
 

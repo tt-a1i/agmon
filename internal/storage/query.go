@@ -5,16 +5,17 @@ import (
 )
 
 type SessionRow struct {
-	SessionID         string
-	Platform          string
-	StartTime         time.Time
-	EndTime           *time.Time
-	Status            string
-	TotalInputTokens  int
-	TotalOutputTokens int
-	TotalCostUSD      float64
-	CWD               string
-	GitBranch         string
+	SessionID            string
+	Platform             string
+	StartTime            time.Time
+	EndTime              *time.Time
+	Status               string
+	TotalInputTokens     int
+	TotalOutputTokens    int
+	TotalCostUSD         float64
+	CWD                  string
+	GitBranch            string
+	LatestContextTokens  int
 }
 
 type AgentRow struct {
@@ -65,7 +66,7 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 	rows, err := s.db.Query(`
 		SELECT session_id, platform, start_time, end_time, status,
 		       total_input_tokens, total_output_tokens, total_cost_usd,
-		       cwd, git_branch
+		       cwd, git_branch, latest_context_tokens
 		FROM sessions ORDER BY start_time DESC
 	`)
 	if err != nil {
@@ -80,7 +81,7 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		var endStr *string
 		if err := rows.Scan(&r.SessionID, &r.Platform, &startStr, &endStr,
 			&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD,
-			&r.CWD, &r.GitBranch); err != nil {
+			&r.CWD, &r.GitBranch, &r.LatestContextTokens); err != nil {
 			return nil, err
 		}
 		r.StartTime = parseTime(startStr)
@@ -202,5 +203,25 @@ func (s *DB) GetAgentTokenSummary(agentID string) (inputTokens, outputTokens int
 		FROM token_usage WHERE agent_id = ?
 	`, agentID).Scan(&inputTokens, &outputTokens, &costUSD)
 	return
+}
+
+func (s *DB) GetTodayCost() (float64, error) {
+	today := time.Now().Format("2006-01-02")
+	var cost float64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(cost_usd), 0)
+		FROM token_usage WHERE timestamp >= ?
+	`, today+"T00:00:00Z").Scan(&cost)
+	return cost, err
+}
+
+func (s *DB) GetWeekCost() (float64, error) {
+	weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+	var cost float64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(cost_usd), 0)
+		FROM token_usage WHERE timestamp >= ?
+	`, weekAgo+"T00:00:00Z").Scan(&cost)
+	return cost, err
 }
 

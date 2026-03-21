@@ -124,7 +124,10 @@ func (s *DB) migrate() error {
 	// Schema migrations for new columns (idempotent).
 	s.addColumnIfMissing("sessions", "cwd", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "git_branch", "TEXT NOT NULL DEFAULT ''")
+	s.addColumnIfMissing("sessions", "latest_context_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("token_usage", "source_id", "TEXT NOT NULL DEFAULT ''")
+	s.addColumnIfMissing("token_usage", "cache_creation_tokens", "INT NOT NULL DEFAULT 0")
+	s.addColumnIfMissing("token_usage", "cache_read_tokens", "INT NOT NULL DEFAULT 0")
 	_, err = s.db.Exec(`
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_token_usage_source
 		ON token_usage(source_id) WHERE source_id != ''
@@ -205,12 +208,12 @@ func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatu
 // sourceID is used for deduplication (INSERT OR IGNORE on unique source_id).
 // Pass a stable unique ID (e.g. message UUID) to prevent double-counting on daemon restart.
 // Pass "" to skip dedup.
-func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputTokens int, model string, costUSD float64, ts time.Time, sourceID string) error {
+func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int, model string, costUSD float64, ts time.Time, sourceID string) error {
 	_, err := s.db.Exec(`
 		INSERT OR IGNORE INTO token_usage
-			(agent_id, session_id, input_tokens, output_tokens, model, cost_usd, timestamp, source_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, agentID, sessionID, inputTokens, outputTokens, model, costUSD, ts.Format(time.RFC3339), sourceID)
+			(agent_id, session_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model, cost_usd, timestamp, source_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, agentID, sessionID, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, costUSD, ts.Format(time.RFC3339), sourceID)
 	return err
 }
 
@@ -257,9 +260,10 @@ func (s *DB) UpdateSessionTokens(sessionID string) error {
 		UPDATE sessions SET
 			total_input_tokens = COALESCE((SELECT SUM(input_tokens) FROM token_usage WHERE session_id = ?), 0),
 			total_output_tokens = COALESCE((SELECT SUM(output_tokens) FROM token_usage WHERE session_id = ?), 0),
-			total_cost_usd = COALESCE((SELECT SUM(cost_usd) FROM token_usage WHERE session_id = ?), 0)
+			total_cost_usd = COALESCE((SELECT SUM(cost_usd) FROM token_usage WHERE session_id = ?), 0),
+			latest_context_tokens = COALESCE((SELECT MAX(input_tokens) FROM token_usage WHERE session_id = ?), 0)
 		WHERE session_id = ?
-	`, sessionID, sessionID, sessionID, sessionID)
+	`, sessionID, sessionID, sessionID, sessionID, sessionID)
 	return err
 }
 

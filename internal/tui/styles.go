@@ -64,4 +64,10 @@ var (
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(colorError)
+
+	costStyle = lipgloss.NewStyle().Foreground(colorWarning).Bold(true)
+
+	contextOkStyle     = lipgloss.NewStyle().Foreground(colorSuccess)  // <50%
+	contextWarnStyle   = lipgloss.NewStyle().Foreground(colorWarning)   // 50-80%
+	contextDangerStyle = lipgloss.NewStyle().Foreground(colorError)     // >80%
 )

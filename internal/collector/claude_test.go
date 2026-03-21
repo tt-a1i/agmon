@@ -95,14 +95,21 @@ func TestClaudeHookToEvents_SessionStart(t *testing.T) {
 	}
 
 	events := ClaudeHookToEvents(hook)
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
+	// SessionStart emits 2 events: EventSessionStart + EventAgentStart (main agent).
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
 	}
 	if events[0].Type != event.EventSessionStart {
-		t.Errorf("type: got %q", events[0].Type)
+		t.Errorf("first event type: got %q, want EventSessionStart", events[0].Type)
 	}
 	if events[0].SessionID != "sess-new" {
 		t.Errorf("session: got %q", events[0].SessionID)
+	}
+	if events[1].Type != event.EventAgentStart {
+		t.Errorf("second event type: got %q, want EventAgentStart", events[1].Type)
+	}
+	if events[1].Data.AgentRole != "main" {
+		t.Errorf("agent role: got %q, want main", events[1].Data.AgentRole)
 	}
 }
 

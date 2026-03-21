@@ -159,7 +159,9 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 					// Only assistant messages carry token usage.
 					if entry.Type == "assistant" && entry.Message != nil && entry.Message.Usage != nil {
 						usage := entry.Message.Usage
+						model := entry.Message.Model
 						totalInput := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+						cost := EstimateClaudeCost(usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, model)
 
 						// Use the actual timestamp from the JSONL entry so historical
 						// sessions get their real start_time, not time.Now().
@@ -175,9 +177,13 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 							Platform:  event.PlatformClaude,
 							Timestamp: evTime,
 							Data: event.EventData{
-								InputTokens:  totalInput,
-								OutputTokens: usage.OutputTokens,
-								Model:        entry.Message.Model,
+								// InputTokens = total (input + cacheCreate + cacheRead) for context tracking.
+								InputTokens:         totalInput,
+								OutputTokens:        usage.OutputTokens,
+								CacheCreationTokens: usage.CacheCreationInputTokens,
+								CacheReadTokens:     usage.CacheReadInputTokens,
+								Model:               model,
+								CostUSD:             cost,
 								// Carry git_branch so the daemon can set it on the session.
 								GitBranch: w.sessionGitBranch[sessionID],
 								CWD:       entry.CWD,
