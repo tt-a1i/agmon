@@ -82,6 +82,14 @@ func ClaudeHookToEvents(hook *ClaudeHookEvent) []event.Event {
 		}
 		events = append(events, ev)
 
+		// Register the main agent so Agent Tree is never empty.
+		agentEv := base
+		agentEv.ID = fmt.Sprintf("agent-main-%s", hook.SessionID)
+		agentEv.AgentID = fmt.Sprintf("main-%s", hook.SessionID)
+		agentEv.Type = event.EventAgentStart
+		agentEv.Data = event.EventData{AgentRole: "main"}
+		events = append(events, agentEv)
+
 	case "SessionEnd", "Stop":
 		ev := base
 		ev.ID = fmt.Sprintf("session-end-%s", hook.SessionID)

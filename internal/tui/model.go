@@ -303,7 +303,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							break
 						}
 					}
-					m.activeTab = tabAgentTree
+					// Go to Tool Calls — the most immediately useful view.
+					m.activeTab = tabToolCalls
 					m.selectedRow = 0
 					m.viewOffset = 0
 					return m, refreshCmd()
