@@ -786,10 +786,10 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-// contextPercent formats the context window usage as "45.2k / 200k (22%)" with color.
+// contextPercent formats the context window usage with color coding.
 func contextPercent(latest int) string {
 	pct := float64(latest) / float64(claudeContextWindow) * 100
-	text := fmt.Sprintf("%s / 200k (%.0f%%)", formatTokens(latest), pct)
+	text := fmt.Sprintf("%s (%.0f%%)", formatTokens(latest), pct)
 	switch {
 	case pct >= 80:
 		return contextDangerStyle.Render(text)
