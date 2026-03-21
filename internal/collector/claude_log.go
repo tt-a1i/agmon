@@ -15,15 +15,16 @@ import (
 )
 
 // ClaudeLogWatcher scans ~/.claude/projects/*/*.jsonl for token usage.
-// Each project directory is named after the cwd (with '/' replaced by '-').
-// Each JSONL file is named <session-id>.jsonl.
+// Only files modified within the last 30 days are processed.
+const claudeLogMaxAge = 30 * 24 * time.Hour
+
 type ClaudeLogWatcher struct {
 	baseDir          string
 	emitFn           func(event.Event)
 	done             chan struct{}
 	stopOnce         sync.Once
 	seen             map[string]int64  // file path -> last committed byte offset
-	sessionGitBranch map[string]string // session_id -> git_branch ("" = not yet found)
+	sessionGitBranch map[string]string // session_id -> git_branch
 }
 
 func NewClaudeLogWatcher(emitFn func(event.Event)) *ClaudeLogWatcher {
@@ -76,6 +77,14 @@ func (w *ClaudeLogWatcher) scanLogs() {
 			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
 				continue
 			}
+			info, err := f.Info()
+			if err != nil {
+				continue
+			}
+			// Skip files not modified in the last 30 days.
+			if time.Since(info.ModTime()) > claudeLogMaxAge {
+				continue
+			}
 			sessionID := strings.TrimSuffix(f.Name(), ".jsonl")
 			w.processFile(filepath.Join(projectPath, f.Name()), sessionID)
 		}
@@ -88,6 +97,7 @@ type claudeLogEntry struct {
 	UUID      string        `json:"uuid"`
 	GitBranch string        `json:"gitBranch"`
 	CWD       string        `json:"cwd"`
+	Timestamp string        `json:"timestamp"`
 	Message   *claudeLogMsg `json:"message,omitempty"`
 }
 
@@ -128,9 +138,6 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 
 	_, hasGitBranch := w.sessionGitBranch[sessionID]
 
-	// Use ReadBytes('\n') so that a partial line at EOF does NOT advance the
-	// committed offset. ReadBytes returns (data, io.EOF) for partial lines;
-	// we only commit the offset when a complete line (err == nil) is processed.
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := offset
 
@@ -143,52 +150,49 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 			if len(line) > 0 {
 				var entry claudeLogEntry
 				if json.Unmarshal(line, &entry) == nil {
-					// Grab git_branch from first line that has it.
+					// Collect git_branch from any line that has it.
 					if !hasGitBranch && entry.GitBranch != "" {
 						w.sessionGitBranch[sessionID] = entry.GitBranch
 						hasGitBranch = true
-						w.emitFn(event.Event{
-							ID:        fmt.Sprintf("claude-log-meta-%s", sessionID),
-							Type:      event.EventSessionStart,
-							SessionID: sessionID,
-							Platform:  event.PlatformClaude,
-							Timestamp: time.Now(),
-							Data: event.EventData{
-								CWD:       entry.CWD,
-								GitBranch: entry.GitBranch,
-							},
-						})
 					}
 
 					// Only assistant messages carry token usage.
 					if entry.Type == "assistant" && entry.Message != nil && entry.Message.Usage != nil {
 						usage := entry.Message.Usage
 						totalInput := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+
+						// Use the actual timestamp from the JSONL entry so historical
+						// sessions get their real start_time, not time.Now().
+						evTime := parseTimestamp(entry.Timestamp)
+						if evTime.IsZero() {
+							evTime = time.Now()
+						}
+
 						w.emitFn(event.Event{
 							ID:        fmt.Sprintf("claude-tokens-%s-%s", sessionID, entry.UUID),
 							Type:      event.EventTokenUsage,
 							SessionID: sessionID,
 							Platform:  event.PlatformClaude,
-							Timestamp: time.Now(),
+							Timestamp: evTime,
 							Data: event.EventData{
 								InputTokens:  totalInput,
 								OutputTokens: usage.OutputTokens,
 								Model:        entry.Message.Model,
+								// Carry git_branch so the daemon can set it on the session.
+								GitBranch: w.sessionGitBranch[sessionID],
+								CWD:       entry.CWD,
 							},
 						})
 					}
 				}
 			}
 
-			// Advance offset only for complete lines (those that had a '\n').
-			// If err == io.EOF, lineBytes is a partial line — do not commit.
 			if err == nil {
 				committedOffset += int64(len(lineBytes))
 			}
 		}
 
 		if err != nil {
-			// io.EOF or other read error — stop processing.
 			break
 		}
 	}
