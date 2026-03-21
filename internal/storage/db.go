@@ -125,6 +125,9 @@ func (s *DB) migrate() error {
 	s.addColumnIfMissing("sessions", "cwd", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "git_branch", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "latest_context_tokens", "INT NOT NULL DEFAULT 0")
+	s.addColumnIfMissing("sessions", "model", "TEXT NOT NULL DEFAULT ''")
+	s.addColumnIfMissing("sessions", "total_cache_read_tokens", "INT NOT NULL DEFAULT 0")
+	s.addColumnIfMissing("sessions", "total_cache_creation_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("token_usage", "source_id", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("token_usage", "cache_creation_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("token_usage", "cache_read_tokens", "INT NOT NULL DEFAULT 0")
@@ -261,9 +264,12 @@ func (s *DB) UpdateSessionTokens(sessionID string) error {
 			total_input_tokens = COALESCE((SELECT SUM(input_tokens) FROM token_usage WHERE session_id = ?), 0),
 			total_output_tokens = COALESCE((SELECT SUM(output_tokens) FROM token_usage WHERE session_id = ?), 0),
 			total_cost_usd = COALESCE((SELECT SUM(cost_usd) FROM token_usage WHERE session_id = ?), 0),
-			latest_context_tokens = COALESCE((SELECT MAX(input_tokens) FROM token_usage WHERE session_id = ?), 0)
+			total_cache_read_tokens = COALESCE((SELECT SUM(cache_read_tokens) FROM token_usage WHERE session_id = ?), 0),
+			total_cache_creation_tokens = COALESCE((SELECT SUM(cache_creation_tokens) FROM token_usage WHERE session_id = ?), 0),
+			latest_context_tokens = COALESCE((SELECT input_tokens FROM token_usage WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1), 0),
+			model = COALESCE(NULLIF((SELECT model FROM token_usage WHERE session_id = ? AND model != '' ORDER BY timestamp DESC LIMIT 1), ''), model)
 		WHERE session_id = ?
-	`, sessionID, sessionID, sessionID, sessionID, sessionID)
+	`, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID)
 	return err
 }
 

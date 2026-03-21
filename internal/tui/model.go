@@ -28,7 +28,15 @@ const (
 
 var tabNames = []string{"Dashboard", "Agent Tree", "Tool Calls", "Timeline"}
 
-const claudeContextWindow = 200_000
+// contextWindowForModel returns the context window size for a given model name.
+func contextWindowForModel(model string) int {
+	switch {
+	case strings.Contains(model, "opus"):
+		return 1_000_000
+	default: // sonnet, haiku, unknown
+		return 200_000
+	}
+}
 
 type timelineEntry struct {
 	time   time.Time
@@ -355,7 +363,7 @@ func (m *Model) refresh() {
 		}
 		sid := m.sessions[m.selectedSession].SessionID
 		m.agents, _ = m.db.ListAgents(sid)
-		m.toolCalls, _ = m.db.ListToolCalls(sid, 100)
+		m.toolCalls, _ = m.db.ListToolCalls(sid, 500)
 		m.fileChanges, _ = m.db.ListFileChanges(sid)
 		m.timelineEntries = buildTimeline(m.agents, m.toolCalls, m.fileChanges)
 	}
@@ -518,7 +526,7 @@ func (m Model) viewDashboard(width int) string {
 		return b.String()
 	}
 
-	hdr := fmt.Sprintf("  %-20s %-8s %8s %8s  %8s  %s", "SESSION", "PLATFORM", "IN", "OUT", "COST", "STATUS")
+	hdr := fmt.Sprintf("  %-20s %-8s %8s  %7s %8s  %s", "SESSION", "AGE", "COST", "CTX", "OUT", "STATUS")
 	b.WriteString(headerStyle.Render(hdr) + "\n")
 
 	visible := m.visibleRows() - 4
@@ -543,12 +551,12 @@ func (m Model) viewDashboard(width int) string {
 			name = name[:20]
 		}
 
+		age := relativeTime(s.StartTime)
 		costStr := fmt.Sprintf("$%.2f", s.TotalCostUSD)
-		line := fmt.Sprintf("  %-20s %-8s %8s %8s  %8s  %s",
-			name, s.Platform,
-			formatTokens(s.TotalInputTokens),
+		ctxStr := formatTokens(s.LatestContextTokens)
+		line := fmt.Sprintf("  %-20s %-8s %8s  %7s %8s  %s",
+			name, age, costStr, ctxStr,
 			formatTokens(s.TotalOutputTokens),
-			costStr,
 			status)
 
 		if i == m.selectedRow {
@@ -572,11 +580,7 @@ func (m Model) viewAgentTree(width int) string {
 	}
 
 	s := m.sessions[m.selectedSession]
-	b.WriteString(headerStyle.Render(fmt.Sprintf("  Session: %s  │  Context: %s  │  %s",
-		sessionDisplayName(s),
-		contextPercent(s.LatestContextTokens),
-		costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)),
-	)) + "\n\n")
+	b.WriteString(sessionHeader(s) + "\n\n")
 
 	filtered := m.filteredAgents()
 	if len(filtered) == 0 {
@@ -641,11 +645,7 @@ func (m Model) viewToolCalls(width int) string {
 
 	if len(m.sessions) > 0 {
 		s := m.sessions[m.selectedSession]
-		b.WriteString(headerStyle.Render(fmt.Sprintf("  Session: %s  │  Context: %s  │  %s",
-			sessionDisplayName(s),
-			contextPercent(s.LatestContextTokens),
-			costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)),
-		)) + "\n\n")
+		b.WriteString(sessionHeader(s) + "\n\n")
 	}
 
 	filtered := m.filteredToolCalls()
@@ -728,11 +728,7 @@ func (m Model) viewTimeline(width int) string {
 	}
 
 	s := m.sessions[m.selectedSession]
-	b.WriteString(headerStyle.Render(fmt.Sprintf("  Session: %s  │  Context: %s  │  %s",
-		sessionDisplayName(s),
-		contextPercent(s.LatestContextTokens),
-		costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)),
-	)) + "\n\n")
+	b.WriteString(sessionHeader(s) + "\n\n")
 
 	filtered := m.filteredTimeline()
 	if len(filtered) == 0 {
@@ -786,9 +782,48 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
+// relativeTime formats a time as "2m ago", "3h ago", "2d ago", etc.
+func relativeTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+// cacheHitRate returns a formatted cache hit rate string like "Cache: 85%".
+func cacheHitRate(s storage.SessionRow) string {
+	total := s.TotalCacheReadTokens + s.TotalCacheCreationTokens
+	if total == 0 {
+		return ""
+	}
+	pct := float64(s.TotalCacheReadTokens) / float64(total) * 100
+	return fmt.Sprintf("Cache: %.0f%%", pct)
+}
+
+// sessionHeader builds the "Session: X │ Context: Y │ Cache: Z% │ $N" header.
+func sessionHeader(s storage.SessionRow) string {
+	parts := []string{
+		fmt.Sprintf("  Session: %s", sessionDisplayName(s)),
+		fmt.Sprintf("Ctx: %s", contextPercent(s.LatestContextTokens, s.Model)),
+	}
+	if cr := cacheHitRate(s); cr != "" {
+		parts = append(parts, cr)
+	}
+	parts = append(parts, costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)))
+	return headerStyle.Render(strings.Join(parts, "  │  "))
+}
+
 // contextPercent formats the context window usage with color coding.
-func contextPercent(latest int) string {
-	pct := float64(latest) / float64(claudeContextWindow) * 100
+func contextPercent(latest int, model string) string {
+	window := contextWindowForModel(model)
+	pct := float64(latest) / float64(window) * 100
 	text := fmt.Sprintf("%s (%.0f%%)", formatTokens(latest), pct)
 	switch {
 	case pct >= 80:

@@ -15,7 +15,10 @@ type SessionRow struct {
 	TotalCostUSD         float64
 	CWD                  string
 	GitBranch            string
-	LatestContextTokens  int
+	LatestContextTokens      int
+	Model                    string
+	TotalCacheReadTokens     int
+	TotalCacheCreationTokens int
 }
 
 type AgentRow struct {
@@ -66,8 +69,9 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 	rows, err := s.db.Query(`
 		SELECT session_id, platform, start_time, end_time, status,
 		       total_input_tokens, total_output_tokens, total_cost_usd,
-		       cwd, git_branch, latest_context_tokens
-		FROM sessions ORDER BY start_time DESC
+		       cwd, git_branch, latest_context_tokens, model,
+		       total_cache_read_tokens, total_cache_creation_tokens
+		FROM sessions ORDER BY start_time DESC LIMIT 50
 	`)
 	if err != nil {
 		return nil, err
@@ -81,7 +85,8 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		var endStr *string
 		if err := rows.Scan(&r.SessionID, &r.Platform, &startStr, &endStr,
 			&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD,
-			&r.CWD, &r.GitBranch, &r.LatestContextTokens); err != nil {
+			&r.CWD, &r.GitBranch, &r.LatestContextTokens, &r.Model,
+			&r.TotalCacheReadTokens, &r.TotalCacheCreationTokens); err != nil {
 			return nil, err
 		}
 		r.StartTime = parseTime(startStr)

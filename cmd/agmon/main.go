@@ -76,9 +76,21 @@ func runTUI() {
 
 	sockPath := daemon.DefaultSocketPath()
 
-	// If daemon already running, connect TUI only
+	// If daemon already running, connect TUI only but still subscribe for real-time events.
 	if running, _ := daemon.IsRunning(); running {
-		tuiCh := make(chan tui.EventMsg, 1)
+		d := daemon.New(db, sockPath)
+		// Don't call d.Start() — just use it for Subscribe/Unsubscribe.
+		eventCh := d.Subscribe()
+		defer d.Unsubscribe(eventCh)
+
+		tuiCh := make(chan tui.EventMsg, 256)
+		go func() {
+			for range eventCh {
+				tuiCh <- tui.EventMsg{}
+			}
+			close(tuiCh)
+		}()
+
 		m := tui.NewModel(db, tuiCh)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
