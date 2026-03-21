@@ -164,14 +164,14 @@ func (s *DB) UpsertSession(sessionID string, platform event.Platform, startTime 
 		INSERT INTO sessions (session_id, platform, start_time)
 		VALUES (?, ?, ?)
 		ON CONFLICT(session_id) DO NOTHING
-	`, sessionID, string(platform), startTime.Format(time.RFC3339))
+	`, sessionID, string(platform), startTime.UTC().Format(time.RFC3339))
 	return err
 }
 
 func (s *DB) EndSession(sessionID string, endTime time.Time) error {
 	_, err := s.db.Exec(`
 		UPDATE sessions SET status = 'ended', end_time = ? WHERE session_id = ?
-	`, endTime.Format(time.RFC3339), sessionID)
+	`, endTime.UTC().Format(time.RFC3339), sessionID)
 	return err
 }
 
@@ -180,14 +180,14 @@ func (s *DB) UpsertAgent(agentID, sessionID, parentAgentID, role string, startTi
 		INSERT INTO agents (agent_id, session_id, parent_agent_id, role, start_time)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(agent_id) DO NOTHING
-	`, agentID, sessionID, parentAgentID, role, startTime.Format(time.RFC3339))
+	`, agentID, sessionID, parentAgentID, role, startTime.UTC().Format(time.RFC3339))
 	return err
 }
 
 func (s *DB) EndAgent(agentID string, endTime time.Time) error {
 	_, err := s.db.Exec(`
 		UPDATE agents SET status = 'ended', end_time = ? WHERE agent_id = ?
-	`, endTime.Format(time.RFC3339), agentID)
+	`, endTime.UTC().Format(time.RFC3339), agentID)
 	return err
 }
 
@@ -195,7 +195,7 @@ func (s *DB) InsertToolCallStart(callID, agentID, sessionID, toolName, params st
 	_, err := s.db.Exec(`
 		INSERT OR IGNORE INTO tool_calls (call_id, agent_id, session_id, tool_name, params_summary, start_time)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, callID, agentID, sessionID, toolName, params, startTime.Format(time.RFC3339))
+	`, callID, agentID, sessionID, toolName, params, startTime.UTC().Format(time.RFC3339))
 	return err
 }
 
@@ -203,7 +203,7 @@ func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatu
 	_, err := s.db.Exec(`
 		UPDATE tool_calls SET result_summary = ?, status = ?, duration_ms = ?, end_time = ?
 		WHERE call_id = ?
-	`, result, string(status), durationMs, endTime.Format(time.RFC3339), callID)
+	`, result, string(status), durationMs, endTime.UTC().Format(time.RFC3339), callID)
 	return err
 }
 
@@ -216,7 +216,7 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 		INSERT OR IGNORE INTO token_usage
 			(agent_id, session_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model, cost_usd, timestamp, source_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, agentID, sessionID, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, costUSD, ts.Format(time.RFC3339), sourceID)
+	`, agentID, sessionID, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, costUSD, ts.UTC().Format(time.RFC3339), sourceID)
 	return err
 }
 
@@ -224,7 +224,13 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 // along with their associated agents, tool_calls, token_usage, and file_changes records.
 // Returns the number of sessions deleted.
 func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
-	cutoff := time.Now().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
+	cutoff := time.Now().UTC().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
 
 	// Delete related records first (SQLite FK not enforced by default).
 	for _, q := range []string{
@@ -233,24 +239,28 @@ func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
 		`DELETE FROM tool_calls   WHERE session_id IN (SELECT session_id FROM sessions WHERE status != 'active' AND start_time < ?)`,
 		`DELETE FROM agents       WHERE session_id IN (SELECT session_id FROM sessions WHERE status != 'active' AND start_time < ?)`,
 	} {
-		if _, err := s.db.Exec(q, cutoff); err != nil {
+		if _, err := tx.Exec(q, cutoff); err != nil {
 			return 0, err
 		}
 	}
 
-	result, err := s.db.Exec(`DELETE FROM sessions WHERE status != 'active' AND start_time < ?`, cutoff)
+	result, err := tx.Exec(`DELETE FROM sessions WHERE status != 'active' AND start_time < ?`, cutoff)
 	if err != nil {
 		return 0, err
 	}
 	n, _ := result.RowsAffected()
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
+	}
 	return int(n), nil
 }
 
 // MarkStaleSessionsEnded marks sessions that have been active longer than maxAge as stale.
 // Called at daemon startup to clean up sessions that never received a SessionEnd event.
 func (s *DB) MarkStaleSessionsEnded(maxAge time.Duration) error {
-	cutoff := time.Now().Add(-maxAge).Format(time.RFC3339)
-	now := time.Now().Format(time.RFC3339)
+	cutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
 		UPDATE sessions SET status = 'stale', end_time = ?
 		WHERE status = 'active' AND start_time < ?
@@ -277,6 +287,6 @@ func (s *DB) InsertFileChange(sessionID, filePath string, changeType event.FileC
 	_, err := s.db.Exec(`
 		INSERT INTO file_changes (session_id, file_path, change_type, timestamp)
 		VALUES (?, ?, ?, ?)
-	`, sessionID, filePath, string(changeType), ts.Format(time.RFC3339))
+	`, sessionID, filePath, string(changeType), ts.UTC().Format(time.RFC3339))
 	return err
 }

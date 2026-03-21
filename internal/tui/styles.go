@@ -10,15 +10,17 @@ var (
 	colorError     = lipgloss.Color("#EF4444") // red
 	colorWarning   = lipgloss.Color("#F59E0B") // amber
 	colorMuted     = lipgloss.Color("#6B7280") // gray
-	colorBg        = lipgloss.Color("#1E1E2E") // dark bg
 	colorBorder    = lipgloss.Color("#3F3F5F") // border
+	colorWhite     = lipgloss.Color("#E5E7EB") // white-ish for normal text
+	colorHighlight = lipgloss.Color("#A78BFA") // lighter purple for highlights
 
-	// Styles
+	// Title
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorPrimary).
 			PaddingLeft(1)
 
+	// Tabs
 	tabActiveStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorPrimary).
@@ -30,22 +32,21 @@ var (
 				Foreground(colorMuted).
 				Padding(0, 2)
 
+	// Content box
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorBorder).
 			Padding(0, 1)
 
+	// Column headers
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorSecondary)
 
+	// Status indicators
 	statusActive = lipgloss.NewStyle().
 			Foreground(colorSuccess).
 			SetString("●")
-
-	statusEnded = lipgloss.NewStyle().
-			Foreground(colorMuted).
-			SetString("◌")
 
 	statusFail = lipgloss.NewStyle().
 			Foreground(colorError).
@@ -55,19 +56,57 @@ var (
 			Foreground(colorSuccess).
 			SetString("✓")
 
+	statusRetry = lipgloss.NewStyle().
+			Foreground(colorWarning).
+			SetString("↻")
+
+	// Text styles
 	mutedStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
 	selectedStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2D2D4F")).
+			Background(lipgloss.Color("#3D3D6F")).
+			Foreground(colorWhite).
 			Bold(true)
 
 	errorStyle = lipgloss.NewStyle().
-			Foreground(colorError)
+			Foreground(colorError).
+			Bold(true)
 
 	costStyle = lipgloss.NewStyle().Foreground(colorWarning).Bold(true)
 
-	contextOkStyle     = lipgloss.NewStyle().Foreground(colorSuccess)  // <50%
-	contextWarnStyle   = lipgloss.NewStyle().Foreground(colorWarning)   // 50-80%
-	contextDangerStyle = lipgloss.NewStyle().Foreground(colorError)     // >80%
+	// Context window usage
+	contextOkStyle     = lipgloss.NewStyle().Foreground(colorSuccess)
+	contextWarnStyle   = lipgloss.NewStyle().Foreground(colorWarning)
+	contextDangerStyle = lipgloss.NewStyle().Foreground(colorError).Bold(true)
+
+	// Filter mode
+	filterLabelStyle = lipgloss.NewStyle().
+				Foreground(colorWarning).
+				Bold(true)
+
+	filterInputStyle = lipgloss.NewStyle().
+				Foreground(colorWhite).
+				Bold(true)
+
+	// Footer keybinding styles
+	keyStyle = lipgloss.NewStyle().
+			Foreground(colorHighlight).
+			Bold(true)
+
+	keyDescStyle = lipgloss.NewStyle().
+			Foreground(colorMuted)
+
+	// Flash message
+	flashStyle = lipgloss.NewStyle().
+			Foreground(colorSuccess).
+			Bold(true)
+
+	// Messages tab
+	msgPromptStyle = lipgloss.NewStyle().
+			Foreground(colorPrimary).
+			Bold(true)
+
+	msgTextStyle = lipgloss.NewStyle().
+			Foreground(colorWhite)
 )

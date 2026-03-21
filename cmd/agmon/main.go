@@ -59,7 +59,7 @@ func main() {
 		runCost()
 	case "clean":
 		runClean()
-	case "version":
+	case "version", "-v", "--version":
 		fmt.Printf("agmon v%s\n", version)
 	case "help", "-h", "--help":
 		printHelp()
@@ -209,7 +209,9 @@ func runSetup() {
 	var settings map[string]any
 	data, err := os.ReadFile(settingsPath)
 	if err == nil {
-		json.Unmarshal(data, &settings)
+		if err := json.Unmarshal(data, &settings); err != nil {
+			log.Fatalf("settings.json contains invalid JSON: %v\nPlease fix %s before running setup.", err, settingsPath)
+		}
 	}
 	if settings == nil {
 		settings = make(map[string]any)
@@ -496,7 +498,7 @@ func runStatus() {
 
 	todayIn, todayOut, _ := db.GetTodayTokens()
 	todayCost, _ := db.GetTodayCost()
-	fmt.Printf("Active sessions: %d\n", activeCount)
+	fmt.Printf("Running: %d\n", activeCount)
 	fmt.Printf("Today's tokens:  %s in / %s out\n", fmtTokens(todayIn), fmtTokens(todayOut))
 	fmt.Printf("Today's cost:    $%.4f\n", todayCost)
 	fmt.Println()
@@ -540,6 +542,12 @@ func runCost() {
 	}
 
 	switch period {
+	case "today":
+		in, out, _ := db.GetTodayTokens()
+		cost, _ := db.GetTodayCost()
+		fmt.Printf("Today:\n")
+		fmt.Printf("  Tokens: %s in + %s out = %s total\n", fmtTokens(in), fmtTokens(out), fmtTokens(in+out))
+		fmt.Printf("  Cost:   $%.4f\n", cost)
 	case "week":
 		in, out, _ := db.GetWeekTokens()
 		cost, _ := db.GetWeekCost()
@@ -547,20 +555,20 @@ func runCost() {
 		fmt.Printf("  Tokens: %s in + %s out = %s total\n", fmtTokens(in), fmtTokens(out), fmtTokens(in+out))
 		fmt.Printf("  Cost:   $%.4f\n", cost)
 	default:
-		in, out, _ := db.GetTodayTokens()
-		cost, _ := db.GetTodayCost()
-		fmt.Printf("Today:\n")
-		fmt.Printf("  Tokens: %s in + %s out = %s total\n", fmtTokens(in), fmtTokens(out), fmtTokens(in+out))
-		fmt.Printf("  Cost:   $%.4f\n", cost)
+		fmt.Fprintf(os.Stderr, "Unknown period: %q (use 'today' or 'week')\n", period)
+		os.Exit(1)
 	}
 }
 
 func runClean() {
 	days := 7
 	if len(os.Args) > 2 {
-		if d, err := strconv.Atoi(os.Args[2]); err == nil && d > 0 {
-			days = d
+		d, err := strconv.Atoi(os.Args[2])
+		if err != nil || d <= 0 {
+			fmt.Fprintf(os.Stderr, "Invalid days: %q (must be a positive number)\n", os.Args[2])
+			os.Exit(1)
 		}
+		days = d
 	}
 
 	db := mustOpenDB()

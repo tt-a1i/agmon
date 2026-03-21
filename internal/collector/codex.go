@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tt-a1i/agmon/internal/event"
@@ -16,6 +17,7 @@ type CodexWatcher struct {
 	baseDir        string
 	emitFn         func(event.Event)
 	done           chan struct{}
+	stopOnce       sync.Once
 	seen           map[string]int64  // file -> last read offset
 	lastTokenUsage map[string]string // sessionID -> "input:output" dedup key
 }
@@ -37,7 +39,7 @@ func (w *CodexWatcher) Start() {
 }
 
 func (w *CodexWatcher) Stop() {
-	close(w.done)
+	w.stopOnce.Do(func() { close(w.done) })
 }
 
 func (w *CodexWatcher) pollLoop() {

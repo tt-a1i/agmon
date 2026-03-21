@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tt-a1i/agmon/internal/collector"
 	"github.com/tt-a1i/agmon/internal/storage"
 )
 
@@ -21,12 +23,25 @@ type tab int
 
 const (
 	tabDashboard tab = iota
-	tabAgentTree
+	tabMessages
 	tabToolCalls
 	tabTimeline
+	tabCount // sentinel for modulo
 )
 
-var tabNames = []string{"Dashboard", "Agent Tree", "Tool Calls", "Timeline"}
+type timeRange int
+
+const (
+	rangeToday timeRange = iota
+	rangeWeek
+	rangeMonth
+	rangeAll
+	rangeCount
+)
+
+var rangeNames = []string{"Today", "Week", "Month", "All"}
+
+var tabNames = []string{"Dashboard", "Messages", "Tool Calls", "Timeline"}
 
 // contextWindowForModel returns the context window size for a given model name.
 func contextWindowForModel(model string) int {
@@ -48,16 +63,21 @@ type timelineEntry struct {
 type Model struct {
 	db              *storage.DB
 	eventCh         chan EventMsg
+	splash          bool // show splash screen on startup
+	splashTick      int  // animation frame counter
 	activeTab       tab
 	sessions        []storage.SessionRow
 	agents          []storage.AgentRow
 	toolCalls       []storage.ToolCallRow
 	fileChanges     []storage.FileChangeRow
 	timelineEntries []timelineEntry
+	messages        []collector.UserMessage
+	messagesCacheID string // session ID for which messages were loaded
 	selectedSession int
 	selectedRow     int
 	viewOffset      int
 	expandedCalls   map[string]bool // call_id -> expanded
+	summaryRange    timeRange
 	filterMode      bool
 	filterText      string
 	todayInput      int
@@ -66,6 +86,8 @@ type Model struct {
 	width           int
 	height          int
 	activeCount     int
+	flashMsg        string
+	flashExpire     time.Time
 	err             error
 }
 
@@ -81,6 +103,9 @@ func NewModel(db *storage.DB, eventCh chan EventMsg) Model {
 }
 
 func (m Model) Init() tea.Cmd {
+	if m.splash {
+		return splashTickCmd()
+	}
 	return tea.Batch(tickCmd(), listenEvents(m.eventCh), refreshCmd())
 }
 
@@ -128,20 +153,6 @@ func (m Model) filteredSessions() []storage.SessionRow {
 	return out
 }
 
-func (m Model) filteredAgents() []storage.AgentRow {
-	if m.filterText == "" {
-		return m.agents
-	}
-	f := strings.ToLower(m.filterText)
-	var out []storage.AgentRow
-	for _, a := range m.agents {
-		if strings.Contains(strings.ToLower(a.Role), f) ||
-			strings.Contains(strings.ToLower(a.AgentID), f) {
-			out = append(out, a)
-		}
-	}
-	return out
-}
 
 func (m Model) filteredToolCalls() []storage.ToolCallRow {
 	if m.filterText == "" {
@@ -177,8 +188,8 @@ func (m Model) currentTabRowCount() int {
 	switch m.activeTab {
 	case tabDashboard:
 		return len(m.filteredSessions())
-	case tabAgentTree:
-		return len(m.filteredAgents())
+	case tabMessages:
+		return len(m.messages)
 	case tabToolCalls:
 		return len(m.filteredToolCalls())
 	case tabTimeline:
@@ -187,9 +198,28 @@ func (m Model) currentTabRowCount() int {
 	return 0
 }
 
+// tabVisibleRows returns how many data rows actually fit in the current tab's
+// rendered area, accounting for headers/summaries each tab reserves.
+func (m Model) tabVisibleRows() int {
+	base := m.visibleRows()
+	switch m.activeTab {
+	case tabDashboard:
+		return base - 4
+	case tabMessages:
+		return base - 3
+	case tabToolCalls:
+		return base - 2
+	default: // tabTimeline
+		return base
+	}
+}
+
 // adjustScroll keeps selectedRow visible within the viewport.
 func (m *Model) adjustScroll() {
-	visible := m.visibleRows()
+	visible := m.tabVisibleRows()
+	if visible < 1 {
+		visible = 1
+	}
 	if m.selectedRow < m.viewOffset {
 		m.viewOffset = m.selectedRow
 	} else if m.selectedRow >= m.viewOffset+visible {
@@ -200,7 +230,82 @@ func (m *Model) adjustScroll() {
 	}
 }
 
+// clearMsgExpanded removes message expansion state (keyed by index, not content).
+func (m *Model) clearMsgExpanded() {
+	for k := range m.expandedCalls {
+		if strings.HasPrefix(k, "msg-") {
+			delete(m.expandedCalls, k)
+		}
+	}
+}
+
+// syncSessionFromRow updates selectedSession to match the current selectedRow
+// on the Dashboard tab. This keeps them in sync when the user navigates with j/k.
+func (m *Model) syncSessionFromRow() {
+	filtered := m.filteredSessions()
+	if m.selectedRow < len(filtered) {
+		targetID := filtered[m.selectedRow].SessionID
+		for i, s := range m.sessions {
+			if s.SessionID == targetID {
+				m.selectedSession = i
+				return
+			}
+		}
+	}
+}
+
+// restoreTabCursor sets selectedRow and viewOffset when switching tabs.
+// For Dashboard, it restores the cursor to the currently selected session.
+// For other tabs, it resets to the top.
+// Filter text is always cleared since it is tab-specific.
+func (m *Model) restoreTabCursor() {
+	m.filterText = ""
+	m.filterMode = false
+
+	if m.activeTab == tabDashboard {
+		// Restore cursor to the selectedSession position.
+		if m.selectedSession < len(m.sessions) {
+			m.selectedRow = m.selectedSession
+			m.adjustScroll()
+			return
+		}
+		m.selectedRow = 0
+		m.viewOffset = 0
+	} else {
+		m.selectedRow = 0
+		m.viewOffset = 0
+	}
+}
+
+type splashTickMsg struct{}
+
+func splashTickCmd() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return splashTickMsg{} })
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Splash screen: any key dismisses, ticks animate
+	if m.splash {
+		switch msg.(type) {
+		case tea.KeyMsg:
+			m.splash = false
+			return m, tea.Batch(refreshCmd(), tickCmd(), listenEvents(m.eventCh))
+		case tea.WindowSizeMsg:
+			wmsg := msg.(tea.WindowSizeMsg)
+			m.width = wmsg.Width
+			m.height = wmsg.Height
+			return m, nil
+		case splashTickMsg:
+			m.splashTick++
+			if m.splashTick >= 20 { // auto-dismiss after ~1.6s
+				m.splash = false
+				return m, tea.Batch(refreshCmd(), tickCmd(), listenEvents(m.eventCh))
+			}
+			return m, splashTickCmd()
+		}
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Filter mode: capture text input; only a few keys have special meaning.
@@ -242,6 +347,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
+			if m.activeTab == tabMessages {
+				return m, nil // Messages tab does not support filtering
+			}
 			// Enter filter mode; pressing / again clears the existing filter.
 			m.filterMode = true
 			m.filterText = ""
@@ -259,21 +367,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
-			m.activeTab = (m.activeTab + 1) % 4
-			m.selectedRow = 0
-			m.viewOffset = 0
+			m.activeTab = (m.activeTab + 1) % tabCount
+			m.restoreTabCursor()
 			return m, refreshCmd()
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("shift+tab"))):
-			m.activeTab = (m.activeTab + 3) % 4
-			m.selectedRow = 0
-			m.viewOffset = 0
+			m.activeTab = (m.activeTab + tabCount - 1) % tabCount
+			m.restoreTabCursor()
 			return m, refreshCmd()
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("j", "down"))):
 			if count := m.currentTabRowCount(); count > 0 && m.selectedRow < count-1 {
 				m.selectedRow++
 				m.adjustScroll()
+				if m.activeTab == tabDashboard {
+					m.syncSessionFromRow()
+				}
 			}
 			return m, nil
 
@@ -281,14 +390,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedRow > 0 {
 				m.selectedRow--
 				m.adjustScroll()
+				if m.activeTab == tabDashboard {
+					m.syncSessionFromRow()
+				}
+			}
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("G"))):
+			// Jump to bottom
+			if count := m.currentTabRowCount(); count > 0 {
+				m.selectedRow = count - 1
+				m.adjustScroll()
+				if m.activeTab == tabDashboard {
+					m.syncSessionFromRow()
+				}
 			}
 			return m, nil
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("["))):
 			if m.selectedSession > 0 {
 				m.selectedSession--
-				m.selectedRow = 0
-				m.viewOffset = 0
+				m.clearMsgExpanded()
+				if m.activeTab == tabDashboard {
+					m.selectedRow = m.selectedSession
+					m.adjustScroll()
+				} else {
+					m.selectedRow = 0
+					m.viewOffset = 0
+				}
 				return m, refreshCmd()
 			}
 			return m, nil
@@ -296,8 +425,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("]"))):
 			if m.selectedSession < len(m.sessions)-1 {
 				m.selectedSession++
-				m.selectedRow = 0
-				m.viewOffset = 0
+				m.clearMsgExpanded()
+				if m.activeTab == tabDashboard {
+					m.selectedRow = m.selectedSession
+					m.adjustScroll()
+				} else {
+					m.selectedRow = 0
+					m.viewOffset = 0
+				}
 				return m, refreshCmd()
 			}
 			return m, nil
@@ -314,12 +449,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							break
 						}
 					}
-					// Go to Tool Calls — the most immediately useful view.
-					m.activeTab = tabToolCalls
+					// Go to Messages — see what was discussed in this session.
+					m.activeTab = tabMessages
 					m.selectedRow = 0
 					m.viewOffset = 0
+					m.filterText = ""
+					m.filterMode = false
 					return m, refreshCmd()
 				}
+			}
+			if m.activeTab == tabMessages {
+				if m.selectedRow < len(m.messages) {
+					idx := m.selectedRow
+					m.expandedCalls[fmt.Sprintf("msg-%d", idx)] = !m.expandedCalls[fmt.Sprintf("msg-%d", idx)]
+				}
+				return m, nil
 			}
 			if m.activeTab == tabToolCalls {
 				filtered := m.filteredToolCalls()
@@ -330,11 +474,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
+			if m.selectedSession < len(m.sessions) {
+				s := m.sessions[m.selectedSession]
+				cmd := fmt.Sprintf("claude --resume %s", s.SessionID)
+				name := sessionDisplayName(s)
+				if err := copyToClipboard(cmd); err == nil {
+					m.flashMsg = fmt.Sprintf("Copied resume cmd for %s", name)
+				} else {
+					m.flashMsg = fmt.Sprintf("Run: %s", cmd)
+				}
+				m.flashExpire = time.Now().Add(3 * time.Second)
+			}
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("t"))):
+			if m.activeTab == tabDashboard {
+				m.summaryRange = (m.summaryRange + 1) % rangeCount
+				return m, refreshCmd()
+			}
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.adjustScroll()
 		return m, nil
 
 	case tickMsg:
@@ -354,18 +520,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) refresh() {
 	m.sessions, m.err = m.db.ListSessions()
 	m.activeCount, _ = m.db.GetActiveSessionCount()
-	m.todayInput, m.todayOutput, _ = m.db.GetTodayTokens()
-	m.todayCost, _ = m.db.GetTodayCost()
+
+	switch m.summaryRange {
+	case rangeWeek:
+		m.todayInput, m.todayOutput, _ = m.db.GetWeekTokens()
+		m.todayCost, _ = m.db.GetWeekCost()
+	case rangeMonth:
+		m.todayInput, m.todayOutput, _ = m.db.GetMonthTokens()
+		m.todayCost, _ = m.db.GetMonthCost()
+	case rangeAll:
+		m.todayInput, m.todayOutput, _ = m.db.GetAllTokens()
+		m.todayCost, _ = m.db.GetAllCost()
+	default:
+		m.todayInput, m.todayOutput, _ = m.db.GetTodayTokens()
+		m.todayCost, _ = m.db.GetTodayCost()
+	}
 
 	if len(m.sessions) > 0 {
 		if m.selectedSession >= len(m.sessions) {
 			m.selectedSession = 0
 		}
-		sid := m.sessions[m.selectedSession].SessionID
+		s := m.sessions[m.selectedSession]
+		sid := s.SessionID
 		m.agents, _ = m.db.ListAgents(sid)
 		m.toolCalls, _ = m.db.ListToolCalls(sid, 500)
 		m.fileChanges, _ = m.db.ListFileChanges(sid)
 		m.timelineEntries = buildTimeline(m.agents, m.toolCalls, m.fileChanges)
+		// Load user messages. Cache by session ID, but always reload for active sessions.
+		if m.messagesCacheID != sid || s.Status == "active" {
+			m.messages = collector.ReadUserMessages(sid, s.CWD, 200)
+			m.messagesCacheID = sid
+		}
+	} else {
+		m.agents = nil
+		m.toolCalls = nil
+		m.fileChanges = nil
+		m.messages = nil
+		m.messagesCacheID = ""
+		m.timelineEntries = nil
 	}
 
 	// Clamp selectedRow to prevent stale-index panics.
@@ -375,8 +567,8 @@ func (m *Model) refresh() {
 		} else {
 			m.selectedRow = 0
 		}
-		m.adjustScroll()
 	}
+	m.adjustScroll()
 }
 
 func buildTimeline(agents []storage.AgentRow, toolCalls []storage.ToolCallRow, fileChanges []storage.FileChangeRow) []timelineEntry {
@@ -449,15 +641,24 @@ func sessionDisplayName(s storage.SessionRow) string {
 	return s.SessionID
 }
 
+const splashLogo = `
+     ██████╗  ██████╗ ███╗   ███╗ ██████╗ ███╗   ██╗
+    ██╔══██╗██╔════╝ ████╗ ████║██╔═══██╗████╗  ██║
+    ███████║██║  ███╗██╔████╔██║██║   ██║██╔██╗ ██║
+    ██╔══██║██║   ██║██║╚██╔╝██║██║   ██║██║╚██╗██║
+    ██║  ██║╚██████╔╝██║ ╚═╝ ██║╚██████╔╝██║ ╚████║
+    ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝`
+
 func (m Model) View() string {
 	if m.width == 0 {
-		return "Loading..."
+		return ""
+	}
+
+	if m.splash {
+		return m.viewSplash()
 	}
 
 	var b strings.Builder
-
-	// Header
-	b.WriteString(titleStyle.Render("⚡ agmon") + mutedStyle.Render("  AI Agent Monitor") + "\n\n")
 
 	// Tabs
 	var tabs []string
@@ -468,7 +669,7 @@ func (m Model) View() string {
 			tabs = append(tabs, tabInactiveStyle.Render(name))
 		}
 	}
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, tabs...) + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, tabs...) + "\n")
 
 	// Content
 	contentWidth := m.width - 4
@@ -480,8 +681,8 @@ func (m Model) View() string {
 	switch m.activeTab {
 	case tabDashboard:
 		content = m.viewDashboard(contentWidth)
-	case tabAgentTree:
-		content = m.viewAgentTree(contentWidth)
+	case tabMessages:
+		content = m.viewMessages(contentWidth)
 	case tabToolCalls:
 		content = m.viewToolCalls(contentWidth)
 	case tabTimeline:
@@ -493,18 +694,97 @@ func (m Model) View() string {
 	// Footer
 	b.WriteString("\n")
 	var footer string
-	if m.filterMode {
-		footer = fmt.Sprintf(" Filter: %s█  Esc: cancel  Enter: confirm", m.filterText)
+	if m.flashMsg != "" && time.Now().Before(m.flashExpire) {
+		footer = " " + flashStyle.Render("✓ "+m.flashMsg)
+	} else if m.filterMode {
+		footer = fmt.Sprintf(" %s %s%s  %s  %s",
+			filterLabelStyle.Render("Filter:"),
+			filterInputStyle.Render(m.filterText),
+			filterLabelStyle.Render("█"),
+			fmtKey("Esc", "cancel"),
+			fmtKey("Enter", "confirm"))
 	} else if m.filterText != "" {
-		footer = fmt.Sprintf(" Filter: %s  Esc: clear  Tab: view  j/k: nav  [/]: session  q: quit",
-			headerStyle.Render(m.filterText))
+		footer = fmt.Sprintf(" %s %s  %s  %s  %s",
+			filterLabelStyle.Render("Filter:"),
+			filterInputStyle.Render(m.filterText),
+			fmtKey("Esc", "clear"),
+			fmtKey("Tab", "view"),
+			fmtKey("q", "quit"))
+	} else if m.activeTab == tabDashboard {
+		footer = fmt.Sprintf(" %s  %s  %s  %s  %s  %s  %s",
+			fmtKey("t", "range"),
+			fmtKey("/", "filter"),
+			fmtKey("Tab", "view"),
+			fmtKey("j/k", "nav"),
+			fmtKey("c", "copy"),
+			fmtKey("Enter", "msgs"),
+			fmtKey("q", "quit"))
 	} else {
-		footer = " /: filter  Tab: view  j/k: nav  [/]: session  Enter: select  q: quit"
+		// Detail tabs: Messages, Tool Calls, Timeline
+		pos := ""
+		if len(m.sessions) > 1 {
+			pos = fmt.Sprintf("  %s",
+				mutedStyle.Render(fmt.Sprintf("session %d/%d", m.selectedSession+1, len(m.sessions))))
+		}
+		enterHint := ""
+		if m.activeTab == tabMessages || m.activeTab == tabToolCalls {
+			enterHint = fmt.Sprintf("  %s", fmtKey("Enter", "expand"))
+		}
+		filterHint := ""
+		if m.activeTab != tabMessages {
+			filterHint = fmt.Sprintf("  %s", fmtKey("/", "filter"))
+		}
+		footer = fmt.Sprintf(" %s  %s  %s  %s%s%s  %s%s",
+			fmtKey("Tab", "view"),
+			fmtKey("[/]", "session"),
+			fmtKey("j/k", "nav"),
+			fmtKey("c", "copy"),
+			enterHint,
+			filterHint,
+			fmtKey("q", "quit"),
+			pos)
 	}
 	if m.err != nil {
 		footer += "  " + errorStyle.Render("err: "+m.err.Error())
 	}
-	b.WriteString(mutedStyle.Render(footer))
+	b.WriteString(footer)
+
+	return b.String()
+}
+
+func (m Model) viewSplash() string {
+	var b strings.Builder
+
+	// Center vertically
+	padTop := (m.height - 10) / 2
+	if padTop < 0 {
+		padTop = 0
+	}
+	for i := 0; i < padTop; i++ {
+		b.WriteString("\n")
+	}
+
+	// Reveal logo lines progressively
+	lines := strings.Split(splashLogo, "\n")
+	for i, line := range lines {
+		if i == 0 && line == "" {
+			continue
+		}
+		if m.splashTick >= i {
+			b.WriteString(titleStyle.Render(line) + "\n")
+		}
+	}
+
+	// Subtitle appears after logo
+	if m.splashTick >= 8 {
+		b.WriteString("\n")
+		sub := mutedStyle.Render("          AI Agent Monitor — cost, context, control")
+		b.WriteString(sub + "\n")
+	}
+	if m.splashTick >= 12 {
+		b.WriteString("\n")
+		b.WriteString(mutedStyle.Render("                    press any key to start") + "\n")
+	}
 
 	return b.String()
 }
@@ -512,12 +792,19 @@ func (m Model) View() string {
 func (m Model) viewDashboard(width int) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("Active: %s  Today: %s in / %s out  Cost: %s\n\n",
-		headerStyle.Render(fmt.Sprintf("%d sessions", m.activeCount)),
-		mutedStyle.Render(formatTokens(m.todayInput)),
-		mutedStyle.Render(formatTokens(m.todayOutput)),
-		costStyle.Render(fmt.Sprintf("$%.4f", m.todayCost)),
-	))
+	// Summary bar — responsive: spread items evenly across the width
+	runCount := fmt.Sprintf("%d", m.activeCount)
+	if m.activeCount > 0 {
+		runCount = contextOkStyle.Render(runCount)
+	} else {
+		runCount = mutedStyle.Render(runCount)
+	}
+	rangeName := rangeNames[m.summaryRange]
+	b.WriteString(fmt.Sprintf(" %s %s    %s %s %s %s    %s %s\n\n",
+		mutedStyle.Render("Running"), runCount,
+		mutedStyle.Render(rangeName+" In"), headerStyle.Render(formatTokens(m.todayInput)),
+		mutedStyle.Render("/ Out"), headerStyle.Render(formatTokens(m.todayOutput)),
+		mutedStyle.Render("Cost"), costStyle.Render(fmt.Sprintf("$%.2f", m.todayCost))))
 
 	filtered := m.filteredSessions()
 	if len(filtered) == 0 {
@@ -538,7 +825,7 @@ func (m Model) viewDashboard(width int) string {
 	hdr := fmt.Sprintf("  %-20s %-14s %8s  %7s %8s  %s", "SESSION", "STARTED", "COST", "CTX", "OUT", "STATUS")
 	b.WriteString(headerStyle.Render(hdr) + "\n")
 
-	visible := m.visibleRows() - 4
+	visible := m.tabVisibleRows()
 	start := m.viewOffset
 	end := start + visible
 	if end > len(filtered) {
@@ -547,25 +834,40 @@ func (m Model) viewDashboard(width int) string {
 
 	for i := start; i < end; i++ {
 		s := filtered[i]
-		status := statusActive.String()
+		status := lipgloss.NewStyle().Foreground(colorSuccess).Render("● run")
 		switch s.Status {
 		case "ended":
-			status = statusEnded.String()
+			status = mutedStyle.Render("  end")
 		case "stale":
-			status = mutedStyle.Render("?")
+			status = mutedStyle.Render("  ---")
 		}
 
-		name := sessionDisplayName(s)
-		if len(name) > 20 {
-			name = name[:20]
-		}
+		name := displayTruncate(sessionDisplayName(s), 20)
 
 		started := formatStartTime(s.StartTime)
-		costStr := fmt.Sprintf("$%.2f", s.TotalCostUSD)
-		ctxStr := formatTokens(s.LatestContextTokens)
-		line := fmt.Sprintf("  %-20s %-14s %8s  %7s %8s  %s",
-			name, started, costStr, ctxStr,
-			formatTokens(s.TotalOutputTokens),
+		// Pad plain text first, then apply color — ANSI codes break %-Ns alignment.
+		costText := fmt.Sprintf("$%.2f", s.TotalCostUSD)
+		if s.TotalCostUSD < 0.005 {
+			costText = "-"
+		}
+		costPad := fmt.Sprintf("%8s", costText)
+		ctxText := formatTokens(s.LatestContextTokens)
+		if s.LatestContextTokens == 0 {
+			ctxText = "-"
+		}
+		ctxPad := fmt.Sprintf("%7s", ctxText)
+		outText := formatTokens(s.TotalOutputTokens)
+		if s.TotalOutputTokens == 0 {
+			outText = "-"
+		}
+		outPad := fmt.Sprintf("%8s", outText)
+
+		line := fmt.Sprintf("  %-20s %s  %s  %s %s  %s",
+			name,
+			mutedStyle.Render(fmt.Sprintf("%-14s", started)),
+			costStyle.Render(costPad),
+			contextColorize(s.LatestContextTokens, s.Model, ctxPad),
+			mutedStyle.Render(outPad),
 			status)
 
 		if i == m.selectedRow {
@@ -581,7 +883,9 @@ func (m Model) viewDashboard(width int) string {
 	return b.String()
 }
 
-func (m Model) viewAgentTree(width int) string {
+
+
+func (m Model) viewMessages(width int) string {
 	var b strings.Builder
 
 	if len(m.sessions) == 0 {
@@ -589,57 +893,75 @@ func (m Model) viewAgentTree(width int) string {
 	}
 
 	s := m.sessions[m.selectedSession]
-	b.WriteString(sessionHeader(s) + "\n\n")
+	b.WriteString(sessionHeader(s) + "\n")
+	b.WriteString(mutedStyle.Render(fmt.Sprintf("  %d messages", len(m.messages))) + "\n\n")
 
-	filtered := m.filteredAgents()
-	if len(filtered) == 0 {
-		if len(m.agents) == 0 {
-			b.WriteString(mutedStyle.Render("  No agents recorded"))
+	if len(m.messages) == 0 {
+		if s.CWD == "" {
+			b.WriteString(mutedStyle.Render("  No messages (session has no CWD — Codex sessions not supported yet)"))
 		} else {
-			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No agents match %q", m.filterText)))
+			b.WriteString(mutedStyle.Render("  No user messages found"))
 		}
 		return b.String()
 	}
 
-	visible := m.visibleRows() - 3
+	visible := m.tabVisibleRows()
 	start := m.viewOffset
 	end := start + visible
-	if end > len(filtered) {
-		end = len(filtered)
+	if end > len(m.messages) {
+		end = len(m.messages)
 	}
 
 	for i := start; i < end; i++ {
-		a := filtered[i]
-		prefix := "  ▼ "
-		if a.ParentAgentID != "" {
-			prefix = "    ├─ "
-		}
+		msg := m.messages[i]
+		timeStr := msg.Timestamp.Format("15:04")
+		expanded := m.expandedCalls[fmt.Sprintf("msg-%d", i)]
 
-		status := statusActive.String()
-		if a.Status == "ended" {
-			status = statusOk.String()
+		if expanded {
+			line := fmt.Sprintf("  %s  %s %s",
+				mutedStyle.Render(timeStr),
+				msgPromptStyle.Render("▼"),
+				msgTextStyle.Render(displayTruncate(strings.ReplaceAll(msg.Content, "\n", " "), width-14)))
+			if i == m.selectedRow {
+				line = selectedStyle.Render(line)
+			}
+			b.WriteString(line + "\n")
+			// Render full content with word wrap
+			for _, rawLine := range strings.Split(msg.Content, "\n") {
+				rawLine = strings.TrimSpace(rawLine)
+				if rawLine == "" {
+					continue
+				}
+				// Wrap long lines into multiple display lines
+				for len(rawLine) > 0 {
+					chunk := displayTruncate(rawLine, width-10)
+					actual := chunk
+					if strings.HasSuffix(chunk, "...") {
+						actual = chunk[:len(chunk)-3]
+					}
+					b.WriteString(mutedStyle.Render("         "+actual) + "\n")
+					if len(actual) >= len(rawLine) {
+						break
+					}
+					rawLine = rawLine[len(actual):]
+				}
+			}
+		} else {
+			content := strings.ReplaceAll(msg.Content, "\n", " ")
+			content = displayTruncate(content, width-14)
+			line := fmt.Sprintf("  %s  %s %s",
+				mutedStyle.Render(timeStr),
+				msgPromptStyle.Render(">"),
+				msgTextStyle.Render(content))
+			if i == m.selectedRow {
+				line = selectedStyle.Render(line)
+			}
+			b.WriteString(line + "\n")
 		}
-
-		role := a.Role
-		if role == "" {
-			role = "agent"
-		}
-
-		idLen := len(a.AgentID)
-		if idLen > 8 {
-			idLen = 8
-		}
-		line := fmt.Sprintf("%s%s %s  %s",
-			prefix, role, mutedStyle.Render(a.AgentID[:idLen]), status)
-
-		if i == m.selectedRow {
-			line = selectedStyle.Render(line)
-		}
-		b.WriteString(line + "\n")
 	}
 
-	if end < len(filtered) {
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ... %d more", len(filtered)-end)) + "\n")
+	if end < len(m.messages) {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ... %d more (j to scroll)", len(m.messages)-end)) + "\n")
 	}
 
 	return b.String()
@@ -664,7 +986,7 @@ func (m Model) viewToolCalls(width int) string {
 	hdr := fmt.Sprintf("  %-8s %-12s %-30s %8s  %s", "TIME", "TOOL", "TARGET", "DURATION", "STATUS")
 	b.WriteString(headerStyle.Render(hdr) + "\n")
 
-	visible := m.visibleRows() - 2
+	visible := m.tabVisibleRows()
 	start := m.viewOffset
 	end := start + visible
 	if end > len(filtered) {
@@ -688,20 +1010,19 @@ func (m Model) viewToolCalls(width int) string {
 		case "interrupted":
 			status = mutedStyle.Render("✗")
 		case "retry":
-			status = lipgloss.NewStyle().Foreground(colorWarning).Render("↻")
+			status = statusRetry.String()
 		}
 
-		target := tc.ParamsSummary
-		if len(target) > 30 {
-			target = target[:30]
-		}
+		target := displayTruncate(strings.ReplaceAll(tc.ParamsSummary, "\n", " "), 30)
 		toolName := tc.ToolName
 		if len(toolName) > 12 {
 			toolName = toolName[:12]
 		}
 
-		line := fmt.Sprintf("  %-8s %-12s %-30s %8s  %s",
-			timeStr, toolName, target, dur, status)
+		line := fmt.Sprintf("  %s %-12s %-30s %8s  %s",
+			mutedStyle.Render(timeStr),
+			headerStyle.Render(toolName),
+			target, dur, status)
 
 		if i == m.selectedRow {
 			line = selectedStyle.Render(line)
@@ -710,10 +1031,14 @@ func (m Model) viewToolCalls(width int) string {
 
 		if m.expandedCalls[tc.CallID] {
 			if tc.ParamsSummary != "" {
-				b.WriteString(mutedStyle.Render("    Params: "+tc.ParamsSummary) + "\n")
+				b.WriteString(fmt.Sprintf("    %s %s\n",
+					keyStyle.Render("Params:"),
+					mutedStyle.Render(tc.ParamsSummary)))
 			}
 			if tc.ResultSummary != "" {
-				b.WriteString(mutedStyle.Render("    Result: "+tc.ResultSummary) + "\n")
+				b.WriteString(fmt.Sprintf("    %s %s\n",
+					keyStyle.Render("Result:"),
+					mutedStyle.Render(tc.ResultSummary)))
 			}
 		}
 	}
@@ -743,7 +1068,7 @@ func (m Model) viewTimeline(width int) string {
 		return b.String() + mutedStyle.Render(fmt.Sprintf("  No events match %q", m.filterText))
 	}
 
-	visible := m.visibleRows()
+	visible := m.tabVisibleRows()
 	start := m.viewOffset
 	end := start + visible
 	if end > len(filtered) {
@@ -763,7 +1088,8 @@ func (m Model) viewTimeline(width int) string {
 			icon = statusActive.String() + " "
 		}
 
-		line := fmt.Sprintf("  %s %s %s", mutedStyle.Render(timeStr), icon, e.detail)
+		detail := displayTruncate(e.detail, width-16)
+		line := fmt.Sprintf("  %s %s %s", mutedStyle.Render(timeStr), icon, detail)
 		if i == m.selectedRow {
 			line = selectedStyle.Render(line)
 		}
@@ -796,21 +1122,6 @@ func formatStartTime(t time.Time) string {
 	return t.Format("01/02 15:04")
 }
 
-// relativeTime formats a time as "2m ago", "3h ago", "2d ago", etc.
-func relativeTime(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
-}
-
 // cacheHitRate returns a formatted cache hit rate string like "Cache: 85%".
 func cacheHitRate(s storage.SessionRow) string {
 	total := s.TotalCacheReadTokens + s.TotalCacheCreationTokens
@@ -823,15 +1134,38 @@ func cacheHitRate(s storage.SessionRow) string {
 
 // sessionHeader builds the "Session: X │ Context: Y │ Cache: Z% │ $N" header.
 func sessionHeader(s storage.SessionRow) string {
+	shortID := s.SessionID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	sep := mutedStyle.Render(" │ ")
 	parts := []string{
-		fmt.Sprintf("  Session: %s", sessionDisplayName(s)),
-		fmt.Sprintf("Ctx: %s", contextPercent(s.LatestContextTokens, s.Model)),
+		headerStyle.Render(fmt.Sprintf("  Session: %s", sessionDisplayName(s))) + mutedStyle.Render(" ("+shortID+")"),
+		headerStyle.Render("Ctx: ") + contextPercent(s.LatestContextTokens, s.Model),
 	}
 	if cr := cacheHitRate(s); cr != "" {
-		parts = append(parts, cr)
+		parts = append(parts, headerStyle.Render(cr))
 	}
-	parts = append(parts, costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)))
-	return headerStyle.Render(strings.Join(parts, "  │  "))
+	costText := fmt.Sprintf("$%.2f", s.TotalCostUSD)
+	if s.TotalCostUSD < 0.005 {
+		costText = "-"
+	}
+	parts = append(parts, costStyle.Render(costText))
+	return strings.Join(parts, sep)
+}
+
+// contextColorize returns a color-coded string based on context window usage percent.
+func contextColorize(latest int, model, text string) string {
+	window := contextWindowForModel(model)
+	pct := float64(latest) / float64(window) * 100
+	switch {
+	case pct >= 80:
+		return contextDangerStyle.Render(text)
+	case pct >= 50:
+		return contextWarnStyle.Render(text)
+	default:
+		return contextOkStyle.Render(text)
+	}
 }
 
 // contextPercent formats the context window usage with color coding.
@@ -854,6 +1188,51 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// displayTruncate truncates a string to fit within maxCols terminal columns.
+// CJK characters count as 2 columns, others as 1.
+func displayTruncate(s string, maxCols int) string {
+	if maxCols < 4 {
+		maxCols = 4
+	}
+	cols := 0
+	for i, r := range s {
+		w := 1
+		if r >= 0x1100 && isWide(r) {
+			w = 2
+		}
+		if cols+w > maxCols-3 { // reserve 3 for "..."
+			return s[:i] + "..."
+		}
+		cols += w
+	}
+	return s
+}
+
+// isWide returns true for characters that take 2 columns in a terminal.
+func isWide(r rune) bool {
+	return (r >= 0x1100 && r <= 0x115F) || // Hangul Jamo
+		(r >= 0x2E80 && r <= 0x9FFF) || // CJK
+		(r >= 0xAC00 && r <= 0xD7AF) || // Hangul Syllables
+		(r >= 0xF900 && r <= 0xFAFF) || // CJK Compat Ideographs
+		(r >= 0xFE10 && r <= 0xFE6F) || // CJK forms
+		(r >= 0xFF01 && r <= 0xFF60) || // Fullwidth
+		(r >= 0xFFE0 && r <= 0xFFE6) || // Fullwidth signs
+		(r >= 0x20000 && r <= 0x2FFFF) || // CJK Ext B-F
+		(r >= 0x30000 && r <= 0x3FFFF) // CJK Ext G+
+}
+
+// fmtKey renders a keybinding hint like "Tab view" with the key highlighted.
+func fmtKey(k, desc string) string {
+	return keyStyle.Render(k) + " " + keyDescStyle.Render(desc)
+}
+
+// copyToClipboard copies text to the system clipboard using pbcopy (macOS).
+func copyToClipboard(text string) error {
+	cmd := exec.Command("pbcopy")
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
 }
 
 // claudeHooksConfigured returns true if agmon hooks are present in ~/.claude/settings.json.

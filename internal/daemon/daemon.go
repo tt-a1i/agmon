@@ -21,6 +21,7 @@ type Daemon struct {
 	mu       sync.RWMutex
 	subs     []chan event.Event
 	done     chan struct{}
+	stopOnce sync.Once
 }
 
 func DefaultSocketPath() string {
@@ -82,7 +83,7 @@ func (d *Daemon) Start() error {
 	log.Printf("daemon listening on %s", d.sockPath)
 
 	// Clean up sessions that never received a SessionEnd (e.g. process killed).
-	if err := d.db.MarkStaleSessionsEnded(24 * time.Hour); err != nil {
+	if err := d.db.MarkStaleSessionsEnded(2 * time.Hour); err != nil {
 		log.Printf("stale session cleanup: %v", err)
 	}
 
@@ -91,11 +92,13 @@ func (d *Daemon) Start() error {
 }
 
 func (d *Daemon) Stop() {
-	close(d.done)
-	if d.listener != nil {
-		d.listener.Close()
-	}
-	os.Remove(d.sockPath)
+	d.stopOnce.Do(func() {
+		close(d.done)
+		if d.listener != nil {
+			d.listener.Close()
+		}
+		os.Remove(d.sockPath)
+	})
 }
 
 func (d *Daemon) acceptLoop() {
