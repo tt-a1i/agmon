@@ -90,11 +90,15 @@ func ClaudeHookToEvents(hook *ClaudeHookEvent) []event.Event {
 		agentEv.Data = event.EventData{AgentRole: "main"}
 		events = append(events, agentEv)
 
-	case "SessionEnd", "Stop":
+	case "SessionEnd":
 		ev := base
 		ev.ID = fmt.Sprintf("session-end-%s", hook.SessionID)
 		ev.Type = event.EventSessionEnd
 		events = append(events, ev)
+
+	case "Stop":
+		// Stop = Claude finished one turn, NOT session end.
+		// Session is still alive; user can continue the conversation.
 
 	case "PreToolUse":
 		ev := base

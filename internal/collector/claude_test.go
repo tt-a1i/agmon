@@ -114,17 +114,29 @@ func TestClaudeHookToEvents_SessionStart(t *testing.T) {
 }
 
 func TestClaudeHookToEvents_SessionEnd(t *testing.T) {
-	for _, hookName := range []string{"SessionEnd", "Stop"} {
-		hook := &ClaudeHookEvent{
-			SessionID:     "sess-done",
-			HookEventName: hookName,
-		}
-		events := ClaudeHookToEvents(hook)
-		if len(events) != 1 {
-			t.Fatalf("%s: expected 1 event, got %d", hookName, len(events))
-		}
-		if events[0].Type != event.EventSessionEnd {
-			t.Errorf("%s: type: got %q", hookName, events[0].Type)
+	hook := &ClaudeHookEvent{
+		SessionID:     "sess-done",
+		HookEventName: "SessionEnd",
+	}
+	events := ClaudeHookToEvents(hook)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != event.EventSessionEnd {
+		t.Errorf("type: got %q", events[0].Type)
+	}
+}
+
+func TestClaudeHookToEvents_StopDoesNotEndSession(t *testing.T) {
+	hook := &ClaudeHookEvent{
+		SessionID:     "sess-active",
+		HookEventName: "Stop",
+	}
+	events := ClaudeHookToEvents(hook)
+	// Stop should NOT produce a SessionEnd event.
+	for _, ev := range events {
+		if ev.Type == event.EventSessionEnd {
+			t.Errorf("Stop should not end session, but got EventSessionEnd")
 		}
 	}
 }
