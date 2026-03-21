@@ -50,7 +50,7 @@ func ReadUserMessages(sessionID, cwd string, maxMessages int) []UserMessage {
 		}
 
 		// Quick pre-check to avoid full JSON parse on every line
-		if !bytes.Contains(line, []byte(`"type":"user"`)) {
+		if !bytes.Contains(line, []byte(`"type":"user"`)) && !bytes.Contains(line, []byte(`"type": "user"`)) {
 			continue
 		}
 

@@ -200,10 +200,15 @@ func (s *DB) InsertToolCallStart(callID, agentID, sessionID, toolName, params st
 }
 
 func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatus, durationMs int64, endTime time.Time) error {
+	endStr := endTime.UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		UPDATE tool_calls SET result_summary = ?, status = ?, duration_ms = ?, end_time = ?
+		UPDATE tool_calls SET result_summary = ?, status = ?,
+			duration_ms = CASE WHEN ? > 0 THEN ?
+				ELSE MAX(0, CAST((julianday(?) - julianday(start_time)) * 86400000 AS INTEGER))
+			END,
+			end_time = ?
 		WHERE call_id = ?
-	`, result, string(status), durationMs, endTime.UTC().Format(time.RFC3339), callID)
+	`, result, string(status), durationMs, durationMs, endStr, endStr, callID)
 	return err
 }
 

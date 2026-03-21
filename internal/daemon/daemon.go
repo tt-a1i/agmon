@@ -133,9 +133,14 @@ func (d *Daemon) handleConn(conn net.Conn) {
 }
 
 func (d *Daemon) processEvent(ev event.Event) error {
-	// Auto-create session for any event with a session ID
+	// Auto-create session for any event with a session ID.
+	// For historical events (>2h old, e.g. from log watcher), mark session as ended
+	// immediately so they don't appear as "running".
 	if ev.SessionID != "" && ev.Type != event.EventSessionEnd {
 		d.db.UpsertSession(ev.SessionID, ev.Platform, ev.Timestamp)
+		if time.Since(ev.Timestamp) > 2*time.Hour && ev.Type == event.EventTokenUsage {
+			d.db.EndSession(ev.SessionID, ev.Timestamp)
+		}
 	}
 
 	switch ev.Type {

@@ -103,6 +103,37 @@ func TestToolCallCRUD(t *testing.T) {
 	}
 }
 
+func TestToolCallDurationAutoCalculated(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	db.UpsertSession("s1", event.PlatformClaude, now)
+
+	// Insert tool call start
+	if err := db.InsertToolCallStart("tc-auto", "a1", "s1", "Bash", "ls", now); err != nil {
+		t.Fatalf("insert tool call: %v", err)
+	}
+
+	// End with durationMs=0 (as Claude/Codex hooks actually send) — should auto-calculate
+	endTime := now.Add(3500 * time.Millisecond)
+	if err := db.UpdateToolCallEnd("tc-auto", "ok", event.StatusSuccess, 0, endTime); err != nil {
+		t.Fatalf("update tool call: %v", err)
+	}
+
+	calls, err := db.ListToolCalls("s1", 10)
+	if err != nil {
+		t.Fatalf("list tool calls: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+
+	// julianday arithmetic may have slight rounding; accept ±500ms tolerance
+	if calls[0].DurationMs < 3000 || calls[0].DurationMs > 4000 {
+		t.Errorf("auto-calculated duration: got %d ms, want ~3500", calls[0].DurationMs)
+	}
+}
+
 func TestTokenUsage(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()

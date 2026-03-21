@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -93,27 +95,44 @@ func (w *CodexWatcher) processFile(path string) {
 	// Extract session ID from filename: rollout-...-<uuid>.jsonl
 	sessionID := extractSessionID(filepath.Base(path))
 
-	dec := json.NewDecoder(f)
-	for dec.More() {
-		var raw codexLogEntry
-		if err := dec.Decode(&raw); err != nil {
-			break
-		}
-		for _, ev := range parseCodexEntry(raw, sessionID) {
-			// Dedup repeated token_count events with same last_token_usage
-			if ev.Type == event.EventTokenUsage {
-				key := fmt.Sprintf("%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens)
-				if w.lastTokenUsage[sessionID] == key {
-					continue
+	reader := bufio.NewReaderSize(f, 1024*1024)
+	committedOffset := offset
+
+	for {
+		lineBytes, err := reader.ReadBytes('\n')
+
+		if len(lineBytes) > 0 {
+			line := bytes.TrimRight(lineBytes, "\r\n")
+
+			if len(line) > 0 {
+				var raw codexLogEntry
+				if json.Unmarshal(line, &raw) == nil {
+					for _, ev := range parseCodexEntry(raw, sessionID) {
+						// Dedup repeated token_count events with same last_token_usage
+						if ev.Type == event.EventTokenUsage {
+							key := fmt.Sprintf("%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens)
+							if w.lastTokenUsage[sessionID] == key {
+								continue
+							}
+							w.lastTokenUsage[sessionID] = key
+						}
+						w.emitFn(ev)
+					}
 				}
-				w.lastTokenUsage[sessionID] = key
 			}
-			w.emitFn(ev)
+
+			// Only advance offset for complete lines (err == nil means \n was found).
+			if err == nil {
+				committedOffset += int64(len(lineBytes))
+			}
+		}
+
+		if err != nil {
+			break
 		}
 	}
 
-	newOffset, _ := f.Seek(0, 1)
-	w.seen[path] = newOffset
+	w.seen[path] = committedOffset
 }
 
 // extractSessionID pulls the UUID from a filename like:

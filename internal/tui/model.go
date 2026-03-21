@@ -204,7 +204,7 @@ func (m Model) tabVisibleRows() int {
 	base := m.visibleRows()
 	switch m.activeTab {
 	case tabDashboard:
-		return base - 4
+		return base - 6 // summary + header + "more" hint + blank + preview bar
 	case tabMessages:
 		return base - 3
 	case tabToolCalls:
@@ -411,6 +411,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedSession > 0 {
 				m.selectedSession--
 				m.clearMsgExpanded()
+				m.filterText = ""
 				if m.activeTab == tabDashboard {
 					m.selectedRow = m.selectedSession
 					m.adjustScroll()
@@ -426,6 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedSession < len(m.sessions)-1 {
 				m.selectedSession++
 				m.clearMsgExpanded()
+				m.filterText = ""
 				if m.activeTab == tabDashboard {
 					m.selectedRow = m.selectedSession
 					m.adjustScroll()
@@ -460,8 +462,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.activeTab == tabMessages {
 				if m.selectedRow < len(m.messages) {
-					idx := m.selectedRow
-					m.expandedCalls[fmt.Sprintf("msg-%d", idx)] = !m.expandedCalls[fmt.Sprintf("msg-%d", idx)]
+					key := fmt.Sprintf("msg-%d", m.selectedRow)
+					wasOpen := m.expandedCalls[key]
+					// Accordion: close all, then toggle this one
+					m.clearMsgExpanded()
+					if !wasOpen {
+						m.expandedCalls[key] = true
+					}
 				}
 				return m, nil
 			}
@@ -469,7 +476,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				filtered := m.filteredToolCalls()
 				if m.selectedRow < len(filtered) {
 					tc := filtered[m.selectedRow]
-					m.expandedCalls[tc.CallID] = !m.expandedCalls[tc.CallID]
+					wasOpen := m.expandedCalls[tc.CallID]
+					// Accordion: close all tool expansions, then toggle this one
+					for k := range m.expandedCalls {
+						if !strings.HasPrefix(k, "msg-") {
+							delete(m.expandedCalls, k)
+						}
+					}
+					if !wasOpen {
+						m.expandedCalls[tc.CallID] = true
+					}
 				}
 				return m, nil
 			}
@@ -822,7 +838,7 @@ func (m Model) viewDashboard(width int) string {
 		return b.String()
 	}
 
-	hdr := fmt.Sprintf("  %-20s %-14s %8s  %7s %8s  %s", "SESSION", "STARTED", "COST", "CTX", "OUT", "STATUS")
+	hdr := fmt.Sprintf("  %-20s %-14s  %8s  %7s  %s", "SESSION", "STARTED", "COST", "CTX", "STATUS")
 	b.WriteString(headerStyle.Render(hdr) + "\n")
 
 	visible := m.tabVisibleRows()
@@ -856,18 +872,12 @@ func (m Model) viewDashboard(width int) string {
 			ctxText = "-"
 		}
 		ctxPad := fmt.Sprintf("%7s", ctxText)
-		outText := formatTokens(s.TotalOutputTokens)
-		if s.TotalOutputTokens == 0 {
-			outText = "-"
-		}
-		outPad := fmt.Sprintf("%8s", outText)
 
-		line := fmt.Sprintf("  %-20s %s  %s  %s %s  %s",
+		line := fmt.Sprintf("  %-20s %s  %s  %s  %s",
 			name,
 			mutedStyle.Render(fmt.Sprintf("%-14s", started)),
 			costStyle.Render(costPad),
 			contextColorize(s.LatestContextTokens, s.Model, ctxPad),
-			mutedStyle.Render(outPad),
 			status)
 
 		if i == m.selectedRow {
@@ -878,6 +888,22 @@ func (m Model) viewDashboard(width int) string {
 
 	if end < len(filtered) {
 		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ... %d more (j to scroll)", len(filtered)-end)) + "\n")
+	}
+
+	// Selected session preview bar
+	if m.selectedSession < len(m.sessions) {
+		s := m.sessions[m.selectedSession]
+		b.WriteString("\n")
+		preview := fmt.Sprintf(" %s %s    %s %s    %s %s    %s %s    %s %s",
+			mutedStyle.Render("▸"), headerStyle.Render(sessionDisplayName(s)),
+			mutedStyle.Render("In"), headerStyle.Render(formatTokens(s.TotalInputTokens)),
+			mutedStyle.Render("Out"), headerStyle.Render(formatTokens(s.TotalOutputTokens)),
+			mutedStyle.Render("Ctx"), contextPercent(s.LatestContextTokens, s.Model),
+			mutedStyle.Render("Cost"), costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)))
+		if cr := cacheHitRate(s); cr != "" {
+			preview += "    " + mutedStyle.Render(cr)
+		}
+		b.WriteString(preview)
 	}
 
 	return b.String()
@@ -1170,6 +1196,9 @@ func contextColorize(latest int, model, text string) string {
 
 // contextPercent formats the context window usage with color coding.
 func contextPercent(latest int, model string) string {
+	if latest == 0 {
+		return mutedStyle.Render("-")
+	}
 	window := contextWindowForModel(model)
 	pct := float64(latest) / float64(window) * 100
 	text := fmt.Sprintf("%s (%.0f%%)", formatTokens(latest), pct)

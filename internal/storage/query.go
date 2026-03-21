@@ -217,12 +217,8 @@ func (s *DB) GetAllTokens() (input, output int, err error) {
 }
 
 func (s *DB) GetActiveSessionCount() (int, error) {
-	cutoff := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339)
 	var count int
-	err := s.db.QueryRow(`
-		SELECT COUNT(*) FROM sessions
-		WHERE status = 'active' AND start_time > ?
-	`, cutoff).Scan(&count)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE status = 'active'`).Scan(&count)
 	return count, err
 }
 
