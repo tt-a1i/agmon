@@ -141,12 +141,24 @@ func (s *DB) migrate() error {
 }
 
 // UpdateSessionMeta sets cwd and git_branch on a session.
-// Only overwrites a field if the new value is non-empty.
+// Use this for authoritative metadata, such as SessionStart hook events.
 func (s *DB) UpdateSessionMeta(sessionID, cwd, gitBranch string) error {
 	_, err := s.db.Exec(`
 		UPDATE sessions SET
 			cwd        = CASE WHEN ? != '' THEN ? ELSE cwd END,
 			git_branch = CASE WHEN ? != '' THEN ? ELSE git_branch END
+		WHERE session_id = ?
+	`, cwd, cwd, gitBranch, gitBranch, sessionID)
+	return err
+}
+
+// FillSessionMeta fills missing cwd and git_branch values without overwriting.
+// Use this for best-effort metadata inferred from transcript/log events.
+func (s *DB) FillSessionMeta(sessionID, cwd, gitBranch string) error {
+	_, err := s.db.Exec(`
+		UPDATE sessions SET
+			cwd        = CASE WHEN cwd = '' AND ? != '' THEN ? ELSE cwd END,
+			git_branch = CASE WHEN git_branch = '' AND ? != '' THEN ? ELSE git_branch END
 		WHERE session_id = ?
 	`, cwd, cwd, gitBranch, gitBranch, sessionID)
 	return err

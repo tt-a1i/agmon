@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tt-a1i/agmon/internal/collector"
+	"github.com/tt-a1i/agmon/internal/event"
 	"github.com/tt-a1i/agmon/internal/storage"
 )
 
@@ -153,7 +154,6 @@ func (m Model) filteredSessions() []storage.SessionRow {
 	}
 	return out
 }
-
 
 func (m Model) filteredToolCalls() []storage.ToolCallRow {
 	if m.filterText == "" {
@@ -565,7 +565,7 @@ func (m *Model) refresh() {
 		m.timelineEntries = buildTimeline(m.agents, m.toolCalls, m.fileChanges)
 		// Load user messages. Cache by session ID, but always reload for active sessions.
 		if m.messagesCacheID != sid || s.Status == "active" {
-			m.messages = collector.ReadUserMessages(sid, s.CWD, 200)
+			m.messages = collector.ReadUserMessages(event.Platform(s.Platform), sid, s.CWD, 200)
 			m.messagesCacheID = sid
 		}
 	} else {
@@ -905,8 +905,6 @@ func (m Model) viewDashboard(width int) string {
 	return b.String()
 }
 
-
-
 func (m Model) viewMessages(width int) string {
 	var b strings.Builder
 
@@ -919,11 +917,7 @@ func (m Model) viewMessages(width int) string {
 	b.WriteString(mutedStyle.Render(fmt.Sprintf("  %d messages", len(m.messages))) + "\n\n")
 
 	if len(m.messages) == 0 {
-		if s.CWD == "" {
-			b.WriteString(mutedStyle.Render("  No messages (session has no CWD — Codex sessions not supported yet)"))
-		} else {
-			b.WriteString(mutedStyle.Render("  No user messages found"))
-		}
+		b.WriteString(mutedStyle.Render("  No user messages found"))
 		return b.String()
 	}
 
@@ -1287,4 +1281,3 @@ func claudeHooksConfigured() bool {
 	}
 	return strings.Contains(string(data), "agmon emit")
 }
-
