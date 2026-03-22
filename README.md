@@ -25,17 +25,9 @@
 
 > Monitor token consumption, costs, tool calls, and file changes across your Claude Code and Codex sessions — all in a single terminal dashboard.
 
-```
-  Dashboard   Messages    Tool Calls    Timeline
+<img width="732" height="810" alt="image" src="https://github.com/user-attachments/assets/06664199-5860-484c-818c-0b3257313dde" />
+<img width="711" height="446" alt="image" src="https://github.com/user-attachments/assets/32d70f5b-e6ab-48be-98c0-12209ddcd621" />
 
-  Running 4    Today In 22.9M / Out 60.5k    Cost $65.36
-
-  SESSION                STARTED     COST      CTX  STATUS
-  CC agmon/main           13:10    $28.44   116.9k  ● run
-  CX mco/chore/v0.9..    10:27     $4.85    56.2k  ● run
-  CC MiroFish/main        22:26     $1.08    26.9k    end
-  CC Populace/main        20:16   $394.52   320.2k    end
-```
 
 ## Features
 
