@@ -6,12 +6,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // On Windows, use TCP localhost instead of Unix socket.
 // The "socket path" is repurposed to store the port file location.
 
 const listenAddr = "127.0.0.1:19847"
+const subscriberListenAddr = "127.0.0.1:19848"
 
 func DefaultSocketPath() string {
 	home, _ := os.UserHomeDir()
@@ -22,7 +24,7 @@ func listenSocket(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	ln, err := net.Listen("tcp", listenAddr)
+	ln, err := net.Listen("tcp", tcpListenAddr(path))
 	if err != nil {
 		return nil, err
 	}
@@ -41,4 +43,11 @@ func dialSocket(path string) (net.Conn, error) {
 
 func cleanupSocket(path string) {
 	os.Remove(path)
+}
+
+func tcpListenAddr(path string) string {
+	if strings.Contains(filepath.Base(path), ".events.") {
+		return subscriberListenAddr
+	}
+	return listenAddr
 }

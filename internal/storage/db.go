@@ -59,14 +59,15 @@ func (s *DB) addColumnIfMissing(table, column, def string) {
 
 func (s *DB) migrate() error {
 	_, err := s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS sessions (
-			session_id TEXT PRIMARY KEY,
-			platform   TEXT NOT NULL,
-			start_time TEXT NOT NULL,
-			end_time   TEXT,
-			status     TEXT NOT NULL DEFAULT 'active',
-			total_input_tokens  INTEGER NOT NULL DEFAULT 0,
-			total_output_tokens INTEGER NOT NULL DEFAULT 0,
+			CREATE TABLE IF NOT EXISTS sessions (
+				session_id TEXT PRIMARY KEY,
+				platform   TEXT NOT NULL,
+				start_time TEXT NOT NULL,
+				last_event_time TEXT NOT NULL DEFAULT '',
+				end_time   TEXT,
+				status     TEXT NOT NULL DEFAULT 'active',
+				total_input_tokens  INTEGER NOT NULL DEFAULT 0,
+				total_output_tokens INTEGER NOT NULL DEFAULT 0,
 			total_cost_usd      REAL NOT NULL DEFAULT 0
 		);
 
@@ -122,6 +123,7 @@ func (s *DB) migrate() error {
 		return err
 	}
 	// Schema migrations for new columns (idempotent).
+	s.addColumnIfMissing("sessions", "last_event_time", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "cwd", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "git_branch", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "latest_context_tokens", "INT NOT NULL DEFAULT 0")
@@ -160,18 +162,44 @@ func (s *DB) MarkPendingToolCallsInterrupted(sessionID string) error {
 }
 
 func (s *DB) UpsertSession(sessionID string, platform event.Platform, startTime time.Time) error {
+	ts := startTime.UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (session_id, platform, start_time)
-		VALUES (?, ?, ?)
-		ON CONFLICT(session_id) DO NOTHING
-	`, sessionID, string(platform), startTime.UTC().Format(time.RFC3339))
+		INSERT INTO sessions (session_id, platform, start_time, last_event_time, status)
+		VALUES (?, ?, ?, ?, 'active')
+		ON CONFLICT(session_id) DO UPDATE SET
+			platform = excluded.platform,
+			start_time = CASE
+				WHEN sessions.start_time > excluded.start_time THEN excluded.start_time
+				ELSE sessions.start_time
+			END,
+			last_event_time = CASE
+				WHEN sessions.last_event_time = '' OR sessions.last_event_time < excluded.last_event_time THEN excluded.last_event_time
+				ELSE sessions.last_event_time
+			END,
+			status = CASE
+				WHEN sessions.end_time IS NULL OR sessions.end_time = '' OR excluded.last_event_time >= sessions.end_time THEN 'active'
+				ELSE sessions.status
+			END,
+			end_time = CASE
+				WHEN sessions.end_time IS NULL OR sessions.end_time = '' OR excluded.last_event_time >= sessions.end_time THEN NULL
+				ELSE sessions.end_time
+			END
+	`, sessionID, string(platform), ts, ts)
 	return err
 }
 
 func (s *DB) EndSession(sessionID string, endTime time.Time) error {
+	endStr := endTime.UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		UPDATE sessions SET status = 'ended', end_time = ? WHERE session_id = ?
-	`, endTime.UTC().Format(time.RFC3339), sessionID)
+		UPDATE sessions
+		SET status = 'ended',
+			end_time = ?,
+			last_event_time = CASE
+				WHEN last_event_time = '' OR last_event_time < ? THEN ?
+				ELSE last_event_time
+			END
+		WHERE session_id = ?
+	`, endStr, endStr, endStr, sessionID)
 	return err
 }
 
@@ -204,7 +232,7 @@ func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatu
 	_, err := s.db.Exec(`
 		UPDATE tool_calls SET result_summary = ?, status = ?,
 			duration_ms = CASE WHEN ? > 0 THEN ?
-				ELSE MAX(0, CAST((julianday(?) - julianday(start_time)) * 86400000 AS INTEGER))
+				ELSE MAX(0, CAST(ROUND((julianday(?) - julianday(start_time)) * 86400000) AS INTEGER))
 			END,
 			end_time = ?
 		WHERE call_id = ?
@@ -230,6 +258,7 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 // Returns the number of sessions deleted.
 func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
+	whereClause := `status != 'active' AND COALESCE(end_time, NULLIF(last_event_time, ''), start_time) < ?`
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -239,17 +268,17 @@ func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
 
 	// Delete related records first (SQLite FK not enforced by default).
 	for _, q := range []string{
-		`DELETE FROM file_changes WHERE session_id IN (SELECT session_id FROM sessions WHERE status != 'active' AND start_time < ?)`,
-		`DELETE FROM token_usage  WHERE session_id IN (SELECT session_id FROM sessions WHERE status != 'active' AND start_time < ?)`,
-		`DELETE FROM tool_calls   WHERE session_id IN (SELECT session_id FROM sessions WHERE status != 'active' AND start_time < ?)`,
-		`DELETE FROM agents       WHERE session_id IN (SELECT session_id FROM sessions WHERE status != 'active' AND start_time < ?)`,
+		`DELETE FROM file_changes WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
+		`DELETE FROM token_usage  WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
+		`DELETE FROM tool_calls   WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
+		`DELETE FROM agents       WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
 	} {
 		if _, err := tx.Exec(q, cutoff); err != nil {
 			return 0, err
 		}
 	}
 
-	result, err := tx.Exec(`DELETE FROM sessions WHERE status != 'active' AND start_time < ?`, cutoff)
+	result, err := tx.Exec(`DELETE FROM sessions WHERE `+whereClause, cutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -267,8 +296,10 @@ func (s *DB) MarkStaleSessionsEnded(maxAge time.Duration) error {
 	cutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339)
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
-		UPDATE sessions SET status = 'stale', end_time = ?
-		WHERE status = 'active' AND start_time < ?
+		UPDATE sessions
+		SET status = 'stale', end_time = ?
+		WHERE status = 'active'
+		  AND COALESCE(NULLIF(last_event_time, ''), start_time) < ?
 	`, now, cutoff)
 	return err
 }

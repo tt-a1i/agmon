@@ -3,6 +3,8 @@ package collector
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tt-a1i/agmon/internal/event"
@@ -237,4 +239,71 @@ func TestExtractSessionID(t *testing.T) {
 			t.Errorf("extractSessionID(%q) = %q, want %q", tt.filename, got, tt.want)
 		}
 	}
+}
+
+func TestCodexWatcher_TurnContextAnnotatesTokensAndApplyPatchProducesFileChanges(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "d4430cef-110d-42e0-924a-bfceeba0c4e1"
+	path := filepath.Join(dir, "rollout-2026-01-14T20-03-54-"+sessionID+".jsonl")
+
+	patch := "*** Begin Patch\n*** Update File: foo.txt\n@@\n-old\n+new\n*** Add File: bar.txt\n+hello\n*** Delete File: old.txt\n*** End Patch"
+	argsJSON, err := json.Marshal(map[string]string{"input": patch})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+
+	lines := []string{
+		`{"timestamp":"2026-01-14T12:07:10.150Z","type":"turn_context","payload":{"cwd":"/tmp/project","model":"gpt-5-codex","effort":"high","summary":"auto"}}`,
+		fmt.Sprintf(`{"timestamp":"2026-01-14T12:07:16.415Z","type":"response_item","payload":{"type":"function_call","name":"apply_patch","arguments":%q,"call_id":"call_patch"}}`, string(argsJSON)),
+		`{"timestamp":"2026-01-14T12:07:16.805Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_patch","output":"ok"}}`,
+		`{"timestamp":"2026-01-14T12:07:16.905Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":12983,"output_tokens":20,"total_tokens":13003}}}}`,
+	}
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("%s\n", joinLines(lines))), 0o644); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	var emitted []event.Event
+	w := &CodexWatcher{
+		seen:           make(map[string]int64),
+		lastTokenUsage: make(map[string]string),
+		emitFn:         func(ev event.Event) { emitted = append(emitted, ev) },
+	}
+
+	w.processFile(path)
+
+	var tokenEvent *event.Event
+	var fileChanges []event.Event
+	for i := range emitted {
+		ev := emitted[i]
+		if ev.Type == event.EventTokenUsage {
+			tokenEvent = &emitted[i]
+		}
+		if ev.Type == event.EventFileChange {
+			fileChanges = append(fileChanges, ev)
+		}
+	}
+
+	if tokenEvent == nil {
+		t.Fatalf("expected token usage event, got %#v", emitted)
+	}
+	if tokenEvent.Data.Model != "gpt-5-codex" {
+		t.Fatalf("token event should carry model from turn_context, got %q", tokenEvent.Data.Model)
+	}
+	if tokenEvent.Data.CWD != "/tmp/project" {
+		t.Fatalf("token event should carry cwd from turn_context, got %q", tokenEvent.Data.CWD)
+	}
+	if len(fileChanges) != 3 {
+		t.Fatalf("expected 3 file change events from apply_patch, got %d", len(fileChanges))
+	}
+}
+
+func joinLines(lines []string) string {
+	out := ""
+	for i, line := range lines {
+		if i > 0 {
+			out += "\n"
+		}
+		out += line
+	}
+	return out
 }

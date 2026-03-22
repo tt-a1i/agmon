@@ -16,23 +16,29 @@ import (
 
 // CodexWatcher watches Codex session log directory for new logs and parses them.
 type CodexWatcher struct {
-	baseDir        string
-	emitFn         func(event.Event)
-	done           chan struct{}
-	stopOnce       sync.Once
-	seen           map[string]int64  // file -> last read offset
-	lastTokenUsage map[string]string // sessionID -> "input:output" dedup key
+	baseDir            string
+	emitFn             func(event.Event)
+	done               chan struct{}
+	stopOnce           sync.Once
+	seen               map[string]int64  // file -> last read offset
+	lastTokenUsage     map[string]string // sessionID -> "input:output" dedup key
+	sessionModels      map[string]string
+	sessionCWDs        map[string]string
+	pendingFileChanges map[string][]codexFileChange
 }
 
 func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
 	home, _ := os.UserHomeDir()
 	baseDir := filepath.Join(home, ".codex", "sessions")
 	return &CodexWatcher{
-		baseDir:        baseDir,
-		emitFn:         emitFn,
-		done:           make(chan struct{}),
-		seen:           make(map[string]int64),
-		lastTokenUsage: make(map[string]string),
+		baseDir:            baseDir,
+		emitFn:             emitFn,
+		done:               make(chan struct{}),
+		seen:               make(map[string]int64),
+		lastTokenUsage:     make(map[string]string),
+		sessionModels:      make(map[string]string),
+		sessionCWDs:        make(map[string]string),
+		pendingFileChanges: make(map[string][]codexFileChange),
 	}
 }
 
@@ -72,6 +78,8 @@ func (w *CodexWatcher) scanLogs() {
 }
 
 func (w *CodexWatcher) processFile(path string) {
+	w.ensureState()
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return
@@ -107,7 +115,16 @@ func (w *CodexWatcher) processFile(path string) {
 			if len(line) > 0 {
 				var raw codexLogEntry
 				if json.Unmarshal(line, &raw) == nil {
-					for _, ev := range parseCodexEntry(raw, sessionID) {
+					if raw.Type == "turn_context" {
+						w.recordTurnContext(sessionID, raw.Payload)
+					}
+
+					payload, ok := decodeCodexResponsePayload(raw)
+					if ok && payload.Type == "function_call" {
+						w.pendingFileChanges[payload.CallID] = extractCodexFileChanges(payload.Name, payload.Arguments)
+					}
+
+					for _, ev := range parseCodexEntryWithContext(raw, sessionID, w.sessionModels[sessionID], w.sessionCWDs[sessionID]) {
 						// Dedup repeated token_count events with same last_token_usage
 						if ev.Type == event.EventTokenUsage {
 							key := fmt.Sprintf("%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens)
@@ -117,6 +134,25 @@ func (w *CodexWatcher) processFile(path string) {
 							w.lastTokenUsage[sessionID] = key
 						}
 						w.emitFn(ev)
+					}
+
+					if ok && payload.Type == "function_call_output" {
+						if payload.Status != "error" && payload.Status != "failed" {
+							for _, change := range w.pendingFileChanges[payload.CallID] {
+								w.emitFn(event.Event{
+									ID:        fmt.Sprintf("%s:%s", payload.CallID, change.Path),
+									Type:      event.EventFileChange,
+									SessionID: sessionID,
+									Platform:  event.PlatformCodex,
+									Timestamp: parseTimestamp(raw.Timestamp),
+									Data: event.EventData{
+										FilePath:   change.Path,
+										ChangeType: change.ChangeType,
+									},
+								})
+							}
+						}
+						delete(w.pendingFileChanges, payload.CallID)
 					}
 				}
 			}
@@ -161,7 +197,8 @@ type codexLogEntry struct {
 
 // session_meta payload
 type codexSessionMeta struct {
-	ID string `json:"id"`
+	ID  string `json:"id"`
+	CWD string `json:"cwd"`
 }
 
 // response_item payload — covers function_call, function_call_output, and message types.
@@ -178,8 +215,8 @@ type codexResponsePayload struct {
 
 // event_msg payload for token_count
 type codexEventMsg struct {
-	Type string             `json:"type"`
-	Info *codexTokenInfo    `json:"info,omitempty"`
+	Type string          `json:"type"`
+	Info *codexTokenInfo `json:"info,omitempty"`
 }
 
 type codexTokenInfo struct {
@@ -193,6 +230,10 @@ type codexTokenUsage struct {
 }
 
 func parseCodexEntry(entry codexLogEntry, sessionID string) []event.Event {
+	return parseCodexEntryWithContext(entry, sessionID, "", "")
+}
+
+func parseCodexEntryWithContext(entry codexLogEntry, sessionID, model, cwd string) []event.Event {
 	ts := parseTimestamp(entry.Timestamp)
 
 	switch entry.Type {
@@ -211,6 +252,9 @@ func parseCodexEntry(entry codexLogEntry, sessionID string) []event.Event {
 			SessionID: sid,
 			Platform:  event.PlatformCodex,
 			Timestamp: ts,
+			Data: event.EventData{
+				CWD: meta.CWD,
+			},
 		}}
 
 	case "response_item":
@@ -263,7 +307,7 @@ func parseCodexEntry(entry codexLogEntry, sessionID string) []event.Event {
 			if usage.TotalTokens == 0 {
 				return nil
 			}
-			cost := estimateCodexCost(usage.InputTokens, usage.OutputTokens, "")
+			cost := estimateCodexCost(usage.InputTokens, usage.OutputTokens, model)
 			return []event.Event{{
 				ID:        fmt.Sprintf("codex-tokens-%d", ts.UnixNano()),
 				Type:      event.EventTokenUsage,
@@ -273,6 +317,8 @@ func parseCodexEntry(entry codexLogEntry, sessionID string) []event.Event {
 				Data: event.EventData{
 					InputTokens:  usage.InputTokens,
 					OutputTokens: usage.OutputTokens,
+					Model:        model,
+					CWD:          cwd,
 					CostUSD:      cost,
 				},
 			}}
@@ -297,10 +343,125 @@ func estimateCodexCost(inputTokens, outputTokens int, model string) float64 {
 	inputPricePerM := 2.0
 	outputPricePerM := 8.0
 
-	if strings.Contains(model, "gpt-4") {
+	switch {
+	case strings.Contains(model, "gpt-5") && strings.Contains(model, "mini"):
+		inputPricePerM = 0.25
+		outputPricePerM = 2.0
+	case strings.Contains(model, "gpt-5"):
+		inputPricePerM = 1.25
+		outputPricePerM = 10.0
+	case strings.Contains(model, "gpt-4.1"):
+		inputPricePerM = 2.0
+		outputPricePerM = 8.0
+	case strings.Contains(model, "gpt-4"):
 		inputPricePerM = 2.5
 		outputPricePerM = 10.0
 	}
 
 	return (float64(inputTokens)*inputPricePerM + float64(outputTokens)*outputPricePerM) / 1_000_000
+}
+
+type codexTurnContext struct {
+	CWD   string `json:"cwd"`
+	Model string `json:"model"`
+}
+
+type codexFileChange struct {
+	Path       string
+	ChangeType event.FileChangeType
+}
+
+func (w *CodexWatcher) ensureState() {
+	if w.seen == nil {
+		w.seen = make(map[string]int64)
+	}
+	if w.lastTokenUsage == nil {
+		w.lastTokenUsage = make(map[string]string)
+	}
+	if w.sessionModels == nil {
+		w.sessionModels = make(map[string]string)
+	}
+	if w.sessionCWDs == nil {
+		w.sessionCWDs = make(map[string]string)
+	}
+	if w.pendingFileChanges == nil {
+		w.pendingFileChanges = make(map[string][]codexFileChange)
+	}
+}
+
+func (w *CodexWatcher) recordTurnContext(sessionID string, payload json.RawMessage) {
+	var ctx codexTurnContext
+	if json.Unmarshal(payload, &ctx) != nil {
+		return
+	}
+	if ctx.Model != "" {
+		w.sessionModels[sessionID] = ctx.Model
+	}
+	if ctx.CWD != "" {
+		w.sessionCWDs[sessionID] = ctx.CWD
+	}
+}
+
+func decodeCodexResponsePayload(entry codexLogEntry) (codexResponsePayload, bool) {
+	if entry.Type != "response_item" {
+		return codexResponsePayload{}, false
+	}
+	var payload codexResponsePayload
+	if json.Unmarshal(entry.Payload, &payload) != nil {
+		return codexResponsePayload{}, false
+	}
+	return payload, true
+}
+
+func extractCodexFileChanges(toolName, arguments string) []codexFileChange {
+	switch toolName {
+	case "apply_patch":
+		var input struct {
+			Input string `json:"input"`
+			Patch string `json:"patch"`
+		}
+		if json.Unmarshal([]byte(arguments), &input) != nil {
+			return nil
+		}
+		patch := input.Input
+		if patch == "" {
+			patch = input.Patch
+		}
+		return extractPatchFileChanges(patch)
+	default:
+		return nil
+	}
+}
+
+func extractPatchFileChanges(patch string) []codexFileChange {
+	if patch == "" {
+		return nil
+	}
+
+	var changes []codexFileChange
+	seen := make(map[string]event.FileChangeType)
+	scanner := bufio.NewScanner(strings.NewReader(patch))
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "*** Update File: "):
+			recordPatchFileChange(seen, &changes, strings.TrimSpace(strings.TrimPrefix(line, "*** Update File: ")), event.FileEdit)
+		case strings.HasPrefix(line, "*** Add File: "):
+			recordPatchFileChange(seen, &changes, strings.TrimSpace(strings.TrimPrefix(line, "*** Add File: ")), event.FileCreate)
+		case strings.HasPrefix(line, "*** Delete File: "):
+			recordPatchFileChange(seen, &changes, strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File: ")), event.FileDelete)
+		}
+	}
+	return changes
+}
+
+func recordPatchFileChange(seen map[string]event.FileChangeType, changes *[]codexFileChange, path string, changeType event.FileChangeType) {
+	if path == "" {
+		return
+	}
+	if existing, ok := seen[path]; ok && existing == changeType {
+		return
+	}
+	seen[path] = changeType
+	*changes = append(*changes, codexFileChange{Path: path, ChangeType: changeType})
 }

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -217,6 +218,60 @@ func TestFileChanges(t *testing.T) {
 	}
 }
 
+func TestMarkStaleSessionsEndedUsesRecentActivity(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformClaude, now.Add(-3*time.Hour)); err != nil {
+		t.Fatalf("insert old session: %v", err)
+	}
+	if err := db.UpsertSession("s1", event.PlatformClaude, now.Add(-10*time.Minute)); err != nil {
+		t.Fatalf("record recent activity: %v", err)
+	}
+	if err := db.MarkStaleSessionsEnded(2 * time.Hour); err != nil {
+		t.Fatalf("mark stale: %v", err)
+	}
+
+	var status string
+	var endTime sql.NullString
+	if err := db.db.QueryRow(`SELECT status, end_time FROM sessions WHERE session_id = ?`, "s1").Scan(&status, &endTime); err != nil {
+		t.Fatalf("query session: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("recently active session should stay active, got %q", status)
+	}
+	if endTime.Valid {
+		t.Fatalf("recently active session should not have end_time, got %q", endTime.String)
+	}
+}
+
+func TestUpsertSessionReactivatesStaleSession(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformClaude, now.Add(-3*time.Hour)); err != nil {
+		t.Fatalf("insert old session: %v", err)
+	}
+	if err := db.MarkStaleSessionsEnded(2 * time.Hour); err != nil {
+		t.Fatalf("mark stale: %v", err)
+	}
+	if err := db.UpsertSession("s1", event.PlatformClaude, now); err != nil {
+		t.Fatalf("reactivate session: %v", err)
+	}
+
+	var status string
+	var endTime sql.NullString
+	if err := db.db.QueryRow(`SELECT status, end_time FROM sessions WHERE session_id = ?`, "s1").Scan(&status, &endTime); err != nil {
+		t.Fatalf("query session: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("new activity should reactivate session, got %q", status)
+	}
+	if endTime.Valid {
+		t.Fatalf("reactivated session should clear end_time, got %q", endTime.String)
+	}
+}
+
 func TestCleanOldSessions(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()
@@ -263,5 +318,31 @@ func TestDefaultDBPath(t *testing.T) {
 	expected := filepath.Join(home, ".agmon", "data", "agmon.db")
 	if path != expected {
 		t.Errorf("default path: got %q, want %q", path, expected)
+	}
+}
+
+func TestListSessionsExcludesZeroTokenSessionsOlderThanOneHour(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	oldSameDay := now.Truncate(time.Hour).Add(-10 * time.Hour)
+	recent := now.Add(-30 * time.Minute)
+
+	if err := db.UpsertSession("old", event.PlatformClaude, oldSameDay); err != nil {
+		t.Fatalf("insert old session: %v", err)
+	}
+	if err := db.UpsertSession("recent", event.PlatformClaude, recent); err != nil {
+		t.Fatalf("insert recent session: %v", err)
+	}
+
+	sessions, err := db.ListSessions()
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected only recent session, got %d", len(sessions))
+	}
+	if sessions[0].SessionID != "recent" {
+		t.Fatalf("expected recent session, got %q", sessions[0].SessionID)
 	}
 }

@@ -5,16 +5,16 @@ import (
 )
 
 type SessionRow struct {
-	SessionID            string
-	Platform             string
-	StartTime            time.Time
-	EndTime              *time.Time
-	Status               string
-	TotalInputTokens     int
-	TotalOutputTokens    int
-	TotalCostUSD         float64
-	CWD                  string
-	GitBranch            string
+	SessionID                string
+	Platform                 string
+	StartTime                time.Time
+	EndTime                  *time.Time
+	Status                   string
+	TotalInputTokens         int
+	TotalOutputTokens        int
+	TotalCostUSD             float64
+	CWD                      string
+	GitBranch                string
 	LatestContextTokens      int
 	Model                    string
 	TotalCacheReadTokens     int
@@ -73,7 +73,7 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		       total_cache_read_tokens, total_cache_creation_tokens
 		FROM sessions
 		WHERE total_input_tokens > 0 OR total_output_tokens > 0
-		   OR start_time > datetime('now', '-1 hour')
+		   OR julianday(COALESCE(NULLIF(last_event_time, ''), start_time)) > julianday('now', '-1 hour')
 		ORDER BY start_time DESC LIMIT 50
 	`)
 	if err != nil {
@@ -268,4 +268,3 @@ func (s *DB) GetAllCost() (float64, error) {
 	`).Scan(&cost)
 	return cost, err
 }
-

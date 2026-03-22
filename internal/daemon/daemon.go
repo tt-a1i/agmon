@@ -13,20 +13,23 @@ import (
 )
 
 type Daemon struct {
-	db       *storage.DB
-	sockPath string
-	listener net.Listener
-	mu       sync.RWMutex
-	subs     []chan event.Event
-	done     chan struct{}
-	stopOnce sync.Once
+	db          *storage.DB
+	sockPath    string
+	listener    net.Listener
+	subListener net.Listener
+	mu          sync.RWMutex
+	subs        []chan event.Event
+	remoteSubs  map[net.Conn]struct{}
+	done        chan struct{}
+	stopOnce    sync.Once
 }
 
 func New(db *storage.DB, sockPath string) *Daemon {
 	return &Daemon{
-		db:       db,
-		sockPath: sockPath,
-		done:     make(chan struct{}),
+		db:         db,
+		sockPath:   sockPath,
+		remoteSubs: make(map[net.Conn]struct{}),
+		done:       make(chan struct{}),
 	}
 }
 
@@ -52,12 +55,23 @@ func (d *Daemon) Unsubscribe(ch chan event.Event) {
 
 func (d *Daemon) broadcast(ev event.Event) {
 	d.mu.RLock()
-	defer d.mu.RUnlock()
-	for _, ch := range d.subs {
+	localSubs := append([]chan event.Event(nil), d.subs...)
+	remoteSubs := make([]net.Conn, 0, len(d.remoteSubs))
+	for conn := range d.remoteSubs {
+		remoteSubs = append(remoteSubs, conn)
+	}
+	d.mu.RUnlock()
+
+	for _, ch := range localSubs {
 		select {
 		case ch <- ev:
 		default:
 			// drop if subscriber is slow
+		}
+	}
+	for _, conn := range remoteSubs {
+		if err := writeRemoteEvent(conn, ev); err != nil {
+			d.removeRemoteSub(conn)
 		}
 	}
 }
@@ -68,6 +82,14 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	d.listener = ln
+
+	subLn, err := listenSocket(subscriberSocketPath(d.sockPath))
+	if err != nil {
+		ln.Close()
+		cleanupSocket(d.sockPath)
+		return fmt.Errorf("listen subscriber: %w", err)
+	}
+	d.subListener = subLn
 	log.Printf("daemon listening on %s", d.sockPath)
 
 	// Clean up sessions that never received a SessionEnd (e.g. process killed).
@@ -76,6 +98,7 @@ func (d *Daemon) Start() error {
 	}
 
 	go d.acceptLoop()
+	go d.acceptSubscriberLoop()
 	return nil
 }
 
@@ -85,7 +108,17 @@ func (d *Daemon) Stop() {
 		if d.listener != nil {
 			d.listener.Close()
 		}
+		if d.subListener != nil {
+			d.subListener.Close()
+		}
+		d.mu.Lock()
+		for conn := range d.remoteSubs {
+			conn.Close()
+			delete(d.remoteSubs, conn)
+		}
+		d.mu.Unlock()
 		cleanupSocket(d.sockPath)
+		cleanupSocket(subscriberSocketPath(d.sockPath))
 	})
 }
 
@@ -102,6 +135,22 @@ func (d *Daemon) acceptLoop() {
 			}
 		}
 		go d.handleConn(conn)
+	}
+}
+
+func (d *Daemon) acceptSubscriberLoop() {
+	for {
+		conn, err := d.subListener.Accept()
+		if err != nil {
+			select {
+			case <-d.done:
+				return
+			default:
+				log.Printf("subscriber accept error: %v", err)
+				continue
+			}
+		}
+		d.addRemoteSub(conn)
 	}
 }
 
@@ -183,3 +232,25 @@ func (d *Daemon) ProcessExternalEvent(ev event.Event) {
 	d.broadcast(ev)
 }
 
+func (d *Daemon) addRemoteSub(conn net.Conn) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.remoteSubs[conn] = struct{}{}
+}
+
+func (d *Daemon) removeRemoteSub(conn net.Conn) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.remoteSubs[conn]; ok {
+		delete(d.remoteSubs, conn)
+		conn.Close()
+	}
+}
+
+func writeRemoteEvent(conn net.Conn, ev event.Event) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		return err
+	}
+	defer conn.SetWriteDeadline(time.Time{})
+	return json.NewEncoder(conn).Encode(ev)
+}

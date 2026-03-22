@@ -40,8 +40,8 @@ type ClaudeHookEvent struct {
 	ToolUseID  string          `json:"tool_use_id,omitempty"`
 
 	// Stop/SubagentStop
-	Reason               string `json:"reason,omitempty"`
-	AgentTranscriptPath  string `json:"agent_transcript_path,omitempty"`
+	Reason              string `json:"reason,omitempty"`
+	AgentTranscriptPath string `json:"agent_transcript_path,omitempty"`
 
 	// SessionStart
 	GitBranch string `json:"gitBranch,omitempty"`
@@ -124,8 +124,8 @@ func ClaudeHookToEvents(hook *ClaudeHookEvent) []event.Event {
 			ToolResult: truncate(hook.ToolResult, 500),
 			ToolStatus: event.StatusSuccess,
 		}
-		// Detect file changes from Edit/Write tool calls
-		if hook.ToolName == "Edit" || hook.ToolName == "Write" {
+		// Detect file changes from file-editing tool calls.
+		if hook.ToolName == "Edit" || hook.ToolName == "Write" || hook.ToolName == "MultiEdit" || hook.ToolName == "NotebookEdit" {
 			filePath := extractFilePath(hook.ToolInput)
 			if filePath != "" {
 				ev.Data.FilePath = filePath
@@ -175,10 +175,19 @@ func extractFilePath(toolInput json.RawMessage) string {
 		return ""
 	}
 	var input struct {
-		FilePath string `json:"file_path"`
+		FilePath     string `json:"file_path"`
+		Path         string `json:"path"`
+		NotebookPath string `json:"notebook_path"`
 	}
-	if json.Unmarshal(toolInput, &input) == nil && input.FilePath != "" {
-		return input.FilePath
+	if json.Unmarshal(toolInput, &input) == nil {
+		switch {
+		case input.FilePath != "":
+			return input.FilePath
+		case input.Path != "":
+			return input.Path
+		case input.NotebookPath != "":
+			return input.NotebookPath
+		}
 	}
 	return ""
 }
