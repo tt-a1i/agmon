@@ -25,17 +25,9 @@
 
 > 在一个终端面板中监控 Claude Code 和 Codex 的 Token 消耗、费用、工具调用和文件变更。
 
-```
-  Dashboard   Messages    Tool Calls    Timeline
+<img width="732" height="810" alt="image" src="https://github.com/user-attachments/assets/7dd5f211-7a44-483c-92d1-4bcf490cd5b5" />
 
-  Running 4    Today In 22.9M / Out 60.5k    Cost $65.36
-
-  SESSION                STARTED     COST      CTX  STATUS
-  CC agmon/main           13:10    $28.44   116.9k  ● run
-  CX mco/chore/v0.9..    10:27     $4.85    56.2k  ● run
-  CC MiroFish/main        22:26     $1.08    26.9k    end
-  CC Populace/main        20:16   $394.52   320.2k    end
-```
+<img width="711" height="446" alt="image" src="https://github.com/user-attachments/assets/30e28c15-09b9-40b1-94e1-7cf4c47c8503" />
 
 ## 功能
 
