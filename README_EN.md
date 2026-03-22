@@ -12,7 +12,7 @@
   <a href="https://github.com/tt-a1i/agmon/releases"><img src="https://img.shields.io/github/v/release/tt-a1i/agmon?style=flat-square&color=7C3AED&label=version" alt="Version"></a>
   <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <a href="https://github.com/tt-a1i/agmon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="License"></a>
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-6B7280?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-6B7280?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/Claude%20Code-supported-F59E0B?style=flat-square" alt="Claude Code">
   <img src="https://img.shields.io/badge/Codex-supported-22C55E?style=flat-square" alt="Codex">
 </p>

@@ -3,16 +3,15 @@ package collector
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"time"
 
 	"github.com/tt-a1i/agmon/internal/event"
 )
 
-// EmitEvent sends a single event to the daemon via Unix socket.
+// EmitEvent sends a single event to the daemon via socket.
 func EmitEvent(sockPath string, ev event.Event) error {
-	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	conn, err := dialDaemon(sockPath)
 	if err != nil {
 		return fmt.Errorf("connect to daemon: %w", err)
 	}

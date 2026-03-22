@@ -1,11 +1,14 @@
+//go:build windows
+
 package daemon
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
-	"syscall"
+	"strings"
 )
 
 func pidFilePath() string {
@@ -28,26 +31,26 @@ func RemovePID() {
 }
 
 // IsRunning checks if another daemon instance is already running.
+// On Windows, use tasklist to verify the PID is alive.
 func IsRunning() (bool, int) {
 	data, err := os.ReadFile(pidFilePath())
 	if err != nil {
 		return false, 0
 	}
 
-	pid, err := strconv.Atoi(string(data))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return false, 0
 	}
 
-	proc, err := os.FindProcess(pid)
+	// Use tasklist to check if PID exists
+	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH").Output()
 	if err != nil {
+		os.Remove(pidFilePath())
 		return false, 0
 	}
 
-	// Check if process is actually running
-	err = proc.Signal(syscall.Signal(0))
-	if err != nil {
-		// Process not running, stale PID file
+	if !strings.Contains(string(out), strconv.Itoa(pid)) {
 		os.Remove(pidFilePath())
 		return false, 0
 	}

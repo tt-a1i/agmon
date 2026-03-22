@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -22,11 +20,6 @@ type Daemon struct {
 	subs     []chan event.Event
 	done     chan struct{}
 	stopOnce sync.Once
-}
-
-func DefaultSocketPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agmon", "agmon.sock")
 }
 
 func New(db *storage.DB, sockPath string) *Daemon {
@@ -70,12 +63,7 @@ func (d *Daemon) broadcast(ev event.Event) {
 }
 
 func (d *Daemon) Start() error {
-	os.Remove(d.sockPath)
-	if err := os.MkdirAll(filepath.Dir(d.sockPath), 0o755); err != nil {
-		return fmt.Errorf("create socket dir: %w", err)
-	}
-
-	ln, err := net.Listen("unix", d.sockPath)
+	ln, err := listenSocket(d.sockPath)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -97,7 +85,7 @@ func (d *Daemon) Stop() {
 		if d.listener != nil {
 			d.listener.Close()
 		}
-		os.Remove(d.sockPath)
+		cleanupSocket(d.sockPath)
 	})
 }
 

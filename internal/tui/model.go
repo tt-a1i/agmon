@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -808,16 +809,9 @@ func (m Model) viewSplash() string {
 func (m Model) viewDashboard(width int) string {
 	var b strings.Builder
 
-	// Summary bar — responsive: spread items evenly across the width
-	runCount := fmt.Sprintf("%d", m.activeCount)
-	if m.activeCount > 0 {
-		runCount = contextOkStyle.Render(runCount)
-	} else {
-		runCount = mutedStyle.Render(runCount)
-	}
+	// Summary bar
 	rangeName := rangeNames[m.summaryRange]
-	b.WriteString(fmt.Sprintf(" %s %s    %s %s %s %s    %s %s\n\n",
-		mutedStyle.Render("Running"), runCount,
+	b.WriteString(fmt.Sprintf(" %s %s %s %s    %s %s\n\n",
 		mutedStyle.Render(rangeName+" In"), headerStyle.Render(formatTokens(m.todayInput)),
 		mutedStyle.Render("/ Out"), headerStyle.Render(formatTokens(m.todayOutput)),
 		mutedStyle.Render("Cost"), costStyle.Render(fmt.Sprintf("$%.2f", m.todayCost))))
@@ -1269,9 +1263,17 @@ func fmtKey(k, desc string) string {
 	return keyStyle.Render(k) + " " + keyDescStyle.Render(desc)
 }
 
-// copyToClipboard copies text to the system clipboard using pbcopy (macOS).
+// copyToClipboard copies text to the system clipboard.
 func copyToClipboard(text string) error {
-	cmd := exec.Command("pbcopy")
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "windows":
+		cmd = exec.Command("cmd", "/C", "clip")
+	default: // linux/bsd
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+	}
 	cmd.Stdin = strings.NewReader(text)
 	return cmd.Run()
 }
