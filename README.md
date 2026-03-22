@@ -54,18 +54,30 @@
 
 ## 安装
 
+### 一键安装（推荐）
+
+```bash
+curl -sL https://raw.githubusercontent.com/tt-a1i/agmon/main/install.sh | sh
+```
+
+### Homebrew
+
+```bash
+brew install tt-a1i/tap/agmon
+```
+
+### Go Install
+
+```bash
+go install github.com/tt-a1i/agmon/cmd/agmon@latest
+```
+
 ### 从源码构建
 
 ```bash
 git clone https://github.com/tt-a1i/agmon.git
 cd agmon
 make install
-```
-
-### Homebrew（即将支持）
-
-```bash
-brew install tt-a1i/tap/agmon
 ```
 
 ## 快速开始

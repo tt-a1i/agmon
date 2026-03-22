@@ -28,6 +28,7 @@ brews:
   - repository:
       owner: tt-a1i
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/tt-a1i/agmon"
     description: "Real-time observability for AI coding agents"
     install: |
