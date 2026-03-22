@@ -1,56 +1,60 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/agmon-AI%20Agent%20Observability-7C3AED?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxwYXRoIGQ9Ik0xMyAyTDMgMTRoOWwtMSA4IDEwLTEyaC05bDEtOHoiLz48L3N2Zz4=&logoColor=white" alt="agmon" height="28">
+  <img src="https://img.shields.io/badge/agmon-AI%20Agent%20%E5%8F%AF%E8%A7%82%E6%B5%8B%E6%80%A7-7C3AED?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxwYXRoIGQ9Ik0xMyAyTDMgMTRoOWwtMSA4IDEwLTEyaC05bDEtOHoiLz48L3N2Zz4=&logoColor=white" alt="agmon" height="28">
 </p>
 
 <h1 align="center">agmon</h1>
 
 <p align="center">
-  <strong>Real-time observability for AI coding agents</strong>
+  <strong>AI 编码 Agent 实时可观测性工具</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/tt-a1i/agmon/releases"><img src="https://img.shields.io/badge/version-0.2.0-7C3AED?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/tt-a1i/agmon/releases"><img src="https://img.shields.io/badge/version-0.2.0-7C3AED?style=flat-square" alt="版本"></a>
   <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
-  <a href="https://github.com/tt-a1i/agmon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="License"></a>
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-6B7280?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/Claude%20Code-supported-F59E0B?style=flat-square" alt="Claude Code">
-  <img src="https://img.shields.io/badge/Codex-supported-22C55E?style=flat-square" alt="Codex">
+  <a href="https://github.com/tt-a1i/agmon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="许可证"></a>
+  <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%7C%20Linux-6B7280?style=flat-square" alt="平台">
+  <img src="https://img.shields.io/badge/Claude%20Code-%E5%B7%B2%E6%94%AF%E6%8C%81-F59E0B?style=flat-square" alt="Claude Code">
+  <img src="https://img.shields.io/badge/Codex-%E5%B7%B2%E6%94%AF%E6%8C%81-22C55E?style=flat-square" alt="Codex">
 </p>
 
 <p align="center">
-  <a href="./README_CN.md">中文文档</a>
+  <a href="./README_EN.md">English</a>
 </p>
 
 ---
 
-> Monitor token consumption, costs, tool calls, and file changes across your Claude Code and Codex sessions — all in a single terminal dashboard.
+> 在一个终端面板中监控 Claude Code 和 Codex 的 Token 消耗、费用、工具调用和文件变更。
 
-<img width="732" height="810" alt="image" src="https://github.com/user-attachments/assets/06664199-5860-484c-818c-0b3257313dde" />
-<img width="711" height="446" alt="image" src="https://github.com/user-attachments/assets/32d70f5b-e6ab-48be-98c0-12209ddcd621" />
+<p align="center">
+  <img width="732" alt="仪表盘" src="https://github.com/user-attachments/assets/7dd5f211-7a44-483c-92d1-4bcf490cd5b5" />
+</p>
 
+<p align="center">
+  <img width="711" alt="工具调用" src="https://github.com/user-attachments/assets/30e28c15-09b9-40b1-94e1-7cf4c47c8503" />
+</p>
 
-## Features
+## 功能
 
-- **Multi-platform** — Claude Code + Codex in one unified view
-- **Token tracking** — input, output, cache creation, cache read — per session, per model
-- **Cost estimation** — model-aware pricing (Opus / Sonnet / Haiku / GPT-4)
-- **Tool call traces** — name, params, result, duration, success/failure status
-- **Session timeline** — chronological event stream with file changes
-- **Conversation messages** — browse user prompts within each session
-- **Time range stats** — Today / Week / Month / All token & cost aggregation
-- **Live updates** — daemon broadcasts events, TUI refreshes in real time
-- **Zero config** — `agmon setup` + `agmon`, single binary, no dependencies
+- **多平台** — Claude Code + Codex 统一视图
+- **Token 追踪** — 输入、输出、缓存创建、缓存读取 — 按会话、按模型细分
+- **费用估算** — 模型感知定价（Opus / Sonnet / Haiku / GPT-4）
+- **工具调用追踪** — 名称、参数、结果、耗时、状态
+- **会话时间线** — 按时间排列的事件流，含文件变更
+- **对话消息** — 浏览每个会话中的用户提示词
+- **时间范围统计** — 今日 / 本周 / 本月 / 全部 Token 与费用聚合
+- **实时更新** — daemon 广播事件，TUI 实时刷新
+- **零配置** — `agmon setup` + `agmon`，单二进制文件，无依赖
 
-## Supported Platforms
+## 支持平台
 
-| Platform | Integration | How |
-|----------|-------------|-----|
-| **Claude Code** | Hooks + JSONL log watcher | `agmon setup` auto-injects hooks into `~/.claude/settings.json` |
-| **Codex** | JSONL log watcher | Automatic — polls `~/.codex/sessions/` |
+| 平台 | 接入方式 | 说明 |
+|------|---------|------|
+| **Claude Code** | Hooks + JSONL 日志监听 | `agmon setup` 自动注入 hooks 到 `~/.claude/settings.json` |
+| **Codex** | JSONL 日志监听 | 自动轮询 `~/.codex/sessions/` |
 
-## Install
+## 安装
 
-### From source
+### 从源码构建
 
 ```bash
 git clone https://github.com/tt-a1i/agmon.git
@@ -58,72 +62,72 @@ cd agmon
 make install
 ```
 
-### Homebrew (coming soon)
+### Homebrew（即将支持）
 
 ```bash
 brew install tt-a1i/tap/agmon
 ```
 
-## Quick Start
+## 快速开始
 
 ```bash
-# 1. Configure Claude Code hooks
+# 1. 配置 Claude Code hooks
 agmon setup
 
-# 2. Launch TUI (auto-starts daemon)
+# 2. 启动 TUI（自动启动 daemon）
 agmon
 ```
 
-That's it. Use Claude Code or Codex normally — agmon captures everything in the background.
+就这样。正常使用 Claude Code 或 Codex，agmon 在后台自动采集所有数据。
 
-## Commands
+## 命令
 
-| Command | Description |
-|---------|-------------|
-| `agmon` | Start TUI (auto-starts daemon) |
-| `agmon daemon` | Start daemon only |
-| `agmon status` | Quick session summary |
-| `agmon report [session]` | Detailed text report |
-| `agmon cost [today\|week]` | Token usage statistics |
-| `agmon clean [days]` | Remove sessions older than N days (default: 7) |
-| `agmon setup` | Configure Claude Code hooks |
-| `agmon uninstall` | Remove hooks and stop daemon |
-| `agmon version` | Show version |
+| 命令 | 说明 |
+|------|------|
+| `agmon` | 启动 TUI（自动启动 daemon） |
+| `agmon daemon` | 仅启动 daemon |
+| `agmon status` | 快速查看会话摘要 |
+| `agmon report [session]` | 详细文本报告 |
+| `agmon cost [today\|week]` | Token 用量统计 |
+| `agmon clean [days]` | 清理 N 天前的历史数据（默认 7 天） |
+| `agmon setup` | 配置 Claude Code hooks |
+| `agmon uninstall` | 卸载 hooks 并停止 daemon |
+| `agmon version` | 显示版本 |
 
-## TUI Views
+## TUI 视图
 
-Press **Tab** to switch between views:
+按 **Tab** 切换视图：
 
-| View | Content |
-|------|---------|
-| **Dashboard** | Session list with cost, context usage, status; summary bar with time range toggle (`t` key) |
-| **Messages** | User conversation messages from Claude JSONL logs |
-| **Tool Calls** | Real-time tool call stream with duration and expand/collapse details |
-| **Timeline** | Chronological events: agent lifecycle, tool calls, file changes |
+| 视图 | 内容 |
+|------|------|
+| **Dashboard** | 会话列表（费用、上下文占用、状态）；汇总栏支持 `t` 键切换时间范围 |
+| **Messages** | 从 Claude JSONL 日志中提取的用户对话消息 |
+| **Tool Calls** | 实时工具调用流，支持展开/折叠查看详情 |
+| **Timeline** | 按时间排列的事件：Agent 生命周期、工具调用、文件变更 |
 
-## Keybindings
+## 快捷键
 
-| Key | Action |
-|-----|--------|
-| `Tab` / `Shift+Tab` | Switch view |
-| `j` / `k` | Navigate up / down |
-| `G` | Jump to bottom |
-| `Enter` | Select session / expand details |
-| `[` / `]` | Switch session (any view) |
-| `/` | Filter current list |
-| `t` | Cycle time range (Today → Week → Month → All) |
-| `c` | Copy session resume command |
-| `Esc` | Clear filter |
-| `q` | Quit |
+| 按键 | 操作 |
+|------|------|
+| `Tab` / `Shift+Tab` | 切换视图 |
+| `j` / `k` | 上 / 下导航 |
+| `G` | 跳到底部 |
+| `Enter` | 选择会话 / 展开详情 |
+| `[` / `]` | 切换会话（任意视图） |
+| `/` | 过滤当前列表 |
+| `t` | 切换时间范围（今日 → 本周 → 本月 → 全部） |
+| `c` | 复制会话恢复命令 |
+| `Esc` | 清除过滤 |
+| `q` | 退出 |
 
-## Architecture
+## 架构
 
 ```
 Claude Code hooks ──→ agmon emit ──→ Unix socket
                                          │
-Claude JSONL logs ──→ ClaudeLogWatcher ──→│
+Claude JSONL 日志 ──→ ClaudeLogWatcher ──→│
                                          │
-Codex JSONL logs  ──→ CodexWatcher ──────→│
+Codex JSONL 日志  ──→ CodexWatcher ──────→│
                                          ▼
                                     agmon daemon
                                          │
@@ -132,27 +136,27 @@ Codex JSONL logs  ──→ CodexWatcher ──────→│
                                     agmon TUI (Bubbletea)
 ```
 
-- **Daemon** — receives events via Unix socket, stores to SQLite, broadcasts to TUI
-- **Claude hooks** — `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, etc.
-- **Log watchers** — poll JSONL files for token usage data (every 3s)
-- **TUI** — connects to daemon, renders 4 views with live refresh
+- **Daemon** — 通过 Unix socket 接收事件，存入 SQLite，广播给 TUI
+- **Claude hooks** — `PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd` 等
+- **日志监听器** — 每 3 秒轮询 JSONL 文件获取 Token 用量
+- **TUI** — 连接 daemon，4 个视图实时刷新
 
-## Data Storage
+## 数据存储
 
 ```
 ~/.agmon/
-├── data/agmon.db    # SQLite database
+├── data/agmon.db    # SQLite 数据库
 ├── agmon.sock       # Unix domain socket
-└── daemon.pid       # PID lock file
+└── daemon.pid       # PID 锁文件
 ```
 
-## Uninstall
+## 卸载
 
 ```bash
-agmon uninstall        # remove hooks, stop daemon
-rm -rf ~/.agmon        # remove all data
+agmon uninstall        # 移除 hooks，停止 daemon
+rm -rf ~/.agmon        # 删除所有数据
 ```
 
-## License
+## 许可证
 
 [MIT](LICENSE)
