@@ -838,7 +838,7 @@ func (m Model) viewDashboard(width int) string {
 		return b.String()
 	}
 
-	hdr := fmt.Sprintf("  %-20s %-14s  %8s  %7s  %s", "SESSION", "STARTED", "COST", "CTX", "STATUS")
+	hdr := fmt.Sprintf("  %-22s %-14s  %8s  %7s  %s", "SESSION", "STARTED", "COST", "CTX", "STATUS")
 	b.WriteString(headerStyle.Render(hdr) + "\n")
 
 	visible := m.tabVisibleRows()
@@ -858,7 +858,8 @@ func (m Model) viewDashboard(width int) string {
 			status = mutedStyle.Render("  ---")
 		}
 
-		name := displayTruncate(sessionDisplayName(s), 20)
+		badge := platformBadge(s.Platform)
+		name := displayTruncate(sessionDisplayName(s), 18)
 
 		started := formatStartTime(s.StartTime)
 		// Pad plain text first, then apply color — ANSI codes break %-Ns alignment.
@@ -873,8 +874,9 @@ func (m Model) viewDashboard(width int) string {
 		}
 		ctxPad := fmt.Sprintf("%7s", ctxText)
 
-		line := fmt.Sprintf("  %-20s %s  %s  %s  %s",
-			name,
+		// badge is 2 visible chars + ANSI, pad name to 18 so badge+space+name = 22 cols
+		line := fmt.Sprintf("  %s %-18s %s  %s  %s  %s",
+			badge, name,
 			mutedStyle.Render(fmt.Sprintf("%-14s", started)),
 			costStyle.Render(costPad),
 			contextColorize(s.LatestContextTokens, s.Model, ctxPad),
@@ -1127,6 +1129,16 @@ func (m Model) viewTimeline(width int) string {
 	}
 
 	return b.String()
+}
+
+// platformBadge returns a short colored tag: "CC" for Claude, "CX" for Codex.
+func platformBadge(platform string) string {
+	switch platform {
+	case "codex":
+		return lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("CX")
+	default:
+		return lipgloss.NewStyle().Foreground(colorSecondary).Render("CC")
+	}
 }
 
 func formatTokens(n int) string {

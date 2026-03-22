@@ -1,49 +1,64 @@
-# agmon
+<p align="center">
+  <img src="https://img.shields.io/badge/agmon-AI%20Agent%20Observability-7C3AED?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxwYXRoIGQ9Ik0xMyAyTDMgMTRoOWwtMSA4IDEwLTEyaC05bDEtOHoiLz48L3N2Zz4=&logoColor=white" alt="agmon" height="28">
+</p>
 
-Real-time observability for AI coding agents. See what your agents are doing, how many tokens they consume, and where they fail.
+<h1 align="center">agmon</h1>
 
-AI 编码 Agent 实时可观测性工具。查看 Agent 的行为、Token 消耗和失败点。
+<p align="center">
+  <strong>Real-time observability for AI coding agents</strong>
+</p>
 
-```
-╭─ agmon ──────────────────────────────────────────╮
-│ Active: 3 sessions  Today: 42.1k in / 8.3k out  │
-│                                                  │
-│ SESSION          PLATFORM       IN      OUT STATUS│
-│ feat/auth        claude      32.1k    8.3k   ●   │
-│ fix/nav-bug      claude       8.7k    2.1k   ●   │
-│ refactor/api     codex        1.3k    0.9k   ◌   │
-╰──────────────────────────────────────────────────╯
-```
+<p align="center">
+  <a href="https://github.com/tt-a1i/agmon/releases"><img src="https://img.shields.io/badge/version-0.2.0-7C3AED?style=flat-square" alt="Version"></a>
+  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
+  <a href="https://github.com/tt-a1i/agmon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="License"></a>
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-6B7280?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/Claude%20Code-supported-F59E0B?style=flat-square" alt="Claude Code">
+  <img src="https://img.shields.io/badge/Codex-supported-22C55E?style=flat-square" alt="Codex">
+</p>
+
+<p align="center">
+  <a href="./README_CN.md">中文文档</a>
+</p>
 
 ---
 
-## Features / 功能
+> Monitor token consumption, costs, tool calls, and file changes across your Claude Code and Codex sessions — all in a single terminal dashboard.
 
-- **Token tracking** — per agent, per session, input + cache tokens in real time
-  **Token 追踪** — 按 Agent、按会话实时统计输入及缓存 Token
-- **Tool call traces** — who called what, params, result, duration
-  **工具调用追踪** — 记录每次调用的参数、结果和耗时
-- **Agent hierarchy** — main agent → subagent tree visualization
-  **Agent 层级树** — 主 Agent → 子 Agent 树状结构可视化
-- **Success/failure/retry** — spot failing tools instantly
-  **成功/失败/重试** — 即时发现失败的工具调用
+```
+  Dashboard   Messages    Tool Calls    Timeline
+
+  Running 4    Today In 22.9M / Out 60.5k    Cost $65.36
+
+  SESSION                STARTED     COST      CTX  STATUS
+  CC agmon/main           13:10    $28.44   116.9k  ● run
+  CX mco/chore/v0.9..    10:27     $4.85    56.2k  ● run
+  CC MiroFish/main        22:26     $1.08    26.9k    end
+  CC Populace/main        20:16   $394.52   320.2k    end
+```
+
+## Features
+
+- **Multi-platform** — Claude Code + Codex in one unified view
+- **Token tracking** — input, output, cache creation, cache read — per session, per model
+- **Cost estimation** — model-aware pricing (Opus / Sonnet / Haiku / GPT-4)
+- **Tool call traces** — name, params, result, duration, success/failure status
 - **Session timeline** — chronological event stream with file changes
-  **会话时间线** — 按时间排列的事件流，含文件变更记录
-- **Multi-session** — monitor multiple concurrent agent sessions
-  **多会话** — 同时监控多个并发 Agent 会话
-- **Zero config** — one command to set up, single binary
-  **零配置** — 一条命令完成配置，单二进制文件
+- **Conversation messages** — browse user prompts within each session
+- **Time range stats** — Today / Week / Month / All token & cost aggregation
+- **Live updates** — daemon broadcasts events, TUI refreshes in real time
+- **Zero config** — `agmon setup` + `agmon`, single binary, no dependencies
 
-## Supported Platforms / 支持平台
+## Supported Platforms
 
-- **Claude Code** — via hooks (auto-configured) / 通过 hooks 接入（自动配置）
-- **Codex** — via log file watching / 通过日志文件轮询
+| Platform | Integration | How |
+|----------|-------------|-----|
+| **Claude Code** | Hooks + JSONL log watcher | `agmon setup` auto-injects hooks into `~/.claude/settings.json` |
+| **Codex** | JSONL log watcher | Automatic — polls `~/.codex/sessions/` |
 
----
+## Install
 
-## Install / 安装
-
-Requires Go 1.22+ / 需要 Go 1.22+
+### From source
 
 ```bash
 git clone https://github.com/tt-a1i/agmon.git
@@ -51,97 +66,101 @@ cd agmon
 make install
 ```
 
-## Quick Start / 快速开始
+### Homebrew (coming soon)
 
 ```bash
-# 1. Auto-configure Claude Code hooks / 自动配置 Claude Code hooks
+brew install tt-a1i/tap/agmon
+```
+
+## Quick Start
+
+```bash
+# 1. Configure Claude Code hooks
 agmon setup
 
-# 2. Launch TUI (starts daemon automatically) / 启动 TUI（自动启动后台进程）
+# 2. Launch TUI (auto-starts daemon)
 agmon
 ```
 
-That's it. Use Claude Code normally — agmon captures everything in the background.
+That's it. Use Claude Code or Codex normally — agmon captures everything in the background.
 
-就这样。正常使用 Claude Code，agmon 在后台自动采集数据。
+## Commands
 
----
+| Command | Description |
+|---------|-------------|
+| `agmon` | Start TUI (auto-starts daemon) |
+| `agmon daemon` | Start daemon only |
+| `agmon status` | Quick session summary |
+| `agmon report [session]` | Detailed text report |
+| `agmon cost [today\|week]` | Token usage statistics |
+| `agmon clean [days]` | Remove sessions older than N days (default: 7) |
+| `agmon setup` | Configure Claude Code hooks |
+| `agmon uninstall` | Remove hooks and stop daemon |
+| `agmon version` | Show version |
 
-## Commands / 命令
+## TUI Views
 
-```
-agmon                    Start TUI (auto-starts daemon) / 启动 TUI
-agmon daemon             Start daemon only / 仅启动后台进程
-agmon status             Quick session summary / 快速查看会话摘要
-agmon report [session]   Detailed text report / 详细文本报告
-agmon cost [today|week]  Token usage statistics / Token 用量统计
-agmon clean [days]       Remove sessions older than N days (default: 7) / 清理 N 天前的历史数据
-agmon setup              Configure Claude Code hooks / 配置 Claude Code hooks
-agmon uninstall          Remove hooks and stop daemon / 卸载 hooks 并停止后台进程
-agmon version            Show version / 显示版本
-```
+Press **Tab** to switch between views:
 
-## TUI Views / TUI 视图
+| View | Content |
+|------|---------|
+| **Dashboard** | Session list with cost, context usage, status; summary bar with time range toggle (`t` key) |
+| **Messages** | User conversation messages from Claude JSONL logs |
+| **Tool Calls** | Real-time tool call stream with duration and expand/collapse details |
+| **Timeline** | Chronological events: agent lifecycle, tool calls, file changes |
 
-Press **Tab** to switch / 按 **Tab** 切换视图：
+## Keybindings
 
-| View / 视图 | What it shows / 内容 |
-|-------------|----------------------|
-| **Dashboard** | Active sessions, today's token summary / 活跃会话、今日 Token 汇总 |
-| **Agent Tree** | Main agent → subagent hierarchy with token counts / Agent 层级树及 Token 统计 |
-| **Tool Calls** | Real-time tool call stream with duration and status / 实时工具调用流 |
-| **Timeline** | Chronological events: agent lifecycle, tool calls, file changes / 按时间排列的事件流 |
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Switch view |
+| `j` / `k` | Navigate up / down |
+| `G` | Jump to bottom |
+| `Enter` | Select session / expand details |
+| `[` / `]` | Switch session (any view) |
+| `/` | Filter current list |
+| `t` | Cycle time range (Today → Week → Month → All) |
+| `c` | Copy session resume command |
+| `Esc` | Clear filter |
+| `q` | Quit |
 
-## Keybindings / 快捷键
-
-| Key / 按键 | Action / 操作 |
-|------------|---------------|
-| `Tab` / `Shift+Tab` | Switch view / 切换视图 |
-| `j` / `k` | Navigate up/down / 上下导航 |
-| `Enter` | Select session / expand tool call details / 选择会话 / 展开工具调用详情 |
-| `[` / `]` | Switch session (any view) / 切换会话（任意视图） |
-| `/` | Filter current list / 过滤当前列表 |
-| `Esc` | Clear filter / 清除过滤 |
-| `q` | Quit / 退出 |
-
----
-
-## Architecture / 架构
+## Architecture
 
 ```
-Claude Code hooks ──→ Unix socket ──→ agmon daemon ──→ SQLite
-Claude log watcher ──→                     ↓
-Codex log watcher ──→                  agmon TUI
+Claude Code hooks ──→ agmon emit ──→ Unix socket
+                                         │
+Claude JSONL logs ──→ ClaudeLogWatcher ──→│
+                                         │
+Codex JSONL logs  ──→ CodexWatcher ──────→│
+                                         ▼
+                                    agmon daemon
+                                         │
+                                    SQLite (~/.agmon/data/agmon.db)
+                                         │
+                                    agmon TUI (Bubbletea)
 ```
 
-- **Daemon** receives events via Unix socket, stores to SQLite, broadcasts to subscribers
-  **后台进程** 通过 Unix socket 接收事件，存入 SQLite，广播给订阅者
-- **TUI** connects to daemon, polls database, renders real-time views
-  **TUI** 连接后台进程，轮询数据库，渲染实时视图
-- **Claude log watcher** polls `~/.claude/projects/` every 3s for token usage
-  **Claude 日志监听器** 每 3 秒扫描 `~/.claude/projects/` 获取 Token 用量
-- **Codex watcher** polls `~/.codex/sessions/` every 3s for new entries
-  **Codex 监听器** 每 3 秒轮询 `~/.codex/sessions/` 获取新日志
-- **PID lock** prevents multiple daemon instances / **PID 锁** 防止重复启动后台进程
+- **Daemon** — receives events via Unix socket, stores to SQLite, broadcasts to TUI
+- **Claude hooks** — `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, etc.
+- **Log watchers** — poll JSONL files for token usage data (every 3s)
+- **TUI** — connects to daemon, renders 4 views with live refresh
 
-## Data / 数据存储
-
-All data stored in `~/.agmon/` / 所有数据存储于 `~/.agmon/`：
+## Data Storage
 
 ```
 ~/.agmon/
-├── data/agmon.db    # SQLite database / SQLite 数据库
+├── data/agmon.db    # SQLite database
 ├── agmon.sock       # Unix domain socket
-└── daemon.pid       # PID lock file / PID 锁文件
+└── daemon.pid       # PID lock file
 ```
 
-## Uninstall / 卸载
+## Uninstall
 
 ```bash
-agmon uninstall        # removes hooks, stops daemon / 移除 hooks，停止后台进程
-rm -rf ~/.agmon        # removes all data / 删除所有数据
+agmon uninstall        # remove hooks, stop daemon
+rm -rf ~/.agmon        # remove all data
 ```
 
 ## License
 
-MIT
+[MIT](LICENSE)
