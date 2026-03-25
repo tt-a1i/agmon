@@ -37,13 +37,38 @@ const (
 	rangeToday timeRange = iota
 	rangeWeek
 	rangeMonth
+	range3Month
+	rangeYear
 	rangeAll
 	rangeCount
 )
 
-var rangeNames = []string{"Today", "Week", "Month", "All"}
+var rangeNames = []string{"Today", "Week", "Month", "3 Mon", "Year", "All"}
 
 var tabNames = []string{"Dashboard", "Messages", "Tool Calls", "Timeline"}
+
+// rangeCutoff converts a timeRange to a *time.Time cutoff for DB queries.
+// Returns nil for rangeAll (meaning no time filter).
+func rangeCutoff(r timeRange) *time.Time {
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var t time.Time
+	switch r {
+	case rangeWeek:
+		t = startOfDay.AddDate(0, 0, -7)
+	case rangeMonth:
+		t = startOfDay.AddDate(0, -1, 0)
+	case range3Month:
+		t = startOfDay.AddDate(0, -3, 0)
+	case rangeYear:
+		t = startOfDay.AddDate(-1, 0, 0)
+	case rangeAll:
+		return nil
+	default: // rangeToday
+		t = startOfDay
+	}
+	return &t
+}
 
 // contextWindowForModel returns the context window size for a given model name.
 func contextWindowForModel(model string) int {
@@ -540,20 +565,9 @@ func (m *Model) refresh() {
 	m.sessions, m.err = m.db.ListSessions()
 	m.activeCount, _ = m.db.GetActiveSessionCount()
 
-	switch m.summaryRange {
-	case rangeWeek:
-		m.todayInput, m.todayOutput, _ = m.db.GetWeekTokens()
-		m.todayCost, _ = m.db.GetWeekCost()
-	case rangeMonth:
-		m.todayInput, m.todayOutput, _ = m.db.GetMonthTokens()
-		m.todayCost, _ = m.db.GetMonthCost()
-	case rangeAll:
-		m.todayInput, m.todayOutput, _ = m.db.GetAllTokens()
-		m.todayCost, _ = m.db.GetAllCost()
-	default:
-		m.todayInput, m.todayOutput, _ = m.db.GetTodayTokens()
-		m.todayCost, _ = m.db.GetTodayCost()
-	}
+	cutoff := rangeCutoff(m.summaryRange)
+	m.todayInput, m.todayOutput, _ = m.db.GetTokensSince(cutoff)
+	m.todayCost, _ = m.db.GetCostSince(cutoff)
 
 	if len(m.sessions) > 0 {
 		if m.selectedSession >= len(m.sessions) {

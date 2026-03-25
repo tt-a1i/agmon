@@ -560,23 +560,39 @@ func runCost() {
 		period = os.Args[2]
 	}
 
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	var since *time.Time
+	var label string
 	switch period {
 	case "today":
-		in, out, _ := db.GetTodayTokens()
-		cost, _ := db.GetTodayCost()
-		fmt.Printf("Today:\n")
-		fmt.Printf("  Tokens: %s in + %s out = %s total\n", fmtTokens(in), fmtTokens(out), fmtTokens(in+out))
-		fmt.Printf("  Cost:   $%.4f\n", cost)
+		t := startOfDay
+		since, label = &t, "Today"
 	case "week":
-		in, out, _ := db.GetWeekTokens()
-		cost, _ := db.GetWeekCost()
-		fmt.Printf("This week:\n")
-		fmt.Printf("  Tokens: %s in + %s out = %s total\n", fmtTokens(in), fmtTokens(out), fmtTokens(in+out))
-		fmt.Printf("  Cost:   $%.4f\n", cost)
+		t := startOfDay.AddDate(0, 0, -7)
+		since, label = &t, "This week"
+	case "month":
+		t := startOfDay.AddDate(0, -1, 0)
+		since, label = &t, "This month"
+	case "3month":
+		t := startOfDay.AddDate(0, -3, 0)
+		since, label = &t, "Last 3 months"
+	case "year":
+		t := startOfDay.AddDate(-1, 0, 0)
+		since, label = &t, "This year"
+	case "all":
+		since, label = nil, "All time"
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown period: %q (use 'today' or 'week')\n", period)
+		fmt.Fprintf(os.Stderr, "Unknown period: %q (use today, week, month, 3month, year, all)\n", period)
 		os.Exit(1)
 	}
+
+	in, out, _ := db.GetTokensSince(since)
+	cost, _ := db.GetCostSince(since)
+	fmt.Printf("%s:\n", label)
+	fmt.Printf("  Tokens: %s in + %s out = %s total\n", fmtTokens(in), fmtTokens(out), fmtTokens(in+out))
+	fmt.Printf("  Cost:   $%.4f\n", cost)
 }
 
 func runClean() {
