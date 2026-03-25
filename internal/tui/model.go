@@ -125,7 +125,9 @@ func listenEvents(ch chan EventMsg) tea.Cmd {
 		if !ok {
 			return nil
 		}
-		return refreshMsg{}
+		// Return EventMsg so Update re-queues listenEvents for the next event.
+		// Returning refreshMsg here would stop the listener after the first event.
+		return EventMsg{}
 	}
 }
 

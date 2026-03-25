@@ -47,7 +47,9 @@ func (d *Daemon) Unsubscribe(ch chan event.Event) {
 	for i, s := range d.subs {
 		if s == ch {
 			d.subs = append(d.subs[:i], d.subs[i+1:]...)
-			close(ch)
+			// Do not close ch here — closing is the caller's responsibility.
+			// Closing here races with broadcast, which copies subs under RLock
+			// and then sends outside the lock, potentially sending to a closed channel.
 			return
 		}
 	}

@@ -86,7 +86,10 @@ func runTUI() {
 			defer closeFn()
 			go func() {
 				for range eventCh {
-					tuiCh <- tui.EventMsg{}
+					select {
+					case tuiCh <- tui.EventMsg{}:
+					default:
+					}
 				}
 			}()
 		}
@@ -123,15 +126,29 @@ func runTUI() {
 	defer claudeLogWatcher.Stop()
 
 	eventCh := d.Subscribe()
-	defer d.Unsubscribe(eventCh)
 
-	// Forward daemon events to TUI
+	// Forward daemon events to TUI.
+	// Use a done channel so we can stop the goroutine before calling Unsubscribe,
+	// preventing a race where broadcast sends to the channel after it is removed from subs.
+	// The tuiCh send is non-blocking so the goroutine never stalls after the TUI exits.
 	tuiCh := make(chan tui.EventMsg, 256)
+	done := make(chan struct{})
 	go func() {
-		for range eventCh {
-			tuiCh <- tui.EventMsg{}
+		defer close(tuiCh)
+		for {
+			select {
+			case _, ok := <-eventCh:
+				if !ok {
+					return
+				}
+				select {
+				case tuiCh <- tui.EventMsg{}:
+				default:
+				}
+			case <-done:
+				return
+			}
 		}
-		close(tuiCh)
 	}()
 
 	m := tui.NewModel(db, tuiCh)
@@ -139,6 +156,8 @@ func runTUI() {
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("tui error: %v", err)
 	}
+	close(done)
+	d.Unsubscribe(eventCh)
 }
 
 func runDaemon() {
