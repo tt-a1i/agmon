@@ -21,6 +21,14 @@ func withArgs(t *testing.T, args []string) {
 	t.Cleanup(func() { os.Args = prev })
 }
 
+func setTestHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	prev := os.Stdout
@@ -43,7 +51,7 @@ func captureStdout(t *testing.T, fn func()) string {
 
 func openHomeDB(t *testing.T, home string) *storage.DB {
 	t.Helper()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	db, err := storage.Open(storage.DefaultDBPath())
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -67,7 +75,7 @@ func readSettingsJSON(t *testing.T, home string) map[string]any {
 
 func TestRunSetupConfiguresClaudeHooks(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	out := captureStdout(t, runSetup)
 	if !strings.Contains(out, "Claude Code hooks configured") {
@@ -88,7 +96,7 @@ func TestRunSetupConfiguresClaudeHooks(t *testing.T) {
 
 func TestRunUninstallRemovesOnlyAgmonHooks(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
@@ -221,7 +229,7 @@ func TestRunCleanRemovesOldSessions(t *testing.T) {
 
 func TestRunSetupPreservesExistingSettingsShape(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {

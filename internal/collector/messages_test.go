@@ -9,9 +9,17 @@ import (
 	"github.com/tt-a1i/agmon/internal/event"
 )
 
+func setCollectorTestHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+}
+
 func TestReadUserMessagesClaudeFallsBackToMatchingSessionFile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setCollectorTestHome(t, home)
 
 	sessionID := "788dbad1-b6ae-4541-bee8-c621ab6a1c13"
 	rootCWD := "/Users/admin/code/coding-cli-guide"
@@ -40,7 +48,7 @@ func TestReadUserMessagesClaudeFallsBackToMatchingSessionFile(t *testing.T) {
 
 func TestReadUserMessagesCodexExtractsUserInputText(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setCollectorTestHome(t, home)
 
 	sessionID := "d4430cef-110d-42e0-924a-bfceeba0c4e1"
 	logPath := filepath.Join(

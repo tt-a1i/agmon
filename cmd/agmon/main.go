@@ -21,7 +21,7 @@ import (
 	"github.com/tt-a1i/agmon/internal/tui"
 )
 
-const version = "0.3.3"
+const version = "0.3.4"
 
 var agmonHookNames = []string{
 	"SessionStart", "SessionEnd", "Stop",
@@ -273,7 +273,7 @@ func runEmitWithReader(sockPath string, r io.Reader) error {
 // Claude Code settings.json uses: [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }]
 func runSetup() {
 	home, _ := os.UserHomeDir()
-	settingsPath := home + "/.claude/settings.json"
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
 
 	var settings map[string]any
 	data, err := os.ReadFile(settingsPath)
@@ -313,7 +313,7 @@ func runSetup() {
 		log.Fatalf("marshal settings: %v", err)
 	}
 
-	if err := os.MkdirAll(home+"/.claude", 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		log.Fatalf("create claude dir: %v", err)
 	}
 
@@ -366,7 +366,7 @@ func addHookEntry(hooks map[string]any, hookName, emitCmd string) {
 
 func runUninstall() {
 	home, _ := os.UserHomeDir()
-	settingsPath := home + "/.claude/settings.json"
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
 
 	data, err := os.ReadFile(settingsPath)
 	if err == nil {
