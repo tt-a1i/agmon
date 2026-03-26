@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tt-a1i/agmon/internal/collector"
 	"github.com/tt-a1i/agmon/internal/event"
 	"github.com/tt-a1i/agmon/internal/storage"
 )
@@ -99,9 +100,35 @@ func (d *Daemon) Start() error {
 		log.Printf("stale session cleanup: %v", err)
 	}
 
+	// Repair token_usage rows that have empty model (Codex turn_context ordering issue).
+	d.repairEmptyTokenModels()
+
 	go d.acceptLoop()
 	go d.acceptSubscriberLoop()
 	return nil
+}
+
+func (d *Daemon) repairEmptyTokenModels() {
+	sessions, err := d.db.ListEmptyModelSessions()
+	if err != nil {
+		log.Printf("repair empty models: list: %v", err)
+		return
+	}
+	var total int64
+	for _, s := range sessions {
+		if s.Model == "" || s.Platform != string(event.PlatformCodex) {
+			continue
+		}
+		inP, outP := collector.CodexPricing(s.Model)
+		n, _ := d.db.BackfillEmptyTokenModel(s.SessionID, s.Model, inP, outP)
+		if n > 0 {
+			d.db.UpdateSessionTokens(s.SessionID)
+			total += n
+		}
+	}
+	if total > 0 {
+		log.Printf("repaired %d token rows with missing model", total)
+	}
 }
 
 func (d *Daemon) Stop() {
@@ -177,7 +204,10 @@ func (d *Daemon) processEvent(ev event.Event) error {
 	// immediately so they don't appear as "running".
 	if ev.SessionID != "" && ev.Type != event.EventSessionEnd {
 		d.db.UpsertSession(ev.SessionID, ev.Platform, ev.Timestamp)
-		if time.Since(ev.Timestamp) > 2*time.Hour && ev.Type == event.EventTokenUsage {
+		// Any event older than 2h is from a historical log replay — end the session
+		// so it doesn't linger as "active". Previously only EventTokenUsage triggered
+		// this, leaving sessions without token rows permanently active.
+		if time.Since(ev.Timestamp) > 2*time.Hour {
 			d.db.EndSession(ev.SessionID, ev.Timestamp)
 		}
 	}
@@ -217,6 +247,14 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		}
 		if err := d.db.InsertTokenUsage(ev.AgentID, ev.SessionID, ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheCreationTokens, ev.Data.CacheReadTokens, ev.Data.Model, ev.Data.CostUSD, ev.Timestamp, ev.ID); err != nil {
 			return err
+		}
+		// Backfill earlier rows in this session that had no model (Codex token_count
+		// can arrive before turn_context which carries the model name).
+		if ev.Platform == event.PlatformCodex && ev.Data.Model != "" {
+			inP, outP := collector.CodexPricing(ev.Data.Model)
+			if n, _ := d.db.BackfillEmptyTokenModel(ev.SessionID, ev.Data.Model, inP, outP); n > 0 {
+				log.Printf("backfilled %d token rows for session %s with model %s", n, ev.SessionID, ev.Data.Model)
+			}
 		}
 		return d.db.UpdateSessionTokens(ev.SessionID)
 

@@ -20,7 +20,8 @@ type CodexWatcher struct {
 	emitFn             func(event.Event)
 	done               chan struct{}
 	stopOnce           sync.Once
-	seen               map[string]int64  // file -> last read offset
+	seen               map[string]int64  // file path -> last read byte offset
+	sessionPaths       map[string]string // sessionID -> file path (index for fast lookup)
 	lastTokenUsage     map[string]string // sessionID -> "input:output" dedup key
 	sessionModels      map[string]string
 	sessionCWDs        map[string]string
@@ -39,6 +40,21 @@ func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
 		sessionModels:      make(map[string]string),
 		sessionCWDs:        make(map[string]string),
 		pendingFileChanges: make(map[string][]codexFileChange),
+	}
+}
+
+// codexPathResolver is set by RegisterCodexWatcher so the Messages view can look
+// up Codex log paths from the watcher's in-memory index instead of walking the FS.
+var codexPathResolver func(sessionID string) string
+
+// RegisterCodexWatcher wires the watcher into the package-level path resolver.
+// Call this once after creating the watcher, before the first Messages lookup.
+func RegisterCodexWatcher(w *CodexWatcher) {
+	codexPathResolver = func(sid string) string {
+		if w.sessionPaths == nil {
+			return ""
+		}
+		return w.sessionPaths[sid]
 	}
 }
 
@@ -66,27 +82,23 @@ func (w *CodexWatcher) pollLoop() {
 
 func (w *CodexWatcher) scanLogs() {
 	filepath.Walk(w.baseDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".jsonl") {
 			return nil
 		}
-		if !strings.HasSuffix(info.Name(), ".jsonl") {
+		// Skip files where we've already read all bytes (avoids open+stat per file).
+		if offset, seen := w.seen[path]; seen && info.Size() <= offset {
 			return nil
 		}
-		w.processFile(path)
+		w.processFile(path, info.Size())
 		return nil
 	})
 }
 
-func (w *CodexWatcher) processFile(path string) {
+func (w *CodexWatcher) processFile(path string, size int64) {
 	w.ensureState()
 
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-
-	offset, exists := w.seen[path]
-	if exists && info.Size() <= offset {
+	offset := w.seen[path]
+	if offset > 0 && size <= offset {
 		return
 	}
 
@@ -102,6 +114,7 @@ func (w *CodexWatcher) processFile(path string) {
 
 	// Extract session ID from filename: rollout-...-<uuid>.jsonl
 	sessionID := extractSessionID(filepath.Base(path))
+	w.sessionPaths[sessionID] = path // index for O(1) lookup in Messages view
 
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := offset
@@ -339,9 +352,10 @@ func parseTimestamp(s string) time.Time {
 	return t
 }
 
-func estimateCodexCost(inputTokens, outputTokens int, model string) float64 {
-	inputPricePerM := 2.0
-	outputPricePerM := 8.0
+// CodexPricing returns per-million-token pricing for a Codex model.
+func CodexPricing(model string) (inputPricePerM, outputPricePerM float64) {
+	inputPricePerM = 2.0
+	outputPricePerM = 8.0
 
 	switch {
 	case strings.Contains(model, "gpt-5") && strings.Contains(model, "mini"):
@@ -357,8 +371,12 @@ func estimateCodexCost(inputTokens, outputTokens int, model string) float64 {
 		inputPricePerM = 2.5
 		outputPricePerM = 10.0
 	}
+	return
+}
 
-	return (float64(inputTokens)*inputPricePerM + float64(outputTokens)*outputPricePerM) / 1_000_000
+func estimateCodexCost(inputTokens, outputTokens int, model string) float64 {
+	inP, outP := CodexPricing(model)
+	return (float64(inputTokens)*inP + float64(outputTokens)*outP) / 1_000_000
 }
 
 type codexTurnContext struct {
@@ -374,6 +392,9 @@ type codexFileChange struct {
 func (w *CodexWatcher) ensureState() {
 	if w.seen == nil {
 		w.seen = make(map[string]int64)
+	}
+	if w.sessionPaths == nil {
+		w.sessionPaths = make(map[string]string)
 	}
 	if w.lastTokenUsage == nil {
 		w.lastTokenUsage = make(map[string]string)

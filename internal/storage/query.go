@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"database/sql"
 	"time"
 )
 
@@ -72,9 +73,10 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		       cwd, git_branch, latest_context_tokens, model,
 		       total_cache_read_tokens, total_cache_creation_tokens
 		FROM sessions
-		WHERE total_input_tokens > 0 OR total_output_tokens > 0
-		   OR julianday(COALESCE(NULLIF(last_event_time, ''), start_time)) > julianday('now', '-1 hour')
-		ORDER BY start_time DESC LIMIT 50
+		WHERE status = 'active'
+		   OR total_input_tokens > 0 OR total_output_tokens > 0
+		   OR total_cache_read_tokens > 0 OR total_cache_creation_tokens > 0
+		ORDER BY start_time DESC LIMIT 200
 	`)
 	if err != nil {
 		return nil, err
@@ -97,6 +99,34 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		result = append(result, r)
 	}
 	return result, rows.Err()
+}
+
+// GetSessionByIDPrefix looks up a session by exact ID or unique prefix, searching
+// all sessions (not just the filtered list returned by ListSessions).
+func (s *DB) GetSessionByIDPrefix(prefix string) (SessionRow, bool, error) {
+	row := s.db.QueryRow(`
+		SELECT session_id, platform, start_time, end_time, status,
+		       total_input_tokens, total_output_tokens, total_cost_usd,
+		       cwd, git_branch, latest_context_tokens, model,
+		       total_cache_read_tokens, total_cache_creation_tokens
+		FROM sessions WHERE session_id LIKE ? || '%' ORDER BY start_time DESC LIMIT 1
+	`, prefix)
+	var r SessionRow
+	var startStr string
+	var endStr *string
+	err := row.Scan(&r.SessionID, &r.Platform, &startStr, &endStr,
+		&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD,
+		&r.CWD, &r.GitBranch, &r.LatestContextTokens, &r.Model,
+		&r.TotalCacheReadTokens, &r.TotalCacheCreationTokens)
+	if err == sql.ErrNoRows {
+		return SessionRow{}, false, nil
+	}
+	if err != nil {
+		return SessionRow{}, false, err
+	}
+	r.StartTime = parseTime(startStr)
+	r.EndTime = parseTimePtr(endStr)
+	return r, true, nil
 }
 
 func (s *DB) ListAgents(sessionID string) ([]AgentRow, error) {

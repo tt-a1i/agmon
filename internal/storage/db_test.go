@@ -57,9 +57,17 @@ func TestSessionCRUD(t *testing.T) {
 		t.Fatalf("end session: %v", err)
 	}
 
-	sessions, _ = db.ListSessions()
-	if sessions[0].Status != "ended" {
-		t.Errorf("status after end: got %q, want %q", sessions[0].Status, "ended")
+	// A token-less ended session is intentionally hidden from ListSessions.
+	// Use GetSessionByIDPrefix for an authoritative status check.
+	ended, found, err := db.GetSessionByIDPrefix("s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if !found {
+		t.Fatal("session not found after end")
+	}
+	if ended.Status != "ended" {
+		t.Errorf("status after end: got %q, want %q", ended.Status, "ended")
 	}
 
 	// Active count
@@ -321,13 +329,15 @@ func TestDefaultDBPath(t *testing.T) {
 	}
 }
 
-func TestListSessionsExcludesZeroTokenSessionsOlderThanOneHour(t *testing.T) {
+func TestListSessionsShowsActiveAndTokenSessions(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()
 
 	oldSameDay := now.Truncate(time.Hour).Add(-10 * time.Hour)
 	recent := now.Add(-30 * time.Minute)
 
+	// Both sessions are "active" (no tokens). ListSessions now shows all active sessions
+	// regardless of age — stale cleanup is the daemon's job, not the query's.
 	if err := db.UpsertSession("old", event.PlatformClaude, oldSameDay); err != nil {
 		t.Fatalf("insert old session: %v", err)
 	}
@@ -339,10 +349,18 @@ func TestListSessionsExcludesZeroTokenSessionsOlderThanOneHour(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list sessions: %v", err)
 	}
-	if len(sessions) != 1 {
-		t.Fatalf("expected only recent session, got %d", len(sessions))
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 active sessions, got %d", len(sessions))
 	}
-	if sessions[0].SessionID != "recent" {
-		t.Fatalf("expected recent session, got %q", sessions[0].SessionID)
+
+	// Ended session with no tokens should not appear.
+	if err := db.EndSession("old", oldSameDay); err != nil {
+		t.Fatalf("end old session: %v", err)
+	}
+	sessions, _ = db.ListSessions()
+	for _, s := range sessions {
+		if s.SessionID == "old" {
+			t.Error("ended zero-token session should not appear in ListSessions")
+		}
 	}
 }

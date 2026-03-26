@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,20 +207,30 @@ func readCodexUserMessages(sessionID string, maxMessages int) []UserMessage {
 }
 
 func findCodexLogPath(sessionID string) string {
-	home, _ := os.UserHomeDir()
-	if home == "" || sessionID == "" {
+	if sessionID == "" {
 		return ""
 	}
-
+	// Fast path: use the watcher's in-memory index if available.
+	if codexPathResolver != nil {
+		if p := codexPathResolver(sessionID); p != "" {
+			return p
+		}
+	}
+	// Slow path: recursive walk (Codex may store files in dated subdirs).
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return ""
+	}
 	baseDir := filepath.Join(home, ".codex", "sessions")
+	suffix := sessionID + ".jsonl"
 	var match string
-	_ = filepath.WalkDir(baseDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d == nil || d.IsDir() {
+	_ = filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
 			return nil
 		}
-		if strings.HasSuffix(d.Name(), sessionID+".jsonl") {
+		if strings.HasSuffix(info.Name(), suffix) {
 			match = path
-			return fs.SkipAll
+			return filepath.SkipAll
 		}
 		return nil
 	})

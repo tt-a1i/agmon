@@ -316,6 +316,48 @@ func (s *DB) MarkStaleSessionsEnded(maxAge time.Duration) error {
 	return err
 }
 
+// BackfillEmptyTokenModel updates token_usage rows with empty model for a session,
+// setting the model and recalculating cost using the given per-million-token prices.
+// Returns the number of rows affected.
+func (s *DB) BackfillEmptyTokenModel(sessionID, model string, inputPricePerM, outputPricePerM float64) (int64, error) {
+	result, err := s.db.Exec(`
+		UPDATE token_usage SET
+			model = ?,
+			cost_usd = (CAST(input_tokens AS REAL) * ? + CAST(output_tokens AS REAL) * ?) / 1000000.0
+		WHERE session_id = ? AND model = ''
+	`, model, inputPricePerM, outputPricePerM, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// ListEmptyModelSessions returns sessions that have token_usage rows with empty model,
+// along with a known model from other rows in the same session (if any).
+func (s *DB) ListEmptyModelSessions() ([]struct{ SessionID, Model, Platform string }, error) {
+	rows, err := s.db.Query(`
+		SELECT sub.session_id,
+		       COALESCE((SELECT t2.model FROM token_usage t2 WHERE t2.session_id = sub.session_id AND t2.model != '' LIMIT 1), ''),
+		       s.platform
+		FROM (SELECT DISTINCT session_id FROM token_usage WHERE model = '') sub
+		JOIN sessions s ON sub.session_id = s.session_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []struct{ SessionID, Model, Platform string }
+	for rows.Next() {
+		var r struct{ SessionID, Model, Platform string }
+		if err := rows.Scan(&r.SessionID, &r.Model, &r.Platform); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 func (s *DB) UpdateSessionTokens(sessionID string) error {
 	_, err := s.db.Exec(`
 		UPDATE sessions SET

@@ -51,11 +51,11 @@ type Event struct {
 
 type EventData struct {
 	// Tool call fields
-	ToolName      string         `json:"tool_name,omitempty"`
-	ToolParams    string         `json:"tool_params,omitempty"`
-	ToolResult    string         `json:"tool_result,omitempty"`
-	ToolStatus    ToolCallStatus `json:"tool_status,omitempty"`
-	DurationMs    int64          `json:"duration_ms,omitempty"`
+	ToolName   string         `json:"tool_name,omitempty"`
+	ToolParams string         `json:"tool_params,omitempty"`
+	ToolResult string         `json:"tool_result,omitempty"`
+	ToolStatus ToolCallStatus `json:"tool_status,omitempty"`
+	DurationMs int64          `json:"duration_ms,omitempty"`
 
 	// Agent fields
 	ParentAgentID string `json:"parent_agent_id,omitempty"`

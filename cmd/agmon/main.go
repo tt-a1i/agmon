@@ -115,6 +115,7 @@ func runTUI() {
 	codexWatcher := collector.NewCodexWatcher(func(ev event.Event) {
 		d.ProcessExternalEvent(ev)
 	})
+	collector.RegisterCodexWatcher(codexWatcher)
 	codexWatcher.Start()
 	defer codexWatcher.Stop()
 
@@ -180,6 +181,7 @@ func runDaemon() {
 	codexWatcher := collector.NewCodexWatcher(func(ev event.Event) {
 		d.ProcessExternalEvent(ev)
 	})
+	collector.RegisterCodexWatcher(codexWatcher)
 	codexWatcher.Start()
 	defer codexWatcher.Stop()
 
@@ -240,7 +242,12 @@ func runSetup() {
 	if agmonPath == "" {
 		agmonPath = "agmon"
 	}
-	emitCmd := fmt.Sprintf("%s emit", agmonPath)
+	// Quote the path if it contains spaces or quotes so the shell doesn't split it.
+	quoted := agmonPath
+	if strings.ContainsAny(agmonPath, " \t\"") {
+		quoted = `"` + strings.ReplaceAll(agmonPath, `"`, `\"`) + `"`
+	}
+	emitCmd := quoted + " emit"
 
 	hooks, ok := settings["hooks"].(map[string]any)
 	if !ok {
@@ -295,7 +302,7 @@ func addHookEntry(hooks map[string]any, hookName, emitCmd string) {
 				if innerHooks, ok := entryMap["hooks"].([]any); ok {
 					for _, h := range innerHooks {
 						if hm, ok := h.(map[string]any); ok {
-							if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "agmon") {
+							if cmd, ok := hm["command"].(string); ok && strings.HasSuffix(cmd, " emit") {
 								return // already installed
 							}
 						}
@@ -367,7 +374,7 @@ func removeAgmonHook(hooks map[string]any, hookName string) {
 		var cleanHooks []any
 		for _, h := range innerHooks {
 			if hm, ok := h.(map[string]any); ok {
-				if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "agmon") {
+				if cmd, ok := hm["command"].(string); ok && strings.HasSuffix(cmd, " emit") {
 					continue
 				}
 			}
@@ -405,15 +412,14 @@ func runReport() {
 	var target storage.SessionRow
 	if len(os.Args) > 2 {
 		sid := os.Args[2]
-		for _, s := range sessions {
-			if strings.HasPrefix(s.SessionID, sid) {
-				target = s
-				break
-			}
+		s, found, err := db.GetSessionByIDPrefix(sid)
+		if err != nil {
+			log.Fatalf("lookup session: %v", err)
 		}
-		if target.SessionID == "" {
+		if !found {
 			log.Fatalf("session not found: %s", sid)
 		}
+		target = s
 	} else {
 		target = sessions[0]
 	}

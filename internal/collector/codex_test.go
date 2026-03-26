@@ -269,7 +269,11 @@ func TestCodexWatcher_TurnContextAnnotatesTokensAndApplyPatchProducesFileChanges
 		emitFn:         func(ev event.Event) { emitted = append(emitted, ev) },
 	}
 
-	w.processFile(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat test file: %v", err)
+	}
+	w.processFile(path, info.Size())
 
 	var tokenEvent *event.Event
 	var fileChanges []event.Event
