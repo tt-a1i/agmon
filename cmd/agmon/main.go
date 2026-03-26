@@ -21,7 +21,7 @@ import (
 	"github.com/tt-a1i/agmon/internal/tui"
 )
 
-const version = "0.4.0"
+var version = "0.4.0"
 
 var agmonHookNames = []string{
 	"SessionStart", "SessionEnd", "Stop",
@@ -88,6 +88,8 @@ func main() {
 		runCost()
 	case "clean":
 		runClean()
+	case "update":
+		runUpdate()
 	case "version", "-v", "--version":
 		fmt.Printf("agmon v%s\n", version)
 	case "help", "-h", "--help":
@@ -703,6 +705,7 @@ Usage:
   agmon report [session]   Detailed session report
   agmon cost [today|week]  Token usage statistics
   agmon clean [days]       Remove sessions older than N days (default: 7)
+  agmon update             Update to the latest version
   agmon version            Show version
   agmon help               Show this help
 `, version)
