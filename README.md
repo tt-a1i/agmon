@@ -37,7 +37,7 @@
 
 - **多平台** — Claude Code + Codex 统一视图
 - **Token 追踪** — 输入、输出、缓存创建、缓存读取 — 按会话、按模型细分
-- **费用估算** — 模型感知定价（Opus / Sonnet / Haiku / GPT-4）
+- **费用估算** — 模型感知定价（Opus / Sonnet / Haiku / GPT-5 / GPT-4.1）
 - **工具调用追踪** — 名称、参数、结果、耗时、状态
 - **会话时间线** — 按时间排列的事件流，含文件变更
 - **对话消息** — 浏览每个会话中的用户提示词
@@ -61,6 +61,9 @@ curl -sL https://raw.githubusercontent.com/tt-a1i/agmon/main/install.sh | sh
 ```
 
 ### Homebrew
+
+仅当 release 流水线配置了 Homebrew tap 仓库和 `HOMEBREW_TAP_GITHUB_TOKEN` 时可用。
+发布细节见 [docs/release.md](docs/release.md)。
 
 ```bash
 brew install tt-a1i/tap/agmon
@@ -113,7 +116,7 @@ agmon
 | 视图 | 内容 |
 |------|------|
 | **Dashboard** | 会话列表（费用、上下文占用、状态）；汇总栏支持 `t` 键切换时间范围 |
-| **Messages** | 从 Claude JSONL 日志中提取的用户对话消息 |
+| **Messages** | 从 Claude / Codex JSONL 日志中提取的用户对话消息 |
 | **Tool Calls** | 实时工具调用流，支持展开/折叠查看详情 |
 | **Timeline** | 按时间排列的事件：Agent 生命周期、工具调用、文件变更 |
 
@@ -150,7 +153,7 @@ Codex JSONL 日志  ──→ CodexWatcher ──────→│
 
 - **Daemon** — 通过 Unix socket 接收事件，存入 SQLite，广播给 TUI
 - **Claude hooks** — `PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd` 等
-- **日志监听器** — 每 3 秒轮询 JSONL 文件获取 Token 用量
+- **日志监听器** — Claude watcher 轮询项目日志；Codex watcher 启动时全量发现一次，之后只跟踪已知文件和最近会话目录
 - **TUI** — 连接 daemon，4 个视图实时刷新
 
 ## 数据存储

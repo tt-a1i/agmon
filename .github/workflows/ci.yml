@@ -9,7 +9,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -18,8 +22,14 @@ jobs:
           go-version: "1.24"
 
       - name: Format
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
         run: |
-          unformatted=$(gofmt -l .)
+          files=$(git ls-files '*.go')
+          if [ -z "$files" ]; then
+            exit 0
+          fi
+          unformatted=$(gofmt -l $files)
           if [ -n "$unformatted" ]; then
             echo "Files not formatted: $unformatted"
             exit 1
@@ -49,10 +59,22 @@ jobs:
         with:
           go-version: "1.24"
 
+      - name: Compute GoReleaser args
+        id: goreleaser
+        shell: bash
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          args="release --clean"
+          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+            args="$args --skip=homebrew"
+          fi
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --clean
+          args: ${{ steps.goreleaser.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

@@ -38,7 +38,7 @@
 
 - **Multi-platform** — Claude Code + Codex in one unified view
 - **Token tracking** — input, output, cache creation, cache read — per session, per model
-- **Cost estimation** — model-aware pricing (Opus / Sonnet / Haiku / GPT-4)
+- **Cost estimation** — model-aware pricing (Opus / Sonnet / Haiku / GPT-5 / GPT-4.1)
 - **Tool call traces** — name, params, result, duration, success/failure status
 - **Session timeline** — chronological event stream with file changes
 - **Conversation messages** — browse user prompts within each session
@@ -62,6 +62,9 @@ curl -sL https://raw.githubusercontent.com/tt-a1i/agmon/main/install.sh | sh
 ```
 
 ### Homebrew
+
+Available only when the release pipeline is configured with a Homebrew tap repository and `HOMEBREW_TAP_GITHUB_TOKEN`.
+See [docs/release.md](docs/release.md) for release prerequisites.
 
 ```bash
 brew install tt-a1i/tap/agmon
@@ -114,7 +117,7 @@ Press **Tab** to switch between views:
 | View | Content |
 |------|---------|
 | **Dashboard** | Session list with cost, context usage, status; summary bar with time range toggle (`t` key) |
-| **Messages** | User conversation messages from Claude JSONL logs |
+| **Messages** | User conversation messages from Claude / Codex JSONL logs |
 | **Tool Calls** | Real-time tool call stream with duration and expand/collapse details |
 | **Timeline** | Chronological events: agent lifecycle, tool calls, file changes |
 
@@ -151,7 +154,7 @@ Codex JSONL logs  ──→ CodexWatcher ──────→│
 
 - **Daemon** — receives events via Unix socket, stores to SQLite, broadcasts to TUI
 - **Claude hooks** — `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, etc.
-- **Log watchers** — poll JSONL files for token usage data (every 3s)
+- **Log watchers** — Claude watcher polls project logs; Codex watcher does one full discovery on startup, then follows known files plus recent session directories
 - **TUI** — connects to daemon, renders 4 views with live refresh
 
 ## Data Storage
