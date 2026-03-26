@@ -21,7 +21,7 @@ import (
 	"github.com/tt-a1i/agmon/internal/tui"
 )
 
-const version = "0.3.2"
+const version = "0.3.3"
 
 var agmonHookNames = []string{
 	"SessionStart", "SessionEnd", "Stop",
