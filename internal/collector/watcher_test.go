@@ -39,12 +39,13 @@ func TestClaudeLogWatcherScanLogsReportsBaseDirReadError(t *testing.T) {
 	}
 }
 
-func TestCodexWatcherScanLogsReportsWalkError(t *testing.T) {
+func TestCodexWatcherScanLogsSkipsMissingDirs(t *testing.T) {
 	w := NewCodexWatcher(func(event.Event) {})
-	w.baseDir = filepath.Join(t.TempDir(), "missing")
+	w.baseDirs = []string{filepath.Join(t.TempDir(), "missing")}
 
-	out := captureCollectorLogs(t, w.scanLogs)
-	if !strings.Contains(out, "codex watcher walk") {
-		t.Fatalf("expected watcher to log walk failure, got %q", out)
+	// Missing directories are silently skipped (archived_sessions may not exist).
+	w.scanLogs()
+	if !w.initialDiscovery {
+		t.Fatal("expected initial discovery to complete even with missing dirs")
 	}
 }

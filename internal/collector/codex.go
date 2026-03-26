@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -16,9 +17,9 @@ import (
 	"github.com/tt-a1i/agmon/internal/event"
 )
 
-// CodexWatcher watches Codex session log directory for new logs and parses them.
+// CodexWatcher watches Codex session log directories for new logs and parses them.
 type CodexWatcher struct {
-	baseDir            string
+	baseDirs           []string // directories to scan (sessions + archived_sessions)
 	emitFn             func(event.Event)
 	done               chan struct{}
 	stopOnce           sync.Once
@@ -34,9 +35,12 @@ type CodexWatcher struct {
 
 func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
 	home, _ := os.UserHomeDir()
-	baseDir := filepath.Join(home, ".codex", "sessions")
+	codexDir := filepath.Join(home, ".codex")
 	return &CodexWatcher{
-		baseDir:            baseDir,
+		baseDirs: []string{
+			filepath.Join(codexDir, "sessions"),
+			filepath.Join(codexDir, "archived_sessions"),
+		},
 		emitFn:             emitFn,
 		done:               make(chan struct{}),
 		seen:               make(map[string]int64),
@@ -99,31 +103,204 @@ func (w *CodexWatcher) scanLogs() {
 	w.scanRecentDirs()
 }
 
+type codexFileJob struct {
+	path string
+	size int64
+}
+
+type codexFileResult struct {
+	path      string
+	offset    int64
+	sessionID string
+	model     string
+	cwd       string
+	tokenKey  string
+	events    []event.Event
+}
+
 func (w *CodexWatcher) fullDiscover() bool {
-	if _, err := os.Stat(w.baseDir); err != nil {
-		log.Printf("codex watcher walk %s: %v", w.baseDir, err)
-		return false
+	// Collect file jobs from all base directories.
+	var jobs []codexFileJob
+	for _, baseDir := range w.baseDirs {
+		if _, err := os.Stat(baseDir); err != nil {
+			continue // directory may not exist (e.g. no archived sessions)
+		}
+		if err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				log.Printf("codex watcher walk %s: %v", path, err)
+				return nil
+			}
+			if info.IsDir() || !strings.HasSuffix(info.Name(), ".jsonl") {
+				return nil
+			}
+			if offset, seen := w.seen[path]; seen && info.Size() <= offset {
+				return nil
+			}
+			jobs = append(jobs, codexFileJob{path: path, size: info.Size()})
+			return nil
+		}); err != nil {
+			log.Printf("codex watcher walk root %s: %v", baseDir, err)
+		}
 	}
 
-	if err := filepath.Walk(w.baseDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			log.Printf("codex watcher walk %s: %v", path, err)
-			return nil
+	if len(jobs) == 0 {
+		return true
+	}
+
+	// Fan out to workers.
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+
+	jobCh := make(chan codexFileJob, len(jobs))
+	for _, j := range jobs {
+		jobCh <- j
+	}
+	close(jobCh)
+
+	resultCh := make(chan codexFileResult, len(jobs))
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				sessionID := extractSessionID(filepath.Base(job.path))
+				r := processCodexFileCollect(
+					job.path, job.size, w.seen[job.path],
+					w.sessionModels[sessionID], w.sessionCWDs[sessionID],
+					w.lastTokenUsage[sessionID],
+				)
+				resultCh <- r
+			}
+		}()
+	}
+	wg.Wait()
+	close(resultCh)
+
+	// Merge results and emit events on the main goroutine.
+	for r := range resultCh {
+		w.seen[r.path] = r.offset
+		if r.sessionID != "" {
+			w.pathsMu.Lock()
+			w.sessionPaths[r.sessionID] = r.path
+			w.pathsMu.Unlock()
+			if r.model != "" {
+				w.sessionModels[r.sessionID] = r.model
+			}
+			if r.cwd != "" {
+				w.sessionCWDs[r.sessionID] = r.cwd
+			}
+			if r.tokenKey != "" {
+				w.lastTokenUsage[r.sessionID] = r.tokenKey
+			}
 		}
-		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jsonl") {
-			return nil
+		for _, ev := range r.events {
+			w.emitFn(ev)
 		}
-		// Skip files where we've already read all bytes (avoids open+stat per file).
-		if offset, seen := w.seen[path]; seen && info.Size() <= offset {
-			return nil
-		}
-		w.processFile(path, info.Size())
-		return nil
-	}); err != nil {
-		log.Printf("codex watcher walk root %s: %v", w.baseDir, err)
-		return false
 	}
 	return true
+}
+
+// processCodexFileCollect parses a Codex JSONL file without touching watcher state.
+// Returns collected events and updated per-session metadata.
+func processCodexFileCollect(path string, size, startOffset int64, prevModel, prevCWD, prevTokenKey string) codexFileResult {
+	result := codexFileResult{path: path, offset: startOffset}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return result
+	}
+	defer f.Close()
+
+	if startOffset > 0 {
+		f.Seek(startOffset, 0)
+	}
+
+	sessionID := extractSessionID(filepath.Base(path))
+	result.sessionID = sessionID
+	result.model = prevModel
+	result.cwd = prevCWD
+	result.tokenKey = prevTokenKey
+
+	reader := bufio.NewReaderSize(f, 1024*1024)
+	committedOffset := startOffset
+	pendingFileChanges := make(map[string][]codexFileChange)
+
+	for {
+		lineBytes, err := reader.ReadBytes('\n')
+
+		if len(lineBytes) > 0 {
+			line := bytes.TrimRight(lineBytes, "\r\n")
+
+			if len(line) > 0 {
+				var raw codexLogEntry
+				if json.Unmarshal(line, &raw) == nil {
+					if raw.Type == "turn_context" {
+						var ctx codexTurnContext
+						if json.Unmarshal(raw.Payload, &ctx) == nil {
+							if ctx.Model != "" {
+								result.model = ctx.Model
+							}
+							if ctx.CWD != "" {
+								result.cwd = ctx.CWD
+							}
+						}
+					}
+
+					payload, ok := decodeCodexResponsePayload(raw)
+					if ok && payload.Type == "function_call" {
+						pendingFileChanges[payload.CallID] = extractCodexFileChanges(payload.Name, payload.Arguments)
+					}
+
+					for _, ev := range parseCodexEntryWithContext(raw, sessionID, result.model, result.cwd) {
+						if ev.Type == event.EventTokenUsage {
+							key := fmt.Sprintf("%d:%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheReadTokens)
+							if result.tokenKey == key {
+								continue
+							}
+							result.tokenKey = key
+						}
+						result.events = append(result.events, ev)
+					}
+
+					if ok && payload.Type == "function_call_output" {
+						if payload.Status != "error" && payload.Status != "failed" {
+							for _, change := range pendingFileChanges[payload.CallID] {
+								result.events = append(result.events, event.Event{
+									ID:        fmt.Sprintf("%s:%s", payload.CallID, change.Path),
+									Type:      event.EventFileChange,
+									SessionID: sessionID,
+									Platform:  event.PlatformCodex,
+									Timestamp: parseTimestamp(raw.Timestamp),
+									Data: event.EventData{
+										FilePath:   change.Path,
+										ChangeType: change.ChangeType,
+									},
+								})
+							}
+						}
+						delete(pendingFileChanges, payload.CallID)
+					}
+				}
+			}
+
+			if err == nil {
+				committedOffset += int64(len(lineBytes))
+			}
+		}
+
+		if err != nil {
+			break
+		}
+	}
+
+	result.offset = committedOffset
+	return result
 }
 
 func (w *CodexWatcher) scanKnownFiles() {
@@ -159,7 +336,11 @@ func (w *CodexWatcher) scanKnownFiles() {
 }
 
 func (w *CodexWatcher) scanRecentDirs() {
-	for _, dir := range recentCodexSessionDirs(w.baseDir, time.Now()) {
+	var recentDirs []string
+	for _, baseDir := range w.baseDirs {
+		recentDirs = append(recentDirs, recentCodexSessionDirs(baseDir, time.Now())...)
+	}
+	for _, dir := range recentDirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -259,7 +440,7 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 					for _, ev := range parseCodexEntryWithContext(raw, sessionID, w.sessionModels[sessionID], w.sessionCWDs[sessionID]) {
 						// Dedup repeated token_count events with same last_token_usage
 						if ev.Type == event.EventTokenUsage {
-							key := fmt.Sprintf("%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens)
+							key := fmt.Sprintf("%d:%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheReadTokens)
 							if w.lastTokenUsage[sessionID] == key {
 								continue
 							}
@@ -356,9 +537,10 @@ type codexTokenInfo struct {
 }
 
 type codexTokenUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens       int `json:"input_tokens"`
+	OutputTokens      int `json:"output_tokens"`
+	TotalTokens       int `json:"total_tokens"`
+	CachedInputTokens int `json:"cached_input_tokens"`
 }
 
 func parseCodexEntry(entry codexLogEntry, sessionID string) []event.Event {
@@ -439,7 +621,7 @@ func parseCodexEntryWithContext(entry codexLogEntry, sessionID, model, cwd strin
 			if usage.TotalTokens == 0 {
 				return nil
 			}
-			cost := estimateCodexCost(usage.InputTokens, usage.OutputTokens, model)
+			cost := estimateCodexCost(usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens, model)
 			return []event.Event{{
 				ID:        fmt.Sprintf("codex-tokens-%d", ts.UnixNano()),
 				Type:      event.EventTokenUsage,
@@ -447,11 +629,12 @@ func parseCodexEntryWithContext(entry codexLogEntry, sessionID, model, cwd strin
 				Platform:  event.PlatformCodex,
 				Timestamp: ts,
 				Data: event.EventData{
-					InputTokens:  usage.InputTokens,
-					OutputTokens: usage.OutputTokens,
-					Model:        model,
-					CWD:          cwd,
-					CostUSD:      cost,
+					InputTokens:     usage.InputTokens,
+					OutputTokens:    usage.OutputTokens,
+					CacheReadTokens: usage.CachedInputTokens,
+					Model:           model,
+					CWD:             cwd,
+					CostUSD:         cost,
 				},
 			}}
 		}
@@ -472,14 +655,23 @@ func parseTimestamp(s string) time.Time {
 }
 
 // CodexPricing returns per-million-token pricing for a Codex model.
-func CodexPricing(model string) (inputPricePerM, outputPricePerM float64) {
+// cacheReadPricePerM falls back to inputPricePerM when the model has no cache discount.
+func CodexPricing(model string) (inputPricePerM, outputPricePerM, cacheReadPricePerM float64) {
 	pricing := codexPricing(model)
-	return pricing.inputPerMillion, pricing.outputPerMillion
+	cacheP := pricing.cacheReadPerMill
+	if cacheP == 0 {
+		cacheP = pricing.inputPerMillion
+	}
+	return pricing.inputPerMillion, pricing.outputPerMillion, cacheP
 }
 
-func estimateCodexCost(inputTokens, outputTokens int, model string) float64 {
-	inP, outP := CodexPricing(model)
-	return (float64(inputTokens)*inP + float64(outputTokens)*outP) / 1_000_000
+func estimateCodexCost(inputTokens, outputTokens, cachedInputTokens int, model string) float64 {
+	inP, outP, cacheP := CodexPricing(model)
+	regularInput := inputTokens - cachedInputTokens
+	if regularInput < 0 {
+		regularInput = 0
+	}
+	return (float64(regularInput)*inP + float64(cachedInputTokens)*cacheP + float64(outputTokens)*outP) / 1_000_000
 }
 
 type codexTurnContext struct {

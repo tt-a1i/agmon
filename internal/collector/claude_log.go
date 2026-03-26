@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type ClaudeLogWatcher struct {
 	stopOnce         sync.Once
 	seen             map[string]int64  // file path -> last committed byte offset
 	sessionGitBranch map[string]string // session_id -> git_branch
+	initialScanDone  bool
 }
 
 func NewClaudeLogWatcher(emitFn func(event.Event)) *ClaudeLogWatcher {
@@ -60,12 +62,28 @@ func (w *ClaudeLogWatcher) pollLoop() {
 	}
 }
 
+type claudeFileJob struct {
+	path      string
+	sessionID string
+	size      int64
+}
+
+type claudeFileResult struct {
+	path      string
+	offset    int64
+	sessionID string
+	gitBranch string
+	events    []event.Event
+}
+
 func (w *ClaudeLogWatcher) scanLogs() {
 	projectDirs, err := os.ReadDir(w.baseDir)
 	if err != nil {
 		log.Printf("claude watcher read base dir %s: %v", w.baseDir, err)
 		return
 	}
+
+	var jobs []claudeFileJob
 	for _, projectDir := range projectDirs {
 		if !projectDir.IsDir() {
 			continue
@@ -84,14 +102,164 @@ func (w *ClaudeLogWatcher) scanLogs() {
 			if err != nil {
 				continue
 			}
-			// Skip files not modified in the last 30 days.
 			if time.Since(info.ModTime()) > claudeLogMaxAge {
 				continue
 			}
+			path := filepath.Join(projectPath, f.Name())
+			if offset, seen := w.seen[path]; seen && info.Size() <= offset {
+				continue
+			}
 			sessionID := strings.TrimSuffix(f.Name(), ".jsonl")
-			w.processFile(filepath.Join(projectPath, f.Name()), sessionID)
+			jobs = append(jobs, claudeFileJob{path: path, sessionID: sessionID, size: info.Size()})
 		}
 	}
+
+	if len(jobs) == 0 {
+		w.initialScanDone = true
+		return
+	}
+
+	// First scan: process files in parallel.
+	if !w.initialScanDone {
+		w.scanParallel(jobs)
+		w.initialScanDone = true
+		return
+	}
+
+	// Incremental: process serially (few files, low overhead).
+	for _, j := range jobs {
+		w.processFile(j.path, j.sessionID)
+	}
+}
+
+func (w *ClaudeLogWatcher) scanParallel(jobs []claudeFileJob) {
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+
+	jobCh := make(chan claudeFileJob, len(jobs))
+	for _, j := range jobs {
+		jobCh <- j
+	}
+	close(jobCh)
+
+	resultCh := make(chan claudeFileResult, len(jobs))
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				r := processClaudeFileCollect(
+					job.path, job.sessionID, w.seen[job.path],
+					w.sessionGitBranch[job.sessionID],
+				)
+				resultCh <- r
+			}
+		}()
+	}
+	wg.Wait()
+	close(resultCh)
+
+	for r := range resultCh {
+		w.seen[r.path] = r.offset
+		if r.gitBranch != "" {
+			w.sessionGitBranch[r.sessionID] = r.gitBranch
+		}
+		for _, ev := range r.events {
+			w.emitFn(ev)
+		}
+	}
+}
+
+// processClaudeFileCollect parses a Claude JSONL file without touching watcher state.
+func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGitBranch string) claudeFileResult {
+	result := claudeFileResult{path: path, offset: startOffset, sessionID: sessionID, gitBranch: prevGitBranch}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return result
+	}
+	if info.Size() <= startOffset {
+		return result
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return result
+	}
+	defer f.Close()
+
+	if startOffset > 0 {
+		if _, err := f.Seek(startOffset, 0); err != nil {
+			return result
+		}
+	}
+
+	reader := bufio.NewReaderSize(f, 1024*1024)
+	committedOffset := startOffset
+
+	for {
+		lineBytes, err := reader.ReadBytes('\n')
+
+		if len(lineBytes) > 0 {
+			line := bytes.TrimRight(lineBytes, "\r\n")
+
+			if len(line) > 0 {
+				var entry claudeLogEntry
+				if json.Unmarshal(line, &entry) == nil {
+					if result.gitBranch == "" && entry.GitBranch != "" {
+						result.gitBranch = entry.GitBranch
+					}
+
+					if entry.Type == "assistant" && entry.Message != nil && entry.Message.Usage != nil {
+						usage := entry.Message.Usage
+						model := entry.Message.Model
+						totalInput := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+						cost := EstimateClaudeCost(usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, model)
+
+						evTime := parseTimestamp(entry.Timestamp)
+						if evTime.IsZero() {
+							evTime = time.Now()
+						}
+
+						result.events = append(result.events, event.Event{
+							ID:        fmt.Sprintf("claude-tokens-%s-%s", sessionID, entry.UUID),
+							Type:      event.EventTokenUsage,
+							SessionID: sessionID,
+							Platform:  event.PlatformClaude,
+							Timestamp: evTime,
+							Data: event.EventData{
+								InputTokens:         totalInput,
+								OutputTokens:        usage.OutputTokens,
+								CacheCreationTokens: usage.CacheCreationInputTokens,
+								CacheReadTokens:     usage.CacheReadInputTokens,
+								Model:               model,
+								CostUSD:             cost,
+								GitBranch:           result.gitBranch,
+								CWD:                 entry.CWD,
+							},
+						})
+					}
+				}
+			}
+
+			if err == nil {
+				committedOffset += int64(len(lineBytes))
+			}
+		}
+
+		if err != nil {
+			break
+		}
+	}
+
+	result.offset = committedOffset
+	return result
 }
 
 type claudeLogEntry struct {

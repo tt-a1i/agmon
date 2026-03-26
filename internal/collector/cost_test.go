@@ -20,11 +20,11 @@ func TestEstimateClaudeCost(t *testing.T) {
 		},
 		{
 			name: "opus large", input: 100000, output: 10000,
-			model: "claude-opus-4-6", wantMinUSD: 1.0, wantMaxUSD: 3.0,
+			model: "claude-opus-4-6", wantMinUSD: 0.5, wantMaxUSD: 1.0,
 		},
 		{
 			name: "haiku cheap", input: 10000, output: 5000,
-			model: "claude-haiku-4-5", wantMinUSD: 0.005, wantMaxUSD: 0.015,
+			model: "claude-haiku-4-5", wantMinUSD: 0.02, wantMaxUSD: 0.04,
 		},
 		{
 			name: "zero tokens", input: 0, output: 0,
@@ -69,18 +69,20 @@ func TestCodexPricing(t *testing.T) {
 		model      string
 		wantInput  float64
 		wantOutput float64
+		wantCache  float64
 	}{
-		{model: "gpt-5-mini", wantInput: 0.25, wantOutput: 2.0},
-		{model: "gpt-5-codex", wantInput: 1.25, wantOutput: 10.0},
-		{model: "gpt-4.1", wantInput: 2.0, wantOutput: 8.0},
-		{model: "unknown", wantInput: 2.0, wantOutput: 8.0},
+		{model: "gpt-5-mini", wantInput: 0.25, wantOutput: 2.0, wantCache: 0.25},
+		{model: "gpt-5.2", wantInput: 1.75, wantOutput: 14.0, wantCache: 0.175},
+		{model: "gpt-5-codex", wantInput: 1.25, wantOutput: 10.0, wantCache: 1.25},
+		{model: "gpt-4.1", wantInput: 2.0, wantOutput: 8.0, wantCache: 2.0},
+		{model: "unknown", wantInput: 2.0, wantOutput: 8.0, wantCache: 2.0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			in, out := CodexPricing(tt.model)
-			if in != tt.wantInput || out != tt.wantOutput {
-				t.Fatalf("CodexPricing(%q) = (%v, %v), want (%v, %v)", tt.model, in, out, tt.wantInput, tt.wantOutput)
+			in, out, cache := CodexPricing(tt.model)
+			if in != tt.wantInput || out != tt.wantOutput || cache != tt.wantCache {
+				t.Fatalf("CodexPricing(%q) = (%v, %v, %v), want (%v, %v, %v)", tt.model, in, out, cache, tt.wantInput, tt.wantOutput, tt.wantCache)
 			}
 		})
 	}

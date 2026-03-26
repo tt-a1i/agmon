@@ -197,7 +197,7 @@ func TestCodexWatcher_DedupsRepeatedTokenCount(t *testing.T) {
 	for _, entry := range entries {
 		for _, ev := range parseCodexEntry(entry, sessionID) {
 			if ev.Type == event.EventTokenUsage {
-				key := fmt.Sprintf("%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens)
+				key := fmt.Sprintf("%d:%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheReadTokens)
 				if w.lastTokenUsage[sessionID] == key {
 					continue
 				}
@@ -216,6 +216,46 @@ func TestCodexWatcher_DedupsRepeatedTokenCount(t *testing.T) {
 	}
 	if emitted[1].Data.InputTokens != 12983 {
 		t.Errorf("second event input: got %d, want 12983", emitted[1].Data.InputTokens)
+	}
+}
+
+func TestCodexWatcher_DedupDistinguishesCachedTokens(t *testing.T) {
+	var emitted []event.Event
+	w := &CodexWatcher{
+		lastTokenUsage: make(map[string]string),
+		emitFn:         func(ev event.Event) { emitted = append(emitted, ev) },
+	}
+
+	// Two entries: same input/output but different cached_input_tokens.
+	entries := []codexLogEntry{
+		{Timestamp: "2026-01-14T12:07:16.785Z", Type: "event_msg",
+			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":10000,"output_tokens":500,"total_tokens":10500,"cached_input_tokens":0}}}`)},
+		{Timestamp: "2026-01-14T12:07:19.661Z", Type: "event_msg",
+			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":10000,"output_tokens":500,"total_tokens":10500,"cached_input_tokens":8000}}}`)},
+	}
+
+	sessionID := "test-cache-dedup"
+	for _, entry := range entries {
+		for _, ev := range parseCodexEntry(entry, sessionID) {
+			if ev.Type == event.EventTokenUsage {
+				key := fmt.Sprintf("%d:%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheReadTokens)
+				if w.lastTokenUsage[sessionID] == key {
+					continue
+				}
+				w.lastTokenUsage[sessionID] = key
+			}
+			w.emitFn(ev)
+		}
+	}
+
+	if len(emitted) != 2 {
+		t.Fatalf("expected 2 events (different cache), got %d", len(emitted))
+	}
+	if emitted[0].Data.CacheReadTokens != 0 {
+		t.Errorf("first event cache: got %d, want 0", emitted[0].Data.CacheReadTokens)
+	}
+	if emitted[1].Data.CacheReadTokens != 8000 {
+		t.Errorf("second event cache: got %d, want 8000", emitted[1].Data.CacheReadTokens)
 	}
 }
 
@@ -313,7 +353,7 @@ func TestCodexWatcher_ScanLogsReusesKnownPathsAndFindsNewRecentFiles(t *testing.
 
 	var emitted []event.Event
 	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
-	w.baseDir = baseDir
+	w.baseDirs = []string{baseDir}
 
 	w.scanLogs()
 

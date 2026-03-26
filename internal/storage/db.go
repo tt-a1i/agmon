@@ -364,13 +364,17 @@ func (s *DB) MarkStaleSessionsEnded(maxAge time.Duration) error {
 // BackfillEmptyTokenModel updates token_usage rows with empty model for a session,
 // setting the model and recalculating cost using the given per-million-token prices.
 // Returns the number of rows affected.
-func (s *DB) BackfillEmptyTokenModel(sessionID, model string, inputPricePerM, outputPricePerM float64) (int64, error) {
+func (s *DB) BackfillEmptyTokenModel(sessionID, model string, inputPricePerM, outputPricePerM, cacheReadPricePerM float64) (int64, error) {
 	result, err := s.db.Exec(`
 		UPDATE token_usage SET
 			model = ?,
-			cost_usd = (CAST(input_tokens AS REAL) * ? + CAST(output_tokens AS REAL) * ?) / 1000000.0
+			cost_usd = (
+				CAST(MAX(input_tokens - cache_read_tokens, 0) AS REAL) * ? +
+				CAST(cache_read_tokens AS REAL) * ? +
+				CAST(output_tokens AS REAL) * ?
+			) / 1000000.0
 		WHERE session_id = ? AND model = ''
-	`, model, inputPricePerM, outputPricePerM, sessionID)
+	`, model, inputPricePerM, cacheReadPricePerM, outputPricePerM, sessionID)
 	if err != nil {
 		return 0, err
 	}

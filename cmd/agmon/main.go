@@ -21,7 +21,7 @@ import (
 	"github.com/tt-a1i/agmon/internal/tui"
 )
 
-const version = "0.3.5"
+const version = "0.4.0"
 
 var agmonHookNames = []string{
 	"SessionStart", "SessionEnd", "Stop",
@@ -150,9 +150,9 @@ func runTUI() {
 	daemon.WritePID()
 	defer daemon.RemovePID()
 
-	// Start Codex watcher
+	// Start Codex watcher (async emit decouples file parsing from DB writes)
 	codexWatcher := collector.NewCodexWatcher(func(ev event.Event) {
-		d.ProcessExternalEvent(ev)
+		d.ProcessExternalEventAsync(ev)
 	})
 	collector.RegisterCodexWatcher(codexWatcher)
 	codexWatcher.Start()
@@ -160,7 +160,7 @@ func runTUI() {
 
 	// Start Claude log watcher
 	claudeLogWatcher := collector.NewClaudeLogWatcher(func(ev event.Event) {
-		d.ProcessExternalEvent(ev)
+		d.ProcessExternalEventAsync(ev)
 	})
 	claudeLogWatcher.Start()
 	defer claudeLogWatcher.Stop()
@@ -218,9 +218,9 @@ func runDaemon() {
 	daemon.WritePID()
 	defer daemon.RemovePID()
 
-	// Start Codex watcher
+	// Start Codex watcher (async emit decouples file parsing from DB writes)
 	codexWatcher := collector.NewCodexWatcher(func(ev event.Event) {
-		d.ProcessExternalEvent(ev)
+		d.ProcessExternalEventAsync(ev)
 	})
 	collector.RegisterCodexWatcher(codexWatcher)
 	codexWatcher.Start()
@@ -228,7 +228,7 @@ func runDaemon() {
 
 	// Start Claude log watcher
 	claudeLogWatcher := collector.NewClaudeLogWatcher(func(ev event.Event) {
-		d.ProcessExternalEvent(ev)
+		d.ProcessExternalEventAsync(ev)
 	})
 	claudeLogWatcher.Start()
 	defer claudeLogWatcher.Stop()
@@ -239,6 +239,10 @@ func runDaemon() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
+	// Stop watchers first so no new events are sent to the batch channel,
+	// then stop daemon which drains remaining events before cleanup.
+	claudeLogWatcher.Stop()
+	codexWatcher.Stop()
 	d.Stop()
 	fmt.Println("\ndaemon stopped")
 }

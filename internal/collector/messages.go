@@ -221,20 +221,26 @@ func findCodexLogPath(sessionID string) string {
 	if home == "" {
 		return ""
 	}
-	baseDir := filepath.Join(home, ".codex", "sessions")
+	codexDir := filepath.Join(home, ".codex")
 	suffix := sessionID + ".jsonl"
-	var match string
-	_ = filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	for _, dir := range []string{"sessions", "archived_sessions"} {
+		baseDir := filepath.Join(codexDir, dir)
+		var match string
+		_ = filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			if strings.HasSuffix(info.Name(), suffix) {
+				match = path
+				return filepath.SkipAll
+			}
 			return nil
+		})
+		if match != "" {
+			return match
 		}
-		if strings.HasSuffix(info.Name(), suffix) {
-			match = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	return match
+	}
+	return ""
 }
 
 func extractCodexMessageText(raw json.RawMessage) string {

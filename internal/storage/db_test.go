@@ -287,7 +287,7 @@ func TestBackfillEmptyTokenModelReconcilesSessionTotals(t *testing.T) {
 		t.Fatalf("insert token usage: %v", err)
 	}
 
-	updated, err := db.BackfillEmptyTokenModel("s1", "gpt-5", 1.25, 10.0)
+	updated, err := db.BackfillEmptyTokenModel("s1", "gpt-5", 1.25, 10.0, 1.25)
 	if err != nil {
 		t.Fatalf("backfill empty model: %v", err)
 	}
@@ -307,6 +307,48 @@ func TestBackfillEmptyTokenModelReconcilesSessionTotals(t *testing.T) {
 	}
 	if sessions[0].TotalCostUSD <= 0 {
 		t.Fatalf("expected backfill to recompute cost, got %f", sessions[0].TotalCostUSD)
+	}
+}
+
+func TestBackfillEmptyTokenModelFullCacheHit(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s-cache", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	// input_tokens == cache_read_tokens (full cache hit): regular input should be 0.
+	if err := db.InsertTokenUsage("a1", "s-cache", 5000, 200, 0, 5000, "", 0, now, "src-cache"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	// gpt-5.2: input $1.75/M, cache $0.175/M, output $14/M
+	updated, err := db.BackfillEmptyTokenModel("s-cache", "gpt-5.2", 1.75, 14.0, 0.175)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("expected 1 backfilled row, got %d", updated)
+	}
+	if err := db.UpdateSessionTokens("s-cache"); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	sessions, _ := db.ListSessions()
+	var s *SessionRow
+	for i := range sessions {
+		if sessions[i].SessionID == "s-cache" {
+			s = &sessions[i]
+			break
+		}
+	}
+	if s == nil {
+		t.Fatal("session not found")
+	}
+	// Expected: 0 * 1.75 + 5000 * 0.175 + 200 * 14.0 = 0 + 875 + 2800 = 3675 / 1M = 0.003675
+	wantCost := (float64(5000)*0.175 + float64(200)*14.0) / 1_000_000
+	if diff := s.TotalCostUSD - wantCost; diff < -0.0001 || diff > 0.0001 {
+		t.Fatalf("cost = %f, want %f (diff %f)", s.TotalCostUSD, wantCost, diff)
 	}
 }
 

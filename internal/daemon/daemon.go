@@ -23,6 +23,8 @@ type Daemon struct {
 	remoteSubs  map[net.Conn]struct{}
 	done        chan struct{}
 	stopOnce    sync.Once
+	batchCh     chan event.Event // buffered channel for async event processing
+	batchDone   chan struct{}    // closed when batch consumer exits
 }
 
 func New(db *storage.DB, sockPath string) *Daemon {
@@ -31,6 +33,8 @@ func New(db *storage.DB, sockPath string) *Daemon {
 		sockPath:   sockPath,
 		remoteSubs: make(map[net.Conn]struct{}),
 		done:       make(chan struct{}),
+		batchCh:    make(chan event.Event, 10000),
+		batchDone:  make(chan struct{}),
 	}
 }
 
@@ -105,6 +109,7 @@ func (d *Daemon) Start() error {
 
 	go d.acceptLoop()
 	go d.acceptSubscriberLoop()
+	go d.batchConsumer()
 	return nil
 }
 
@@ -119,8 +124,8 @@ func (d *Daemon) repairEmptyTokenModels() {
 		if s.Model == "" || s.Platform != string(event.PlatformCodex) {
 			continue
 		}
-		inP, outP := collector.CodexPricing(s.Model)
-		n, _ := d.db.BackfillEmptyTokenModel(s.SessionID, s.Model, inP, outP)
+		inP, outP, cacheP := collector.CodexPricing(s.Model)
+		n, _ := d.db.BackfillEmptyTokenModel(s.SessionID, s.Model, inP, outP, cacheP)
 		if n > 0 {
 			d.db.UpdateSessionTokens(s.SessionID)
 			total += n
@@ -134,6 +139,7 @@ func (d *Daemon) repairEmptyTokenModels() {
 func (d *Daemon) Stop() {
 	d.stopOnce.Do(func() {
 		close(d.done)
+		<-d.batchDone // wait for batch consumer to drain
 		if d.listener != nil {
 			d.listener.Close()
 		}
@@ -251,8 +257,8 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		// Backfill earlier rows in this session that had no model (Codex token_count
 		// can arrive before turn_context which carries the model name).
 		if ev.Platform == event.PlatformCodex && ev.Data.Model != "" {
-			inP, outP := collector.CodexPricing(ev.Data.Model)
-			if n, _ := d.db.BackfillEmptyTokenModel(ev.SessionID, ev.Data.Model, inP, outP); n > 0 {
+			inP, outP, cacheP := collector.CodexPricing(ev.Data.Model)
+			if n, _ := d.db.BackfillEmptyTokenModel(ev.SessionID, ev.Data.Model, inP, outP, cacheP); n > 0 {
 				log.Printf("backfilled %d token rows for session %s with model %s", n, ev.SessionID, ev.Data.Model)
 				return d.db.UpdateSessionTokens(ev.SessionID)
 			}
@@ -271,6 +277,44 @@ func (d *Daemon) ProcessExternalEvent(ev event.Event) {
 		log.Printf("process external event error: %v", err)
 	}
 	d.broadcast(ev)
+}
+
+// ProcessExternalEventAsync sends an event to the batch channel for async processing.
+// Falls back to synchronous processing if the daemon is shutting down.
+func (d *Daemon) ProcessExternalEventAsync(ev event.Event) {
+	select {
+	case d.batchCh <- ev:
+	case <-d.done:
+	}
+}
+
+func (d *Daemon) batchConsumer() {
+	defer close(d.batchDone)
+	for {
+		select {
+		case ev, ok := <-d.batchCh:
+			if !ok {
+				return
+			}
+			if err := d.processEvent(ev); err != nil {
+				log.Printf("batch process event: %v", err)
+			}
+			d.broadcast(ev)
+		case <-d.done:
+			// Drain remaining events before exiting.
+			for {
+				select {
+				case ev := <-d.batchCh:
+					if err := d.processEvent(ev); err != nil {
+						log.Printf("batch drain event: %v", err)
+					}
+					d.broadcast(ev)
+				default:
+					return
+				}
+			}
+		}
+	}
 }
 
 func (d *Daemon) addRemoteSub(conn net.Conn) {
