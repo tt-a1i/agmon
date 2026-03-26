@@ -28,6 +28,34 @@ var agmonHookNames = []string{
 	"SubagentStart", "SubagentStop",
 }
 
+func defaultLogPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".agmon", "agmon.log")
+}
+
+func configureTUILogging(logPath string) (func() error, error) {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create log dir: %w", err)
+	}
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open log file: %w", err)
+	}
+
+	prevWriter := log.Writer()
+	prevFlags := log.Flags()
+	prevPrefix := log.Prefix()
+	log.SetOutput(f)
+
+	return func() error {
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
+		log.SetPrefix(prevPrefix)
+		return f.Close()
+	}, nil
+}
+
 func mustOpenDB() *storage.DB {
 	db, err := storage.Open(storage.DefaultDBPath())
 	if err != nil {
@@ -102,10 +130,20 @@ func runTUI() {
 		return
 	}
 
+	logPath := defaultLogPath()
+	restoreLogs, err := configureTUILogging(logPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "configure tui logging: %v\n", err)
+		os.Exit(1)
+	}
+	defer restoreLogs()
+
 	// Start embedded daemon
 	d := daemon.New(db, sockPath)
 	if err := d.Start(); err != nil {
-		log.Fatalf("start daemon: %v", err)
+		_ = restoreLogs()
+		fmt.Fprintf(os.Stderr, "start daemon: %v\n", err)
+		os.Exit(1)
 	}
 	defer d.Stop()
 	daemon.WritePID()
@@ -155,7 +193,9 @@ func runTUI() {
 	m := tui.NewModel(db, tuiCh)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
-		log.Fatalf("tui error: %v", err)
+		_ = restoreLogs()
+		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
+		os.Exit(1)
 	}
 	close(done)
 	d.Unsubscribe(eventCh)
