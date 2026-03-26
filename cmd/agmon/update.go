@@ -39,7 +39,7 @@ func runUpdate() {
 	}
 
 	latest := strings.TrimPrefix(rel.TagName, "v")
-	if latest == version {
+	if latest == version && version != "dev" {
 		fmt.Println("Already up to date.")
 		return
 	}

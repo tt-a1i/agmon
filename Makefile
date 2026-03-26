@@ -1,7 +1,9 @@
 .PHONY: build install test lint clean
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
+
 build:
-	go build -o agmon ./cmd/agmon/
+	go build -ldflags "-X main.version=$(VERSION)" -o agmon ./cmd/agmon/
 
 install: build
 	cp agmon $(shell go env GOPATH)/bin/agmon
