@@ -3,8 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 func (m Model) viewDashboard(width int) string {
@@ -26,13 +24,17 @@ func (m Model) viewDashboard(width int) string {
 				msg += "\n  Start using Claude Code or Codex to see data."
 			}
 			b.WriteString(mutedStyle.Render(msg))
-		} else {
+		} else if m.filterText != "" {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No sessions match %q", m.filterText)))
+		} else if m.platformFilter != platformAll {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No %s sessions", platformFilterNames[m.platformFilter])))
+		} else {
+			b.WriteString(mutedStyle.Render("  No sessions"))
 		}
 		return b.String()
 	}
 
-	hdr := fmt.Sprintf("  %-22s %-14s  %8s  %7s  %s", "SESSION", "STARTED", "COST", "CTX", "STATUS")
+	hdr := fmt.Sprintf("  %-*s %-16s %-14s  %-8s  %-8s  %-8s", dashboardBadgeWidth, "", "SESSION", "STARTED", "COST", "IN", "OUT")
 	b.WriteString(headerStyle.Render(hdr) + "\n")
 
 	visible := m.tabVisibleRows()
@@ -44,35 +46,32 @@ func (m Model) viewDashboard(width int) string {
 
 	for i := start; i < end; i++ {
 		s := filtered[i]
-		status := lipgloss.NewStyle().Foreground(colorSuccess).Render("● run")
-		switch s.Status {
-		case "ended":
-			status = mutedStyle.Render("  end")
-		case "stale":
-			status = mutedStyle.Render("  ---")
-		}
-
 		badge := platformBadge(s.Platform)
-		name := displayTruncate(sessionDisplayName(s), 18)
+		name := displayTruncate(sessionDisplayName(s), 16)
 		started := formatStartTime(s.StartTime)
 
 		costText := fmt.Sprintf("$%.2f", s.TotalCostUSD)
 		if s.TotalCostUSD < 0.005 {
 			costText = "-"
 		}
-		costPad := fmt.Sprintf("%8s", costText)
-		ctxText := formatTokens(s.LatestContextTokens)
-		if s.LatestContextTokens == 0 {
-			ctxText = "-"
+		costPad := fmt.Sprintf("%-8s", costText)
+		inText := formatTokens(s.TotalInputTokens)
+		if s.TotalInputTokens == 0 {
+			inText = "-"
 		}
-		ctxPad := fmt.Sprintf("%7s", ctxText)
+		inPad := fmt.Sprintf("%-8s", inText)
+		outText := formatTokens(s.TotalOutputTokens)
+		if s.TotalOutputTokens == 0 {
+			outText = "-"
+		}
+		outPad := fmt.Sprintf("%-8s", outText)
 
-		line := fmt.Sprintf("  %s %-18s %s  %s  %s  %s",
+		line := fmt.Sprintf("  %s %-16s %s  %s  %s  %s",
 			badge, name,
 			mutedStyle.Render(fmt.Sprintf("%-14s", started)),
 			costStyle.Render(costPad),
-			contextColorize(s.LatestContextTokens, s.Model, ctxPad),
-			status)
+			dashboardMetricStyle.Render(inPad),
+			dashboardMetricStyle.Render(outPad))
 
 		if i == m.selectedRow {
 			line = selectedStyle.Render(line)
@@ -87,14 +86,12 @@ func (m Model) viewDashboard(width int) string {
 	if m.selectedSession < len(m.sessions) {
 		s := m.sessions[m.selectedSession]
 		b.WriteString("\n")
-		preview := fmt.Sprintf(" %s %s    %s %s    %s %s    %s %s    %s %s",
+		preview := fmt.Sprintf(" %s %s    %s %s    %s %s",
 			mutedStyle.Render("▸"), headerStyle.Render(sessionDisplayName(s)),
-			mutedStyle.Render("In"), headerStyle.Render(formatTokens(s.TotalInputTokens)),
-			mutedStyle.Render("Out"), headerStyle.Render(formatTokens(s.TotalOutputTokens)),
 			mutedStyle.Render("Ctx"), contextPercent(s.LatestContextTokens, s.Model),
-			mutedStyle.Render("Cost"), costStyle.Render(fmt.Sprintf("$%.2f", s.TotalCostUSD)))
-		if cr := cacheHitRate(s); cr != "" {
-			preview += "    " + mutedStyle.Render(cr)
+			mutedStyle.Render("Status"), dashboardStatus(s.Status))
+		if s.CWD != "" {
+			preview += "\n " + mutedStyle.Render(displayTruncate(s.CWD, width-4))
 		}
 		b.WriteString(preview)
 	}

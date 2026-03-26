@@ -43,6 +43,27 @@ var rangeNames = []string{"Today", "Week", "Month", "3 Mon", "Year", "All"}
 
 var tabNames = []string{"Dashboard", "Messages", "Tool Calls", "Timeline"}
 
+type sessionPlatformFilter int
+
+const (
+	platformAll sessionPlatformFilter = iota
+	platformClaude
+	platformCodex
+	platformFilterCount
+)
+
+var platformFilterNames = []string{"All", "CC", "Codex"}
+
+type dashboardSort int
+
+const (
+	sortRecent dashboardSort = iota
+	sortCost
+	sortCount
+)
+
+var dashboardSortNames = []string{"Recent", "Cost"}
+
 // rangeCutoff converts a timeRange to a *time.Time cutoff for DB queries.
 // Returns nil for rangeAll (meaning no time filter).
 func rangeCutoff(r timeRange) *time.Time {
@@ -104,6 +125,8 @@ type Model struct {
 	viewOffset             int
 	expandedCalls          map[string]bool // call_id -> expanded
 	summaryRange           timeRange
+	platformFilter         sessionPlatformFilter
+	dashboardSort          dashboardSort
 	filterMode             bool
 	filterText             string
 	todayInput             int
@@ -248,6 +271,23 @@ func (m *Model) syncSessionFromRow() {
 	}
 }
 
+// syncRowFromSelectedSession updates selectedRow to match the current
+// selectedSession within the dashboard's filtered/sorted list.
+func (m *Model) syncRowFromSelectedSession() bool {
+	if m.selectedSession >= len(m.sessions) {
+		return false
+	}
+	targetID := m.sessions[m.selectedSession].SessionID
+	filtered := m.filteredSessions()
+	for i, s := range filtered {
+		if s.SessionID == targetID {
+			m.selectedRow = i
+			return true
+		}
+	}
+	return false
+}
+
 // restoreTabCursor sets selectedRow and viewOffset when switching tabs.
 // For Dashboard, it restores the cursor to the currently selected session.
 // For other tabs, it resets to the top.
@@ -256,9 +296,9 @@ func (m *Model) restoreTabCursor() {
 	m.resetFilter()
 
 	if m.activeTab == tabDashboard {
-		// Restore cursor to the selectedSession position.
-		if m.selectedSession < len(m.sessions) {
-			m.selectedRow = m.selectedSession
+		// Restore cursor to the selected session's position inside the current
+		// filtered/sorted dashboard view.
+		if m.selectedSession < len(m.sessions) && m.syncRowFromSelectedSession() {
 			m.adjustScroll()
 			return
 		}
@@ -399,7 +439,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.clearMsgExpanded()
 				m.setFilterText("")
 				if m.activeTab == tabDashboard {
-					m.selectedRow = m.selectedSession
+					if !m.syncRowFromSelectedSession() {
+						m.selectedRow = 0
+					}
 					m.adjustScroll()
 				} else {
 					m.resetListPosition()
@@ -414,7 +456,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.clearMsgExpanded()
 				m.setFilterText("")
 				if m.activeTab == tabDashboard {
-					m.selectedRow = m.selectedSession
+					if !m.syncRowFromSelectedSession() {
+						m.selectedRow = 0
+					}
 					m.adjustScroll()
 				} else {
 					m.resetListPosition()
@@ -489,6 +533,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, refreshCmd()
 			}
 			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("p"))):
+			if m.activeTab == tabDashboard {
+				m.platformFilter = (m.platformFilter + 1) % platformFilterCount
+				m.refreshFilteredViews()
+				m.resetListPosition()
+				m.syncSessionFromRow()
+			}
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("s"))):
+			if m.activeTab == tabDashboard {
+				m.dashboardSort = (m.dashboardSort + 1) % sortCount
+				m.refreshFilteredViews()
+				m.resetListPosition()
+				m.syncSessionFromRow()
+			}
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -545,6 +607,16 @@ func (m *Model) refresh() {
 
 	m.refreshFilteredViews()
 	m.pruneExpandedCalls()
+	if m.activeTab == tabDashboard {
+		if !m.syncRowFromSelectedSession() {
+			if len(m.filteredSessionsCache) > 0 {
+				m.selectedRow = 0
+				m.syncSessionFromRow()
+			} else {
+				m.selectedRow = 0
+			}
+		}
+	}
 
 	// Clamp selectedRow to prevent stale-index panics.
 	if count := m.currentTabRowCount(); m.selectedRow >= count {

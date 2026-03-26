@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/tt-a1i/agmon/internal/storage"
@@ -9,7 +10,7 @@ import (
 
 func (m *Model) refreshFilteredViews() {
 	filter := strings.ToLower(m.filterText)
-	m.filteredSessionsCache = filterSessions(m.sessions, filter)
+	m.filteredSessionsCache = filterSessions(m.sessions, filter, m.platformFilter, m.dashboardSort)
 	m.filteredToolCallsCache = filterToolCalls(m.toolCalls, filter)
 	m.filteredTimelineCache = filterTimeline(m.timelineEntries, filter)
 }
@@ -57,18 +58,42 @@ func (m *Model) pruneExpandedCalls() {
 	}
 }
 
-func filterSessions(sessions []storage.SessionRow, filter string) []storage.SessionRow {
-	if filter == "" {
-		return sessions
-	}
+func filterSessions(sessions []storage.SessionRow, filter string, platform sessionPlatformFilter, order dashboardSort) []storage.SessionRow {
 	out := make([]storage.SessionRow, 0, len(sessions))
 	for _, s := range sessions {
-		if strings.Contains(strings.ToLower(sessionDisplayName(s)), filter) ||
+		if !matchesPlatformFilter(s, platform) {
+			continue
+		}
+		if filter == "" ||
+			strings.Contains(strings.ToLower(sessionDisplayName(s)), filter) ||
 			strings.Contains(strings.ToLower(s.Platform), filter) {
 			out = append(out, s)
 		}
 	}
+	sortSessions(out, order)
 	return out
+}
+
+func matchesPlatformFilter(s storage.SessionRow, platform sessionPlatformFilter) bool {
+	switch platform {
+	case platformClaude:
+		return s.Platform == "claude"
+	case platformCodex:
+		return s.Platform == "codex"
+	default:
+		return true
+	}
+}
+
+func sortSessions(sessions []storage.SessionRow, order dashboardSort) {
+	switch order {
+	case sortCost:
+		sort.SliceStable(sessions, func(i, j int) bool {
+			return sessions[i].TotalCostUSD > sessions[j].TotalCostUSD
+		})
+	default:
+		// Keep DB order: newest first.
+	}
 }
 
 func filterToolCalls(toolCalls []storage.ToolCallRow, filter string) []storage.ToolCallRow {

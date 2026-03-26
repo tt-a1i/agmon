@@ -4,15 +4,17 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// Colors
-	colorPrimary   = lipgloss.Color("#7C3AED") // purple
-	colorSecondary = lipgloss.Color("#06B6D4") // cyan
-	colorSuccess   = lipgloss.Color("#22C55E") // green
-	colorError     = lipgloss.Color("#EF4444") // red
-	colorWarning   = lipgloss.Color("#F59E0B") // amber
-	colorMuted     = lipgloss.Color("#6B7280") // gray
-	colorBorder    = lipgloss.Color("#3F3F5F") // border
-	colorWhite     = lipgloss.Color("#E5E7EB") // white-ish for normal text
-	colorHighlight = lipgloss.Color("#A78BFA") // lighter purple for highlights
+	colorPrimary     = lipgloss.Color("#7C3AED") // purple
+	colorSecondary   = lipgloss.Color("#06B6D4") // cyan
+	colorSuccess     = lipgloss.Color("#22C55E") // green
+	colorError       = lipgloss.Color("#EF4444") // red
+	colorWarning     = lipgloss.Color("#F59E0B") // amber
+	colorMuted       = lipgloss.Color("#6B7280") // gray
+	colorBorder      = lipgloss.Color("#3F3F5F") // border
+	colorWhite       = lipgloss.Color("#E5E7EB") // white-ish for normal text
+	colorHighlight   = lipgloss.Color("#A78BFA") // lighter purple for highlights
+	colorInfo        = lipgloss.Color("#93C5FD") // soft blue for dashboard values
+	colorClaudeBadge = lipgloss.Color("#94A3B8") // slate blue for Claude badge
 
 	// Title
 	titleStyle = lipgloss.NewStyle().
@@ -42,6 +44,20 @@ var (
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorSecondary)
+
+	dashboardMetricStyle = lipgloss.NewStyle().
+				Foreground(colorInfo).
+				Bold(true)
+
+	claudeBadgeStyle = lipgloss.NewStyle().
+				Width(dashboardBadgeWidth).
+				Foreground(colorClaudeBadge).
+				Bold(true)
+
+	codexBadgeStyle = lipgloss.NewStyle().
+			Width(dashboardBadgeWidth).
+			Foreground(colorSuccess).
+			Bold(true)
 
 	// Status indicators
 	statusActive = lipgloss.NewStyle().

@@ -73,8 +73,10 @@ func (m Model) footer() string {
 			fmtKey("Tab", "view"),
 			fmtKey("q", "quit"))
 	case m.activeTab == tabDashboard:
-		footer = fmt.Sprintf(" %s  %s  %s  %s  %s  %s  %s",
+		footer = fmt.Sprintf(" %s  %s  %s  %s  %s  %s  %s  %s  %s",
 			fmtKey("t", "range"),
+			fmtKey("p", "plat:"+platformFilterNames[m.platformFilter]),
+			fmtKey("s", "sort:"+dashboardSortNames[m.dashboardSort]),
 			fmtKey("/", "filter"),
 			fmtKey("Tab", "view"),
 			fmtKey("j/k", "nav"),

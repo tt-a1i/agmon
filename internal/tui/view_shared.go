@@ -21,6 +21,8 @@ const splashLogo = `
     ██║  ██║╚██████╔╝██║ ╚═╝ ██║╚██████╔╝██║ ╚████║
     ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝`
 
+const dashboardBadgeWidth = 5
+
 func (m Model) viewSplash() string {
 	var b strings.Builder
 
@@ -57,9 +59,9 @@ func (m Model) viewSplash() string {
 func platformBadge(platform string) string {
 	switch platform {
 	case "codex":
-		return lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("CX")
+		return codexBadgeStyle.Render("Codex")
 	default:
-		return lipgloss.NewStyle().Foreground(colorSecondary).Render("CC")
+		return claudeBadgeStyle.Render("CC")
 	}
 }
 
@@ -88,6 +90,17 @@ func cacheHitRate(s storage.SessionRow) string {
 	}
 	pct := float64(s.TotalCacheReadTokens) / float64(total) * 100
 	return fmt.Sprintf("Cache: %.0f%%", pct)
+}
+
+func dashboardStatus(status string) string {
+	switch status {
+	case "ended":
+		return mutedStyle.Render("end")
+	case "stale":
+		return mutedStyle.Render("---")
+	default:
+		return lipgloss.NewStyle().Foreground(colorSuccess).Render("● run")
+	}
 }
 
 func sessionHeader(s storage.SessionRow) string {
