@@ -399,18 +399,11 @@ func runReport() {
 	db := mustOpenDB()
 	defer db.Close()
 
-	sessions, err := db.ListSessions()
-	if err != nil {
-		log.Fatalf("list sessions: %v", err)
-	}
-
-	if len(sessions) == 0 {
-		fmt.Println("No sessions recorded.")
-		return
-	}
-
 	var target storage.SessionRow
+
 	if len(os.Args) > 2 {
+		// Direct lookup by ID prefix — searches all sessions, not just the
+		// filtered list, so ended or zero-token sessions are always reachable.
 		sid := os.Args[2]
 		s, found, err := db.GetSessionByIDPrefix(sid)
 		if err != nil {
@@ -421,6 +414,15 @@ func runReport() {
 		}
 		target = s
 	} else {
+		// No ID given: show the most recent session from the visible list.
+		sessions, err := db.ListSessions()
+		if err != nil {
+			log.Fatalf("list sessions: %v", err)
+		}
+		if len(sessions) == 0 {
+			fmt.Println("No sessions recorded.")
+			return
+		}
 		target = sessions[0]
 	}
 

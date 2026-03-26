@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 )
 
@@ -103,13 +104,25 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 
 // GetSessionByIDPrefix looks up a session by exact ID or unique prefix, searching
 // all sessions (not just the filtered list returned by ListSessions).
+// Returns an error if the prefix matches more than one session.
 func (s *DB) GetSessionByIDPrefix(prefix string) (SessionRow, bool, error) {
+	// Check for ambiguity before returning a result.
+	var count int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM sessions WHERE session_id LIKE ? || '%'`, prefix,
+	).Scan(&count); err != nil {
+		return SessionRow{}, false, err
+	}
+	if count > 1 {
+		return SessionRow{}, false, fmt.Errorf("ambiguous prefix %q matches %d sessions; use more characters", prefix, count)
+	}
+
 	row := s.db.QueryRow(`
 		SELECT session_id, platform, start_time, end_time, status,
 		       total_input_tokens, total_output_tokens, total_cost_usd,
 		       cwd, git_branch, latest_context_tokens, model,
 		       total_cache_read_tokens, total_cache_creation_tokens
-		FROM sessions WHERE session_id LIKE ? || '%' ORDER BY start_time DESC LIMIT 1
+		FROM sessions WHERE session_id LIKE ? || '%' LIMIT 1
 	`, prefix)
 	var r SessionRow
 	var startStr string

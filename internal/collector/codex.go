@@ -21,7 +21,8 @@ type CodexWatcher struct {
 	done               chan struct{}
 	stopOnce           sync.Once
 	seen               map[string]int64  // file path -> last read byte offset
-	sessionPaths       map[string]string // sessionID -> file path (index for fast lookup)
+	pathsMu            sync.RWMutex
+	sessionPaths       map[string]string // sessionID -> file path; protected by pathsMu
 	lastTokenUsage     map[string]string // sessionID -> "input:output" dedup key
 	sessionModels      map[string]string
 	sessionCWDs        map[string]string
@@ -51,10 +52,10 @@ var codexPathResolver func(sessionID string) string
 // Call this once after creating the watcher, before the first Messages lookup.
 func RegisterCodexWatcher(w *CodexWatcher) {
 	codexPathResolver = func(sid string) string {
-		if w.sessionPaths == nil {
-			return ""
-		}
-		return w.sessionPaths[sid]
+		w.pathsMu.RLock()
+		p := w.sessionPaths[sid]
+		w.pathsMu.RUnlock()
+		return p
 	}
 }
 
@@ -114,7 +115,9 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 
 	// Extract session ID from filename: rollout-...-<uuid>.jsonl
 	sessionID := extractSessionID(filepath.Base(path))
+	w.pathsMu.Lock()
 	w.sessionPaths[sessionID] = path // index for O(1) lookup in Messages view
+	w.pathsMu.Unlock()
 
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := offset
@@ -394,7 +397,9 @@ func (w *CodexWatcher) ensureState() {
 		w.seen = make(map[string]int64)
 	}
 	if w.sessionPaths == nil {
+		w.pathsMu.Lock()
 		w.sessionPaths = make(map[string]string)
+		w.pathsMu.Unlock()
 	}
 	if w.lastTokenUsage == nil {
 		w.lastTokenUsage = make(map[string]string)
