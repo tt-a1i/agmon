@@ -254,9 +254,10 @@ func (d *Daemon) processEvent(ev event.Event) error {
 			inP, outP := collector.CodexPricing(ev.Data.Model)
 			if n, _ := d.db.BackfillEmptyTokenModel(ev.SessionID, ev.Data.Model, inP, outP); n > 0 {
 				log.Printf("backfilled %d token rows for session %s with model %s", n, ev.SessionID, ev.Data.Model)
+				return d.db.UpdateSessionTokens(ev.SessionID)
 			}
 		}
-		return d.db.UpdateSessionTokens(ev.SessionID)
+		return nil
 
 	case event.EventFileChange:
 		return d.db.InsertFileChange(ev.SessionID, ev.Data.FilePath, ev.Data.ChangeType, ev.Timestamp)

@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,13 +22,14 @@ type CodexWatcher struct {
 	emitFn             func(event.Event)
 	done               chan struct{}
 	stopOnce           sync.Once
-	seen               map[string]int64  // file path -> last read byte offset
+	seen               map[string]int64 // file path -> last read byte offset
 	pathsMu            sync.RWMutex
 	sessionPaths       map[string]string // sessionID -> file path; protected by pathsMu
 	lastTokenUsage     map[string]string // sessionID -> "input:output" dedup key
 	sessionModels      map[string]string
 	sessionCWDs        map[string]string
 	pendingFileChanges map[string][]codexFileChange
+	initialDiscovery   bool
 }
 
 func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
@@ -82,8 +85,32 @@ func (w *CodexWatcher) pollLoop() {
 }
 
 func (w *CodexWatcher) scanLogs() {
-	filepath.Walk(w.baseDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".jsonl") {
+	w.ensureState()
+
+	if !w.initialDiscovery {
+		if !w.fullDiscover() {
+			return
+		}
+		w.initialDiscovery = true
+		return
+	}
+
+	w.scanKnownFiles()
+	w.scanRecentDirs()
+}
+
+func (w *CodexWatcher) fullDiscover() bool {
+	if _, err := os.Stat(w.baseDir); err != nil {
+		log.Printf("codex watcher walk %s: %v", w.baseDir, err)
+		return false
+	}
+
+	if err := filepath.Walk(w.baseDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			log.Printf("codex watcher walk %s: %v", path, err)
+			return nil
+		}
+		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jsonl") {
 			return nil
 		}
 		// Skip files where we've already read all bytes (avoids open+stat per file).
@@ -92,7 +119,96 @@ func (w *CodexWatcher) scanLogs() {
 		}
 		w.processFile(path, info.Size())
 		return nil
-	})
+	}); err != nil {
+		log.Printf("codex watcher walk root %s: %v", w.baseDir, err)
+		return false
+	}
+	return true
+}
+
+func (w *CodexWatcher) scanKnownFiles() {
+	if len(w.seen) == 0 {
+		return
+	}
+
+	paths := make([]string, 0, len(w.seen))
+	for path := range w.seen {
+		paths = append(paths, path)
+	}
+
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				log.Printf("codex watcher stat %s: %v", path, err)
+			}
+			delete(w.seen, path)
+			w.removeSessionPath(path)
+			continue
+		}
+		if info.IsDir() {
+			delete(w.seen, path)
+			w.removeSessionPath(path)
+			continue
+		}
+		if info.Size() <= w.seen[path] {
+			continue
+		}
+		w.processFile(path, info.Size())
+	}
+}
+
+func (w *CodexWatcher) scanRecentDirs() {
+	for _, dir := range recentCodexSessionDirs(w.baseDir, time.Now()) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			log.Printf("codex watcher read recent dir %s: %v", dir, err)
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				log.Printf("codex watcher stat %s: %v", filepath.Join(dir, entry.Name()), err)
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			if offset, seen := w.seen[path]; seen && info.Size() <= offset {
+				continue
+			}
+			w.processFile(path, info.Size())
+		}
+	}
+}
+
+func recentCodexSessionDirs(baseDir string, now time.Time) []string {
+	dirs := make([]string, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	for i := 0; i < 3; i++ {
+		day := now.AddDate(0, 0, -i).UTC()
+		dir := filepath.Join(baseDir, day.Format("2006"), day.Format("01"), day.Format("02"))
+		if _, ok := seen[dir]; ok {
+			continue
+		}
+		seen[dir] = struct{}{}
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+func (w *CodexWatcher) removeSessionPath(path string) {
+	w.pathsMu.Lock()
+	defer w.pathsMu.Unlock()
+	for sessionID, indexedPath := range w.sessionPaths {
+		if indexedPath == path {
+			delete(w.sessionPaths, sessionID)
+		}
+	}
 }
 
 func (w *CodexWatcher) processFile(path string, size int64) {
@@ -357,24 +473,8 @@ func parseTimestamp(s string) time.Time {
 
 // CodexPricing returns per-million-token pricing for a Codex model.
 func CodexPricing(model string) (inputPricePerM, outputPricePerM float64) {
-	inputPricePerM = 2.0
-	outputPricePerM = 8.0
-
-	switch {
-	case strings.Contains(model, "gpt-5") && strings.Contains(model, "mini"):
-		inputPricePerM = 0.25
-		outputPricePerM = 2.0
-	case strings.Contains(model, "gpt-5"):
-		inputPricePerM = 1.25
-		outputPricePerM = 10.0
-	case strings.Contains(model, "gpt-4.1"):
-		inputPricePerM = 2.0
-		outputPricePerM = 8.0
-	case strings.Contains(model, "gpt-4"):
-		inputPricePerM = 2.5
-		outputPricePerM = 10.0
-	}
-	return
+	pricing := codexPricing(model)
+	return pricing.inputPerMillion, pricing.outputPerMillion
 }
 
 func estimateCodexCost(inputTokens, outputTokens int, model string) float64 {

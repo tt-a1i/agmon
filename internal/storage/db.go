@@ -127,6 +127,7 @@ func (s *DB) migrate() error {
 	s.addColumnIfMissing("sessions", "cwd", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "git_branch", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "latest_context_tokens", "INT NOT NULL DEFAULT 0")
+	s.addColumnIfMissing("sessions", "latest_token_time", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "model", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "total_cache_read_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("sessions", "total_cache_creation_tokens", "INT NOT NULL DEFAULT 0")
@@ -257,12 +258,56 @@ func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatu
 // Pass a stable unique ID (e.g. message UUID) to prevent double-counting on daemon restart.
 // Pass "" to skip dedup.
 func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int, model string, costUSD float64, ts time.Time, sourceID string) error {
-	_, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	tsStr := ts.UTC().Format(time.RFC3339)
+	result, err := tx.Exec(`
 		INSERT OR IGNORE INTO token_usage
 			(agent_id, session_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model, cost_usd, timestamp, source_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, agentID, sessionID, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, costUSD, ts.UTC().Format(time.RFC3339), sourceID)
-	return err
+	`, agentID, sessionID, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, costUSD, tsStr, sourceID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return tx.Commit()
+	}
+
+	_, err = tx.Exec(`
+		UPDATE sessions SET
+			total_input_tokens = total_input_tokens + ?,
+			total_output_tokens = total_output_tokens + ?,
+			total_cost_usd = total_cost_usd + ?,
+			total_cache_read_tokens = total_cache_read_tokens + ?,
+			total_cache_creation_tokens = total_cache_creation_tokens + ?,
+			latest_context_tokens = CASE
+				WHEN latest_token_time = '' OR latest_token_time <= ? THEN ?
+				ELSE latest_context_tokens
+			END,
+			latest_token_time = CASE
+				WHEN latest_token_time = '' OR latest_token_time <= ? THEN ?
+				ELSE latest_token_time
+			END,
+			model = CASE
+				WHEN ? != '' AND (latest_token_time = '' OR latest_token_time <= ?) THEN ?
+				ELSE model
+			END
+		WHERE session_id = ?
+	`, inputTokens, outputTokens, costUSD, cacheReadTokens, cacheCreationTokens, tsStr, inputTokens, tsStr, tsStr, model, tsStr, model, sessionID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // CleanOldSessions deletes all non-active sessions (ended/stale) older than olderThanDays days,
@@ -366,10 +411,11 @@ func (s *DB) UpdateSessionTokens(sessionID string) error {
 			total_cost_usd = COALESCE((SELECT SUM(cost_usd) FROM token_usage WHERE session_id = ?), 0),
 			total_cache_read_tokens = COALESCE((SELECT SUM(cache_read_tokens) FROM token_usage WHERE session_id = ?), 0),
 			total_cache_creation_tokens = COALESCE((SELECT SUM(cache_creation_tokens) FROM token_usage WHERE session_id = ?), 0),
+			latest_token_time = COALESCE((SELECT timestamp FROM token_usage WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1), ''),
 			latest_context_tokens = COALESCE((SELECT input_tokens FROM token_usage WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1), 0),
 			model = COALESCE(NULLIF((SELECT model FROM token_usage WHERE session_id = ? AND model != '' ORDER BY timestamp DESC LIMIT 1), ''), model)
 		WHERE session_id = ?
-	`, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID)
+	`, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID)
 	return err
 }
 
