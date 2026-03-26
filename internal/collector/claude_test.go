@@ -1,10 +1,18 @@
 package collector
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tt-a1i/agmon/internal/event"
 )
+
+func TestParseClaudeHookReportsInvalidJSON(t *testing.T) {
+	_, err := ParseClaudeHook(strings.NewReader("{not-json"))
+	if err == nil {
+		t.Fatal("expected invalid json to return an error")
+	}
+}
 
 func TestClaudeHookToEvents_PreToolUse(t *testing.T) {
 	hook := &ClaudeHookEvent{

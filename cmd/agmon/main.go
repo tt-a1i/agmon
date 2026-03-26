@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -243,22 +244,29 @@ func runDaemon() {
 }
 
 func runEmit() {
-	hookEvent, err := collector.ParseClaudeHookStdin()
-	if err != nil {
+	if err := runEmitWithReader(daemon.DefaultSocketPath(), os.Stdin); err != nil {
+		log.Printf("run emit: %v", err)
 		os.Exit(0)
+	}
+}
+
+func runEmitWithReader(sockPath string, r io.Reader) error {
+	hookEvent, err := collector.ParseClaudeHook(r)
+	if err != nil {
+		return err
 	}
 
 	// Use ClaudeHookToEvents which produces properly correlated events
 	// using tool_use_id from Claude Code for Pre/Post matching
 	events := collector.ClaudeHookToEvents(hookEvent)
 
-	sockPath := daemon.DefaultSocketPath()
 	for _, ev := range events {
 		if err := collector.EmitEvent(sockPath, ev); err != nil {
 			// Daemon not running, silently fail
-			os.Exit(0)
+			return err
 		}
 	}
+	return nil
 }
 
 // agmon setup hook format:

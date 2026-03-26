@@ -68,6 +68,23 @@ func TestReadUserMessagesCodexExtractsUserInputText(t *testing.T) {
 	}
 }
 
+func TestFindCodexLogPathPrefersIndexedResolver(t *testing.T) {
+	sessionID := "d4430cef-110d-42e0-924a-bfceeba0c4e1"
+	want := "/tmp/codex-indexed.jsonl"
+
+	codexPathResolver = func(id string) string {
+		if id == sessionID {
+			return want
+		}
+		return ""
+	}
+	t.Cleanup(func() { codexPathResolver = nil })
+
+	if got := findCodexLogPath(sessionID); got != want {
+		t.Fatalf("expected indexed path %q, got %q", want, got)
+	}
+}
+
 func writeLines(t *testing.T, path string, lines ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

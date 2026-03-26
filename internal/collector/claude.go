@@ -3,6 +3,7 @@ package collector
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -49,8 +50,13 @@ type ClaudeHookEvent struct {
 
 // ParseClaudeHookStdin reads and parses Claude Code hook input from stdin.
 func ParseClaudeHookStdin() (*ClaudeHookEvent, error) {
+	return ParseClaudeHook(os.Stdin)
+}
+
+// ParseClaudeHook reads and parses Claude Code hook input from the provided reader.
+func ParseClaudeHook(r io.Reader) (*ClaudeHookEvent, error) {
 	var hookEvent ClaudeHookEvent
-	dec := json.NewDecoder(os.Stdin)
+	dec := json.NewDecoder(r)
 	if err := dec.Decode(&hookEvent); err != nil {
 		return nil, fmt.Errorf("decode hook stdin: %w", err)
 	}

@@ -185,6 +185,131 @@ func TestTokenUsage(t *testing.T) {
 	}
 }
 
+func TestInsertTokenUsageUpdatesSessionTotalsIncrementally(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "s1", 1200, 300, 40, 20, "sonnet", 2.5, now, "src-1"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	sessions, err := db.ListSessions()
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].TotalInputTokens != 1200 || sessions[0].TotalOutputTokens != 300 {
+		t.Fatalf("unexpected incremental totals: in=%d out=%d", sessions[0].TotalInputTokens, sessions[0].TotalOutputTokens)
+	}
+	if sessions[0].TotalCacheCreationTokens != 40 || sessions[0].TotalCacheReadTokens != 20 {
+		t.Fatalf("unexpected cache totals: create=%d read=%d", sessions[0].TotalCacheCreationTokens, sessions[0].TotalCacheReadTokens)
+	}
+	if sessions[0].LatestContextTokens != 1200 {
+		t.Fatalf("expected latest context tokens to update incrementally, got %d", sessions[0].LatestContextTokens)
+	}
+	if sessions[0].Model != "sonnet" {
+		t.Fatalf("expected model to update incrementally, got %q", sessions[0].Model)
+	}
+
+	if err := db.InsertTokenUsage("a1", "s1", 999, 999, 0, 0, "sonnet", 99, now, "src-1"); err != nil {
+		t.Fatalf("duplicate insert token usage: %v", err)
+	}
+	sessions, err = db.ListSessions()
+	if err != nil {
+		t.Fatalf("list sessions after dedup: %v", err)
+	}
+	if sessions[0].TotalInputTokens != 1200 || sessions[0].TotalOutputTokens != 300 {
+		t.Fatalf("duplicate insert should not change totals, got in=%d out=%d", sessions[0].TotalInputTokens, sessions[0].TotalOutputTokens)
+	}
+}
+
+func TestUpdateSessionTokensReconcilesSessionTotals(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "s1", 500, 100, 0, 0, "", 0, now, "src-1"); err != nil {
+		t.Fatalf("insert first token usage: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "s1", 900, 250, 0, 0, "sonnet", 1.2, now.Add(time.Minute), "src-2"); err != nil {
+		t.Fatalf("insert second token usage: %v", err)
+	}
+
+	if _, err := db.db.Exec(`
+		UPDATE sessions SET
+			total_input_tokens = 0,
+			total_output_tokens = 0,
+			total_cost_usd = 0,
+			total_cache_read_tokens = 0,
+			total_cache_creation_tokens = 0,
+			latest_context_tokens = 0,
+			latest_token_time = '',
+			model = ''
+		WHERE session_id = 's1'
+	`); err != nil {
+		t.Fatalf("corrupt session totals: %v", err)
+	}
+
+	if err := db.UpdateSessionTokens("s1"); err != nil {
+		t.Fatalf("reconcile session tokens: %v", err)
+	}
+
+	sessions, err := db.ListSessions()
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if sessions[0].TotalInputTokens != 1400 || sessions[0].TotalOutputTokens != 350 {
+		t.Fatalf("unexpected reconciled totals: in=%d out=%d", sessions[0].TotalInputTokens, sessions[0].TotalOutputTokens)
+	}
+	if sessions[0].LatestContextTokens != 900 {
+		t.Fatalf("expected latest context from newest token row, got %d", sessions[0].LatestContextTokens)
+	}
+	if sessions[0].Model != "sonnet" {
+		t.Fatalf("expected latest non-empty model after reconcile, got %q", sessions[0].Model)
+	}
+}
+
+func TestBackfillEmptyTokenModelReconcilesSessionTotals(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "s1", 800, 120, 0, 0, "", 0, now, "src-1"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	updated, err := db.BackfillEmptyTokenModel("s1", "gpt-5", 1.25, 10.0)
+	if err != nil {
+		t.Fatalf("backfill empty model: %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("expected 1 backfilled row, got %d", updated)
+	}
+	if err := db.UpdateSessionTokens("s1"); err != nil {
+		t.Fatalf("reconcile after backfill: %v", err)
+	}
+
+	sessions, err := db.ListSessions()
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if sessions[0].Model != "gpt-5" {
+		t.Fatalf("expected backfilled model to propagate, got %q", sessions[0].Model)
+	}
+	if sessions[0].TotalCostUSD <= 0 {
+		t.Fatalf("expected backfill to recompute cost, got %f", sessions[0].TotalCostUSD)
+	}
+}
+
 func TestAgentHierarchy(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()

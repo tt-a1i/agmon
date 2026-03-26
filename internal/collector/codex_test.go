@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tt-a1i/agmon/internal/event"
 )
@@ -298,6 +299,65 @@ func TestCodexWatcher_TurnContextAnnotatesTokensAndApplyPatchProducesFileChanges
 	}
 	if len(fileChanges) != 3 {
 		t.Fatalf("expected 3 file change events from apply_patch, got %d", len(fileChanges))
+	}
+}
+
+func TestCodexWatcher_ScanLogsReusesKnownPathsAndFindsNewRecentFiles(t *testing.T) {
+	baseDir := filepath.Join(t.TempDir(), "sessions")
+	now := time.Now().UTC()
+	dir := filepath.Join(baseDir, now.Format("2006"), now.Format("01"), now.Format("02"))
+
+	session1 := "11111111-1111-1111-1111-111111111111"
+	path1 := filepath.Join(dir, "rollout-"+now.Format("2006-01-02T15-04-05")+"-"+session1+".jsonl")
+	writeLinesToFile(t, path1, fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/tmp/a"}}`, now.Format(time.RFC3339), session1))
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	w.baseDir = baseDir
+
+	w.scanLogs()
+
+	if !w.initialDiscovery {
+		t.Fatal("expected initial discovery to complete after first scan")
+	}
+	if got := len(w.seen); got != 1 {
+		t.Fatalf("expected 1 indexed file after first scan, got %d", got)
+	}
+	if got := len(emitted); got != 1 {
+		t.Fatalf("expected 1 emitted event after first scan, got %d", got)
+	}
+
+	session2 := "22222222-2222-2222-2222-222222222222"
+	path2 := filepath.Join(dir, "rollout-"+now.Add(time.Second).Format("2006-01-02T15-04-05")+"-"+session2+".jsonl")
+	writeLinesToFile(t, path2, fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/tmp/b"}}`, now.Add(time.Second).Format(time.RFC3339), session2))
+
+	w.scanLogs()
+
+	if got := len(w.seen); got != 2 {
+		t.Fatalf("expected second scan to index new recent file, got %d", got)
+	}
+	if got := len(emitted); got != 2 {
+		t.Fatalf("expected unchanged file to stay deduped and new file to emit once, got %d events", got)
+	}
+
+	w.pathsMu.RLock()
+	defer w.pathsMu.RUnlock()
+	if got := w.sessionPaths[session1]; got != path1 {
+		t.Fatalf("expected session1 path index %q, got %q", path1, got)
+	}
+	if got := w.sessionPaths[session2]; got != path2 {
+		t.Fatalf("expected session2 path index %q, got %q", path2, got)
+	}
+}
+
+func writeLinesToFile(t *testing.T, path string, lines ...string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+	data := joinLines(lines) + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,7 @@ func (w *ClaudeLogWatcher) pollLoop() {
 func (w *ClaudeLogWatcher) scanLogs() {
 	projectDirs, err := os.ReadDir(w.baseDir)
 	if err != nil {
+		log.Printf("claude watcher read base dir %s: %v", w.baseDir, err)
 		return
 	}
 	for _, projectDir := range projectDirs {
@@ -71,6 +73,7 @@ func (w *ClaudeLogWatcher) scanLogs() {
 		projectPath := filepath.Join(w.baseDir, projectDir.Name())
 		files, err := os.ReadDir(projectPath)
 		if err != nil {
+			log.Printf("claude watcher read project dir %s: %v", projectPath, err)
 			continue
 		}
 		for _, f := range files {

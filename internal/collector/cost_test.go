@@ -63,3 +63,25 @@ func TestEstimateClaudeCostCacheTokens(t *testing.T) {
 		t.Errorf("cache read ($%.6f) should cost less than regular input ($%.6f)", costCacheRead, costWithInput)
 	}
 }
+
+func TestCodexPricing(t *testing.T) {
+	tests := []struct {
+		model      string
+		wantInput  float64
+		wantOutput float64
+	}{
+		{model: "gpt-5-mini", wantInput: 0.25, wantOutput: 2.0},
+		{model: "gpt-5-codex", wantInput: 1.25, wantOutput: 10.0},
+		{model: "gpt-4.1", wantInput: 2.0, wantOutput: 8.0},
+		{model: "unknown", wantInput: 2.0, wantOutput: 8.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			in, out := CodexPricing(tt.model)
+			if in != tt.wantInput || out != tt.wantOutput {
+				t.Fatalf("CodexPricing(%q) = (%v, %v), want (%v, %v)", tt.model, in, out, tt.wantInput, tt.wantOutput)
+			}
+		})
+	}
+}
