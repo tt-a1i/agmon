@@ -589,7 +589,7 @@ func (m *Model) refresh() {
 		m.fileChanges, _ = m.db.ListFileChanges(sid)
 		m.toolStats, _ = m.db.ListToolStats(sid)
 		m.agentStats, _ = m.db.ListAgentStats(sid)
-		m.statsLineCount = m.computeStatsLineCount()
+		m.statsLineCount = len(m.buildStatsLines(m.width - 4))
 		// Load user messages. Cache by session ID, but always reload for active sessions.
 		if m.messagesCacheID != sid || s.Status == "active" {
 			m.messages = collector.ReadUserMessages(event.Platform(s.Platform), sid, s.CWD, 200)

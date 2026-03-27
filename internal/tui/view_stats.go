@@ -8,12 +8,13 @@ import (
 	"github.com/tt-a1i/agmon/internal/storage"
 )
 
-func (m Model) viewStats(width int) string {
+// buildStatsLines builds all display lines for the Stats tab.
+// Used by both viewStats (rendering) and refresh (line count for scrolling).
+func (m Model) buildStatsLines(width int) []string {
 	if len(m.sessions) == 0 {
-		return mutedStyle.Render("  No sessions")
+		return []string{mutedStyle.Render("  No sessions")}
 	}
 
-	// Build all lines, then slice for viewport scrolling.
 	var lines []string
 
 	s := m.sessions[m.selectedSession]
@@ -151,10 +152,16 @@ func (m Model) viewStats(width int) string {
 		}
 	}
 
+	return lines
+}
+
+func (m Model) viewStats(width int) string {
+	lines := m.buildStatsLines(width)
+
 	// Apply viewport scrolling
 	visible := m.tabVisibleRows()
 	start := m.viewOffset
-	if start > len(lines) {
+	if start >= len(lines) {
 		start = 0
 	}
 	end := start + visible
@@ -171,44 +178,6 @@ func (m Model) viewStats(width int) string {
 	}
 
 	return b.String()
-}
-
-// statsLineCount estimates the total line count for stats tab scrolling.
-func (m Model) computeStatsLineCount() int {
-	if len(m.sessions) == 0 {
-		return 1
-	}
-	n := 4 // header + blank + overview + blank
-	s := m.sessions[m.selectedSession]
-	if s.TotalCacheCreationTokens > 0 || s.TotalCacheReadTokens > 0 {
-		n++
-	}
-	if len(m.toolStats) > 0 {
-		limit := len(m.toolStats)
-		if limit > 10 {
-			limit = 10
-		}
-		n += 2 + limit // header + column header + rows
-		if len(m.toolStats) > limit {
-			n++
-		}
-		n++ // blank
-	}
-	if len(m.agentStats) > 0 {
-		groups := aggregateAgentsByRole(m.agentStats)
-		n += 2 + len(groups) + 1 // header + column header + rows + blank
-	}
-	if len(m.fileChanges) > 0 {
-		limit := len(m.fileChanges)
-		if limit > 6 {
-			limit = 6
-		}
-		n += 1 + limit // summary + rows
-		if len(m.fileChanges) > limit {
-			n++
-		}
-	}
-	return n
 }
 
 type agentRoleGroup struct {

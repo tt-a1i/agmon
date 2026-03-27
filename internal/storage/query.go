@@ -268,16 +268,25 @@ func (s *DB) ListToolStats(sessionID string) ([]ToolStatRow, error) {
 }
 
 func (s *DB) ListAgentStats(sessionID string) ([]AgentStatRow, error) {
+	// Map empty agent_id tool calls to the main agent (first agent without a parent).
 	rows, err := s.db.Query(`
+		WITH main_agent AS (
+			SELECT agent_id FROM agents
+			WHERE session_id = ? AND (parent_agent_id IS NULL OR parent_agent_id = '')
+			ORDER BY start_time ASC LIMIT 1
+		),
+		tool_counts AS (
+			SELECT CASE WHEN tc.agent_id = '' THEN COALESCE((SELECT agent_id FROM main_agent), '') ELSE tc.agent_id END as agent_id,
+			       COUNT(*) as cnt
+			FROM tool_calls tc WHERE tc.session_id = ?
+			GROUP BY 1
+		)
 		SELECT a.agent_id, COALESCE(a.parent_agent_id, ''), COALESCE(a.role, ''),
 		       a.status,
 		       COALESCE(tc.cnt, 0),
 		       COALESCE(t.in_tok, 0), COALESCE(t.out_tok, 0), COALESCE(t.cost, 0)
 		FROM agents a
-		LEFT JOIN (
-			SELECT agent_id, COUNT(*) as cnt
-			FROM tool_calls WHERE session_id = ? GROUP BY agent_id
-		) tc ON a.agent_id = tc.agent_id
+		LEFT JOIN tool_counts tc ON a.agent_id = tc.agent_id
 		LEFT JOIN (
 			SELECT agent_id,
 			       SUM(input_tokens + cache_creation_tokens + cache_read_tokens) as in_tok,
@@ -287,7 +296,7 @@ func (s *DB) ListAgentStats(sessionID string) ([]AgentStatRow, error) {
 		) t ON a.agent_id = t.agent_id
 		WHERE a.session_id = ?
 		ORDER BY a.start_time ASC
-	`, sessionID, sessionID, sessionID)
+	`, sessionID, sessionID, sessionID, sessionID)
 	if err != nil {
 		return nil, err
 	}
