@@ -447,6 +447,48 @@ func TestUpsertSessionReactivatesStaleSession(t *testing.T) {
 	}
 }
 
+func TestPruneEmptyCodexSessions(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	// Phantom Codex session: zero tokens, no tool calls → should be pruned.
+	db.UpsertSession("phantom", event.PlatformCodex, now)
+
+	// Real Codex session with tokens → should survive.
+	db.UpsertSession("real-tokens", event.PlatformCodex, now)
+	db.InsertTokenUsage("", "real-tokens", 100, 10, 0, 0, "gpt-5", 0.01, now, "tu-1")
+
+	// Real Codex session with tool calls but no tokens → should survive.
+	db.UpsertSession("real-tools", event.PlatformCodex, now)
+	db.InsertToolCallStart("tc-1", "", "real-tools", "shell", "{}", now)
+
+	// Claude session with zero tokens → should NOT be pruned (wrong platform).
+	db.UpsertSession("claude-empty", event.PlatformClaude, now)
+
+	n, err := db.PruneEmptyCodexSessions()
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 pruned session, got %d", n)
+	}
+
+	// Verify phantom is gone.
+	var count int
+	db.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE session_id = 'phantom'`).Scan(&count)
+	if count != 0 {
+		t.Error("phantom session should be deleted")
+	}
+
+	// Verify others survive.
+	for _, sid := range []string{"real-tokens", "real-tools", "claude-empty"} {
+		db.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE session_id = ?`, sid).Scan(&count)
+		if count != 1 {
+			t.Errorf("session %q should survive, got count=%d", sid, count)
+		}
+	}
+}
+
 func TestCleanOldSessions(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()

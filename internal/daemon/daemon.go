@@ -104,6 +104,13 @@ func (d *Daemon) Start() error {
 		log.Printf("stale session cleanup: %v", err)
 	}
 
+	// Remove phantom Codex sessions (zero tokens, zero tool calls).
+	if n, err := d.db.PruneEmptyCodexSessions(); err != nil {
+		log.Printf("prune empty codex sessions: %v", err)
+	} else if n > 0 {
+		log.Printf("pruned %d empty Codex sessions", n)
+	}
+
 	// Repair token_usage rows that have empty model (Codex turn_context ordering issue).
 	d.repairEmptyTokenModels()
 

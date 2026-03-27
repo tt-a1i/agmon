@@ -349,7 +349,10 @@ func TestCodexWatcher_ScanLogsReusesKnownPathsAndFindsNewRecentFiles(t *testing.
 
 	session1 := "11111111-1111-1111-1111-111111111111"
 	path1 := filepath.Join(dir, "rollout-"+now.Format("2006-01-02T15-04-05")+"-"+session1+".jsonl")
-	writeLinesToFile(t, path1, fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/tmp/a"}}`, now.Format(time.RFC3339), session1))
+	writeLinesToFile(t, path1,
+		fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/tmp/a"}}`, now.Format(time.RFC3339), session1),
+		fmt.Sprintf(`{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}`, now.Format(time.RFC3339)),
+	)
 
 	var emitted []event.Event
 	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
@@ -363,20 +366,23 @@ func TestCodexWatcher_ScanLogsReusesKnownPathsAndFindsNewRecentFiles(t *testing.
 	if got := len(w.seen); got != 1 {
 		t.Fatalf("expected 1 indexed file after first scan, got %d", got)
 	}
-	if got := len(emitted); got != 1 {
-		t.Fatalf("expected 1 emitted event after first scan, got %d", got)
+	if got := len(emitted); got != 2 {
+		t.Fatalf("expected 2 emitted events (SessionStart+TokenUsage) after first scan, got %d", got)
 	}
 
 	session2 := "22222222-2222-2222-2222-222222222222"
 	path2 := filepath.Join(dir, "rollout-"+now.Add(time.Second).Format("2006-01-02T15-04-05")+"-"+session2+".jsonl")
-	writeLinesToFile(t, path2, fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/tmp/b"}}`, now.Add(time.Second).Format(time.RFC3339), session2))
+	writeLinesToFile(t, path2,
+		fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/tmp/b"}}`, now.Add(time.Second).Format(time.RFC3339), session2),
+		fmt.Sprintf(`{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"output_tokens":20,"total_tokens":220}}}}`, now.Add(time.Second).Format(time.RFC3339)),
+	)
 
 	w.scanLogs()
 
 	if got := len(w.seen); got != 2 {
 		t.Fatalf("expected second scan to index new recent file, got %d", got)
 	}
-	if got := len(emitted); got != 2 {
+	if got := len(emitted); got != 4 {
 		t.Fatalf("expected unchanged file to stay deduped and new file to emit once, got %d events", got)
 	}
 
@@ -387,6 +393,117 @@ func TestCodexWatcher_ScanLogsReusesKnownPathsAndFindsNewRecentFiles(t *testing.
 	}
 	if got := w.sessionPaths[session2]; got != path2 {
 		t.Fatalf("expected session2 path index %q, got %q", path2, got)
+	}
+}
+
+func TestCodexWatcher_EmptySessionsFiltered(t *testing.T) {
+	// JSONL files containing only session_meta (no tokens, no tool calls) should
+	// not produce emitted events — they create phantom sessions in the dashboard.
+	baseDir := filepath.Join(t.TempDir(), "sessions")
+	now := time.Now().UTC()
+	dir := filepath.Join(baseDir, now.Format("2006"), now.Format("01"), now.Format("02"))
+
+	session1 := "aaaa1111-1111-1111-1111-111111111111"
+	path1 := filepath.Join(dir, "rollout-"+now.Format("2006-01-02T15-04-05")+"-"+session1+".jsonl")
+	writeLinesToFile(t, path1,
+		fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/"}}`, now.Format(time.RFC3339), session1),
+	)
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	w.baseDirs = []string{baseDir}
+
+	// First scan (fullDiscover) — empty session should be filtered.
+	w.scanLogs()
+	if got := len(emitted); got != 0 {
+		t.Fatalf("expected 0 emitted events for session_meta-only file, got %d", got)
+	}
+	// File should still be tracked so we don't re-process it.
+	if _, ok := w.seen[path1]; !ok {
+		t.Fatal("expected file to be tracked in seen map")
+	}
+	// SessionStart should be deferred, not lost.
+	if _, ok := w.pendingStarts[session1]; !ok {
+		t.Fatal("expected deferred SessionStart in pendingStarts")
+	}
+
+	// Second scan (incremental via scanRecentDirs) — add a new empty file.
+	session2 := "bbbb2222-2222-2222-2222-222222222222"
+	path2 := filepath.Join(dir, "rollout-"+now.Add(time.Second).Format("2006-01-02T15-04-05")+"-"+session2+".jsonl")
+	writeLinesToFile(t, path2,
+		fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/"}}`, now.Add(time.Second).Format(time.RFC3339), session2),
+	)
+
+	w.scanLogs()
+	if got := len(emitted); got != 0 {
+		t.Fatalf("expected still 0 emitted events after incremental scan of empty file, got %d", got)
+	}
+}
+
+func TestCodexWatcher_DeferredStartEmittedWhenDataArrives(t *testing.T) {
+	// When a file initially has only session_meta, SessionStart is deferred.
+	// When real data arrives later, the deferred start is emitted first with
+	// the correct original timestamp and CWD.
+	baseDir := filepath.Join(t.TempDir(), "sessions")
+	now := time.Now().UTC()
+	dir := filepath.Join(baseDir, now.Format("2006"), now.Format("01"), now.Format("02"))
+
+	sessionID := "cccc3333-3333-3333-3333-333333333333"
+	path := filepath.Join(dir, "rollout-"+now.Format("2006-01-02T15-04-05")+"-"+sessionID+".jsonl")
+	startTS := now.Add(-10 * time.Minute).Format(time.RFC3339)
+	writeLinesToFile(t, path,
+		fmt.Sprintf(`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","cwd":"/home/user/project"}}`, startTS, sessionID),
+	)
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	w.baseDirs = []string{baseDir}
+
+	// First scan: only session_meta → deferred.
+	w.scanLogs()
+	if len(emitted) != 0 {
+		t.Fatalf("expected 0 events, got %d", len(emitted))
+	}
+
+	// Append token_count data to the file.
+	tokenTS := now.Format(time.RFC3339)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(f, `{"timestamp":"%s","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":500,"output_tokens":50,"total_tokens":550}}}}`+"\n", tokenTS)
+	f.Close()
+
+	// Second scan: file grew → incremental processFile.
+	w.scanLogs()
+
+	if len(emitted) < 2 {
+		t.Fatalf("expected at least 2 events (deferred SessionStart + TokenUsage), got %d", len(emitted))
+	}
+
+	// First event should be the deferred SessionStart with original timestamp.
+	if emitted[0].Type != event.EventSessionStart {
+		t.Errorf("first event should be SessionStart, got %s", emitted[0].Type)
+	}
+	if emitted[0].Data.CWD != "/home/user/project" {
+		t.Errorf("deferred SessionStart should preserve CWD, got %q", emitted[0].Data.CWD)
+	}
+
+	// Second event should be TokenUsage.
+	found := false
+	for _, ev := range emitted[1:] {
+		if ev.Type == event.EventTokenUsage {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected TokenUsage event after deferred SessionStart")
+	}
+
+	// Pending should be cleared.
+	if _, ok := w.pendingStarts[sessionID]; ok {
+		t.Error("pendingStart should be cleared after emission")
 	}
 }
 

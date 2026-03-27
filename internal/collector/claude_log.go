@@ -25,9 +25,12 @@ type ClaudeLogWatcher struct {
 	emitFn           func(event.Event)
 	done             chan struct{}
 	stopOnce         sync.Once
+	loopWG           sync.WaitGroup
 	seen             map[string]int64  // file path -> last committed byte offset
 	sessionGitBranch map[string]string // session_id -> git_branch
 	initialScanDone  bool
+	tickInterval     time.Duration
+	scanFn           func()
 }
 
 func NewClaudeLogWatcher(emitFn func(event.Event)) *ClaudeLogWatcher {
@@ -38,25 +41,39 @@ func NewClaudeLogWatcher(emitFn func(event.Event)) *ClaudeLogWatcher {
 		done:             make(chan struct{}),
 		seen:             make(map[string]int64),
 		sessionGitBranch: make(map[string]string),
+		tickInterval:     3 * time.Second,
 	}
 }
 
 func (w *ClaudeLogWatcher) Start() {
-	go w.pollLoop()
+	w.loopWG.Add(1)
+	go func() {
+		defer w.loopWG.Done()
+		w.pollLoop()
+	}()
 }
 
 func (w *ClaudeLogWatcher) Stop() {
 	w.stopOnce.Do(func() { close(w.done) })
+	w.loopWG.Wait()
 }
 
 func (w *ClaudeLogWatcher) pollLoop() {
-	ticker := time.NewTicker(3 * time.Second)
+	interval := w.tickInterval
+	if interval <= 0 {
+		interval = 3 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-w.done:
 			return
 		case <-ticker.C:
+			if w.scanFn != nil {
+				w.scanFn()
+				continue
+			}
 			w.scanLogs()
 		}
 	}

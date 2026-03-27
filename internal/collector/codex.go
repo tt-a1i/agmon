@@ -23,6 +23,7 @@ type CodexWatcher struct {
 	emitFn             func(event.Event)
 	done               chan struct{}
 	stopOnce           sync.Once
+	loopWG             sync.WaitGroup
 	seen               map[string]int64 // file path -> last read byte offset
 	pathsMu            sync.RWMutex
 	sessionPaths       map[string]string // sessionID -> file path; protected by pathsMu
@@ -30,7 +31,10 @@ type CodexWatcher struct {
 	sessionModels      map[string]string
 	sessionCWDs        map[string]string
 	pendingFileChanges map[string][]codexFileChange
+	pendingStarts      map[string]event.Event // deferred SessionStart events for empty sessions
 	initialDiscovery   bool
+	tickInterval       time.Duration
+	scanFn             func()
 }
 
 func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
@@ -48,6 +52,7 @@ func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
 		sessionModels:      make(map[string]string),
 		sessionCWDs:        make(map[string]string),
 		pendingFileChanges: make(map[string][]codexFileChange),
+		tickInterval:       3 * time.Second,
 	}
 }
 
@@ -67,15 +72,24 @@ func RegisterCodexWatcher(w *CodexWatcher) {
 }
 
 func (w *CodexWatcher) Start() {
-	go w.pollLoop()
+	w.loopWG.Add(1)
+	go func() {
+		defer w.loopWG.Done()
+		w.pollLoop()
+	}()
 }
 
 func (w *CodexWatcher) Stop() {
 	w.stopOnce.Do(func() { close(w.done) })
+	w.loopWG.Wait()
 }
 
 func (w *CodexWatcher) pollLoop() {
-	ticker := time.NewTicker(3 * time.Second)
+	interval := w.tickInterval
+	if interval <= 0 {
+		interval = 3 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -83,6 +97,10 @@ func (w *CodexWatcher) pollLoop() {
 		case <-w.done:
 			return
 		case <-ticker.C:
+			if w.scanFn != nil {
+				w.scanFn()
+				continue
+			}
 			w.scanLogs()
 		}
 	}
@@ -109,13 +127,14 @@ type codexFileJob struct {
 }
 
 type codexFileResult struct {
-	path      string
-	offset    int64
-	sessionID string
-	model     string
-	cwd       string
-	tokenKey  string
-	events    []event.Event
+	path         string
+	offset       int64
+	sessionID    string
+	model        string
+	cwd          string
+	tokenKey     string
+	events       []event.Event
+	pendingStart *event.Event // deferred SessionStart when file has no substantive data
 }
 
 func (w *CodexWatcher) fullDiscover() bool {
@@ -199,8 +218,18 @@ func (w *CodexWatcher) fullDiscover() bool {
 				w.lastTokenUsage[r.sessionID] = r.tokenKey
 			}
 		}
-		for _, ev := range r.events {
-			w.emitFn(ev)
+		if r.pendingStart != nil && len(r.events) == 0 {
+			w.pendingStarts[r.sessionID] = *r.pendingStart
+		}
+		if len(r.events) > 0 {
+			// Prepend deferred SessionStart if one was saved for this session.
+			if pending, ok := w.pendingStarts[r.sessionID]; ok {
+				w.emitFn(pending)
+				delete(w.pendingStarts, r.sessionID)
+			}
+			for _, ev := range r.events {
+				w.emitFn(ev)
+			}
 		}
 	}
 	return true
@@ -300,6 +329,18 @@ func processCodexFileCollect(path string, size, startOffset int64, prevModel, pr
 	}
 
 	result.offset = committedOffset
+	// Defer SessionStart for files with no substantive data (empty/idle sessions).
+	// The deferred start will be emitted later if real data arrives.
+	if !hasSubstantiveEvents(result.events) {
+		for _, ev := range result.events {
+			if ev.Type == event.EventSessionStart {
+				evCopy := ev
+				result.pendingStart = &evCopy
+				break
+			}
+		}
+		result.events = nil
+	}
 	return result
 }
 
@@ -418,6 +459,7 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := offset
+	var bufferedEvents []event.Event
 
 	for {
 		lineBytes, err := reader.ReadBytes('\n')
@@ -446,13 +488,13 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 							}
 							w.lastTokenUsage[sessionID] = key
 						}
-						w.emitFn(ev)
+						bufferedEvents = append(bufferedEvents, ev)
 					}
 
 					if ok && payload.Type == "function_call_output" {
 						if payload.Status != "error" && payload.Status != "failed" {
 							for _, change := range w.pendingFileChanges[payload.CallID] {
-								w.emitFn(event.Event{
+								bufferedEvents = append(bufferedEvents, event.Event{
 									ID:        fmt.Sprintf("%s:%s", payload.CallID, change.Path),
 									Type:      event.EventFileChange,
 									SessionID: sessionID,
@@ -482,6 +524,35 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 	}
 
 	w.seen[path] = committedOffset
+
+	// Emit events only if the session has substantive data.
+	// Defer SessionStart for empty files; prepend deferred start when data arrives.
+	if hasSubstantiveEvents(bufferedEvents) {
+		if pending, ok := w.pendingStarts[sessionID]; ok {
+			w.emitFn(pending)
+			delete(w.pendingStarts, sessionID)
+		}
+		for _, ev := range bufferedEvents {
+			w.emitFn(ev)
+		}
+	} else {
+		for _, ev := range bufferedEvents {
+			if ev.Type == event.EventSessionStart {
+				w.pendingStarts[sessionID] = ev
+				break
+			}
+		}
+	}
+}
+
+// hasSubstantiveEvents returns true if events contain anything beyond SessionStart.
+func hasSubstantiveEvents(events []event.Event) bool {
+	for _, ev := range events {
+		if ev.Type != event.EventSessionStart {
+			return true
+		}
+	}
+	return false
 }
 
 // extractSessionID pulls the UUID from a filename like:
@@ -704,6 +775,9 @@ func (w *CodexWatcher) ensureState() {
 	}
 	if w.pendingFileChanges == nil {
 		w.pendingFileChanges = make(map[string][]codexFileChange)
+	}
+	if w.pendingStarts == nil {
+		w.pendingStarts = make(map[string]event.Event)
 	}
 }
 

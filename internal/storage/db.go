@@ -361,6 +361,20 @@ func (s *DB) MarkStaleSessionsEnded(maxAge time.Duration) error {
 	return err
 }
 
+// PruneEmptyCodexSessions deletes Codex sessions that have zero tokens and zero
+// tool calls. These are phantom sessions created by idle Codex background processes.
+func (s *DB) PruneEmptyCodexSessions() (int64, error) {
+	result, err := s.db.Exec(`
+		DELETE FROM sessions WHERE platform = 'codex'
+		AND total_input_tokens = 0 AND total_output_tokens = 0
+		AND session_id NOT IN (SELECT DISTINCT session_id FROM tool_calls)
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // BackfillEmptyTokenModel updates token_usage rows with empty model for a session,
 // setting the model and recalculating cost using the given per-million-token prices.
 // Returns the number of rows affected.
