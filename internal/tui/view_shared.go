@@ -21,7 +21,7 @@ const splashLogo = `
     ██║  ██║╚██████╔╝██║ ╚═╝ ██║╚██████╔╝██║ ╚████║
     ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝`
 
-const dashboardBadgeWidth = 5
+const dashboardBadgeWidth = 6
 
 func (m Model) viewSplash() string {
 	var b strings.Builder
@@ -61,7 +61,7 @@ func platformBadge(platform string) string {
 	case "codex":
 		return codexBadgeStyle.Render("Codex")
 	default:
-		return claudeBadgeStyle.Render("CC")
+		return claudeBadgeStyle.Render("Claude")
 	}
 }
 

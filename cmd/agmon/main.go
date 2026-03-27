@@ -127,6 +127,7 @@ func runTUI() {
 
 		m := tui.NewModel(db, tuiCh)
 		p := tea.NewProgram(m, tea.WithAltScreen())
+		go checkAndNotifyUpdate(p)
 		if _, err := p.Run(); err != nil {
 			log.Fatalf("tui error: %v", err)
 		}
@@ -195,6 +196,7 @@ func runTUI() {
 
 	m := tui.NewModel(db, tuiCh)
 	p := tea.NewProgram(m, tea.WithAltScreen())
+	go checkAndNotifyUpdate(p)
 	if _, err := p.Run(); err != nil {
 		_ = restoreLogs()
 		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
@@ -690,6 +692,17 @@ func fmtTokens(n int) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1_000)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+func checkAndNotifyUpdate(p *tea.Program) {
+	rel, err := fetchLatestRelease()
+	if err != nil {
+		return
+	}
+	latest := strings.TrimPrefix(rel.TagName, "v")
+	if latest != version && version != "dev" {
+		p.Send(tui.UpdateAvailableMsg(latest))
+	}
 }
 
 func printHelp() {

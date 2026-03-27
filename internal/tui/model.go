@@ -52,7 +52,7 @@ const (
 	platformFilterCount
 )
 
-var platformFilterNames = []string{"All", "CC", "Codex"}
+var platformFilterNames = []string{"All", "Claude", "Codex"}
 
 type dashboardSort int
 
@@ -137,11 +137,15 @@ type Model struct {
 	activeCount            int
 	flashMsg               string
 	flashExpire            time.Time
+	updateAvailable        string // latest version if update available
 	err                    error
 }
 
 type tickMsg time.Time
 type refreshMsg struct{}
+
+// UpdateAvailableMsg is sent when a newer version is found.
+type UpdateAvailableMsg string
 
 func NewModel(db *storage.DB, eventCh chan EventMsg) Model {
 	return Model{
@@ -567,6 +571,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshMsg:
 		m.refresh()
+		return m, nil
+
+	case UpdateAvailableMsg:
+		m.updateAvailable = string(msg)
 		return m, nil
 	}
 

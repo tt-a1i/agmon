@@ -111,5 +111,8 @@ func (m Model) footer() string {
 	if m.err != nil {
 		footer += "  " + errorStyle.Render("err: "+m.err.Error())
 	}
+	if m.updateAvailable != "" {
+		footer += "  " + mutedStyle.Render("v"+m.updateAvailable+" available — ") + keyStyle.Render("agmon update")
+	}
 	return footer
 }

@@ -370,8 +370,8 @@ func TestModelUpdateDashboardCyclesPlatformFilterAndCostSort(t *testing.T) {
 }
 
 func TestPlatformBadgeUsesRequestedLabels(t *testing.T) {
-	if got := platformBadge("claude"); !strings.Contains(got, "CC") {
-		t.Fatalf("expected claude badge to contain CC, got %q", got)
+	if got := platformBadge("claude"); !strings.Contains(got, "Claude") {
+		t.Fatalf("expected claude badge to contain Claude, got %q", got)
 	}
 	if got := platformBadge("codex"); !strings.Contains(got, "Codex") {
 		t.Fatalf("expected codex badge to contain Codex, got %q", got)
@@ -419,7 +419,7 @@ func TestViewDashboardLeftAlignsColumnsAfterBadge(t *testing.T) {
 
 	sessionHeader := strings.Index(headerLine, "SESSION")
 	sessionValue := strings.Index(rowLine, "main")
-	badgeValue := strings.Index(rowLine, "CC")
+	badgeValue := strings.Index(rowLine, "Claude")
 	costHeader := strings.Index(headerLine, "COST")
 	costValue := strings.Index(rowLine, "$2.86")
 	inHeader := strings.Index(headerLine, "IN")
@@ -487,7 +487,7 @@ func TestDashboardUsesDistinctStylesForValuesAndClaudeBadge(t *testing.T) {
 	headerColoredClaudeBadge := lipgloss.NewStyle().
 		Width(dashboardBadgeWidth).
 		Foreground(headerStyle.GetForeground()).
-		Render("CC")
+		Render("Claude")
 
 	if strings.Contains(view, headerColoredIn) {
 		t.Fatalf("expected IN values to stop using header style, got %q", view)
@@ -496,7 +496,7 @@ func TestDashboardUsesDistinctStylesForValuesAndClaudeBadge(t *testing.T) {
 		t.Fatalf("expected OUT values to stop using header style, got %q", view)
 	}
 	if platformBadge("claude") == headerColoredClaudeBadge {
-		t.Fatalf("expected CC badge to stop using header color, got %q", platformBadge("claude"))
+		t.Fatalf("expected Claude badge to stop using header color, got %q", platformBadge("claude"))
 	}
 	if !sameTerminalColor(dashboardMetricStyle.GetForeground(), colorInfo) {
 		t.Fatalf("expected dashboard metric style to use colorInfo, got %#v", dashboardMetricStyle.GetForeground())
