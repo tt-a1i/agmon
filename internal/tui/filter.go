@@ -108,4 +108,3 @@ func filterToolCalls(toolCalls []storage.ToolCallRow, filter string) []storage.T
 	}
 	return out
 }
-

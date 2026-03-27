@@ -630,7 +630,6 @@ func (m *Model) refresh() {
 	m.adjustScroll()
 }
 
-
 func sessionDisplayName(s storage.SessionRow) string {
 	project := ""
 	if s.CWD != "" {

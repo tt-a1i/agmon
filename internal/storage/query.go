@@ -55,9 +55,9 @@ type FileChangeRow struct {
 }
 
 type ToolStatRow struct {
-	ToolName string
-	Count    int
-	AvgMs    int64
+	ToolName  string
+	Count     int
+	AvgMs     int64
 	FailCount int
 }
 
