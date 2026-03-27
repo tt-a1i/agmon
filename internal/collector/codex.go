@@ -84,6 +84,15 @@ func (w *CodexWatcher) Stop() {
 	w.loopWG.Wait()
 }
 
+func (w *CodexWatcher) stopped() bool {
+	select {
+	case <-w.done:
+		return true
+	default:
+		return false
+	}
+}
+
 func (w *CodexWatcher) pollLoop() {
 	interval := w.tickInterval
 	if interval <= 0 {
@@ -141,10 +150,16 @@ func (w *CodexWatcher) fullDiscover() bool {
 	// Collect file jobs from all base directories.
 	var jobs []codexFileJob
 	for _, baseDir := range w.baseDirs {
+		if w.stopped() {
+			return true
+		}
 		if _, err := os.Stat(baseDir); err != nil {
 			continue // directory may not exist (e.g. no archived sessions)
 		}
 		if err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+			if w.stopped() {
+				return filepath.SkipAll
+			}
 			if err != nil {
 				log.Printf("codex watcher walk %s: %v", path, err)
 				return nil
@@ -188,11 +203,14 @@ func (w *CodexWatcher) fullDiscover() bool {
 		go func() {
 			defer wg.Done()
 			for job := range jobCh {
+				if w.stopped() {
+					return
+				}
 				sessionID := extractSessionID(filepath.Base(job.path))
 				r := processCodexFileCollect(
 					job.path, job.size, w.seen[job.path],
 					w.sessionModels[sessionID], w.sessionCWDs[sessionID],
-					w.lastTokenUsage[sessionID],
+					w.lastTokenUsage[sessionID], w.stopped,
 				)
 				resultCh <- r
 			}
@@ -221,7 +239,7 @@ func (w *CodexWatcher) fullDiscover() bool {
 		if r.pendingStart != nil && len(r.events) == 0 {
 			w.pendingStarts[r.sessionID] = *r.pendingStart
 		}
-		if len(r.events) > 0 {
+		if len(r.events) > 0 && !w.stopped() {
 			// Prepend deferred SessionStart if one was saved for this session.
 			if pending, ok := w.pendingStarts[r.sessionID]; ok {
 				w.emitFn(pending)
@@ -237,7 +255,7 @@ func (w *CodexWatcher) fullDiscover() bool {
 
 // processCodexFileCollect parses a Codex JSONL file without touching watcher state.
 // Returns collected events and updated per-session metadata.
-func processCodexFileCollect(path string, size, startOffset int64, prevModel, prevCWD, prevTokenKey string) codexFileResult {
+func processCodexFileCollect(path string, size, startOffset int64, prevModel, prevCWD, prevTokenKey string, cancelled func() bool) codexFileResult {
 	result := codexFileResult{path: path, offset: startOffset}
 
 	f, err := os.Open(path)
@@ -259,8 +277,14 @@ func processCodexFileCollect(path string, size, startOffset int64, prevModel, pr
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := startOffset
 	pendingFileChanges := make(map[string][]codexFileChange)
+	linesRead := 0
 
 	for {
+		if linesRead%100 == 0 && cancelled != nil && cancelled() {
+			break
+		}
+		linesRead++
+
 		lineBytes, err := reader.ReadBytes('\n')
 
 		if len(lineBytes) > 0 {
@@ -355,6 +379,9 @@ func (w *CodexWatcher) scanKnownFiles() {
 	}
 
 	for _, path := range paths {
+		if w.stopped() {
+			return
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -382,6 +409,9 @@ func (w *CodexWatcher) scanRecentDirs() {
 		recentDirs = append(recentDirs, recentCodexSessionDirs(baseDir, time.Now())...)
 	}
 	for _, dir := range recentDirs {
+		if w.stopped() {
+			return
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -460,8 +490,14 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := offset
 	var bufferedEvents []event.Event
+	linesRead := 0
 
 	for {
+		if linesRead%100 == 0 && w.stopped() {
+			break
+		}
+		linesRead++
+
 		lineBytes, err := reader.ReadBytes('\n')
 
 		if len(lineBytes) > 0 {

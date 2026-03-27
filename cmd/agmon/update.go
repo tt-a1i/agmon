@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const releaseAPI = "https://api.github.com/repos/tt-a1i/agmon/releases/latest"
@@ -110,8 +111,10 @@ func runUpdate() {
 	fmt.Printf("Updated to v%s\n", latest)
 }
 
+var updateClient = &http.Client{Timeout: 5 * time.Second}
+
 func fetchLatestRelease() (*ghRelease, error) {
-	resp, err := http.Get(releaseAPI)
+	resp, err := updateClient.Get(releaseAPI)
 	if err != nil {
 		return nil, err
 	}

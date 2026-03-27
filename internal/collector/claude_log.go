@@ -58,6 +58,15 @@ func (w *ClaudeLogWatcher) Stop() {
 	w.loopWG.Wait()
 }
 
+func (w *ClaudeLogWatcher) stopped() bool {
+	select {
+	case <-w.done:
+		return true
+	default:
+		return false
+	}
+}
+
 func (w *ClaudeLogWatcher) pollLoop() {
 	interval := w.tickInterval
 	if interval <= 0 {
@@ -102,6 +111,9 @@ func (w *ClaudeLogWatcher) scanLogs() {
 
 	var jobs []claudeFileJob
 	for _, projectDir := range projectDirs {
+		if w.stopped() {
+			return
+		}
 		if !projectDir.IsDir() {
 			continue
 		}
@@ -145,6 +157,9 @@ func (w *ClaudeLogWatcher) scanLogs() {
 
 	// Incremental: process serially (few files, low overhead).
 	for _, j := range jobs {
+		if w.stopped() {
+			return
+		}
 		w.processFile(j.path, j.sessionID)
 	}
 }
@@ -171,9 +186,12 @@ func (w *ClaudeLogWatcher) scanParallel(jobs []claudeFileJob) {
 		go func() {
 			defer wg.Done()
 			for job := range jobCh {
+				if w.stopped() {
+					return
+				}
 				r := processClaudeFileCollect(
 					job.path, job.sessionID, w.seen[job.path],
-					w.sessionGitBranch[job.sessionID],
+					w.sessionGitBranch[job.sessionID], w.stopped,
 				)
 				resultCh <- r
 			}
@@ -187,6 +205,9 @@ func (w *ClaudeLogWatcher) scanParallel(jobs []claudeFileJob) {
 		if r.gitBranch != "" {
 			w.sessionGitBranch[r.sessionID] = r.gitBranch
 		}
+		if w.stopped() {
+			continue // drain resultCh but skip emitting
+		}
 		for _, ev := range r.events {
 			w.emitFn(ev)
 		}
@@ -194,7 +215,7 @@ func (w *ClaudeLogWatcher) scanParallel(jobs []claudeFileJob) {
 }
 
 // processClaudeFileCollect parses a Claude JSONL file without touching watcher state.
-func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGitBranch string) claudeFileResult {
+func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGitBranch string, cancelled func() bool) claudeFileResult {
 	result := claudeFileResult{path: path, offset: startOffset, sessionID: sessionID, gitBranch: prevGitBranch}
 
 	info, err := os.Stat(path)
@@ -219,8 +240,14 @@ func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGit
 
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := startOffset
+	linesRead := 0
 
 	for {
+		if linesRead%100 == 0 && cancelled != nil && cancelled() {
+			break
+		}
+		linesRead++
+
 		lineBytes, err := reader.ReadBytes('\n')
 
 		if len(lineBytes) > 0 {
@@ -328,8 +355,15 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := offset
+	linesRead := 0
 
 	for {
+		// Check for cancellation every 100 lines to avoid overhead on every line.
+		if linesRead%100 == 0 && w.stopped() {
+			break
+		}
+		linesRead++
+
 		lineBytes, err := reader.ReadBytes('\n')
 
 		if len(lineBytes) > 0 {
