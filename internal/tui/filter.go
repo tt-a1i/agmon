@@ -12,7 +12,6 @@ func (m *Model) refreshFilteredViews() {
 	filter := strings.ToLower(m.filterText)
 	m.filteredSessionsCache = filterSessions(m.sessions, filter, m.platformFilter, m.dashboardSort)
 	m.filteredToolCallsCache = filterToolCalls(m.toolCalls, filter)
-	m.filteredTimelineCache = filterTimeline(m.timelineEntries, filter)
 }
 
 func (m *Model) setFilterText(text string) {
@@ -110,16 +109,3 @@ func filterToolCalls(toolCalls []storage.ToolCallRow, filter string) []storage.T
 	return out
 }
 
-func filterTimeline(entries []timelineEntry, filter string) []timelineEntry {
-	if filter == "" {
-		return entries
-	}
-	out := make([]timelineEntry, 0, len(entries))
-	for _, e := range entries {
-		if strings.Contains(strings.ToLower(e.detail), filter) ||
-			strings.Contains(strings.ToLower(e.kind), filter) {
-			out = append(out, e)
-		}
-	}
-	return out
-}

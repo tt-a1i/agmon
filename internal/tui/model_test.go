@@ -74,8 +74,8 @@ func TestModelRefreshLoadsSelectedSessionData(t *testing.T) {
 	if len(m.fileChanges) != 1 {
 		t.Fatalf("expected 1 file change, got %d", len(m.fileChanges))
 	}
-	if len(m.timelineEntries) != 3 {
-		t.Fatalf("expected 3 timeline entries, got %d", len(m.timelineEntries))
+	if len(m.toolStats) < 1 {
+		t.Fatalf("expected tool stats, got %d", len(m.toolStats))
 	}
 	if m.todayInput != 500 || m.todayOutput != 120 {
 		t.Fatalf("unexpected today totals: in=%d out=%d", m.todayInput, m.todayOutput)
@@ -132,43 +132,6 @@ func TestModelUpdateFilterModeCapturesRunesAndEscClears(t *testing.T) {
 	}
 }
 
-func TestBuildTimelineOrdersEntriesChronologically(t *testing.T) {
-	start := time.Now()
-	end := start.Add(2 * time.Second)
-	toolStart := start.Add(time.Second)
-	fileTime := end.Add(time.Second)
-
-	entries := buildTimeline(
-		[]storage.AgentRow{{
-			AgentID:   "agent-1",
-			Role:      "main",
-			StartTime: start,
-			EndTime:   &end,
-		}},
-		[]storage.ToolCallRow{{
-			CallID:     "call-1",
-			ToolName:   "Edit",
-			StartTime:  toolStart,
-			Status:     "success",
-			DurationMs: 250,
-		}},
-		[]storage.FileChangeRow{{
-			FilePath:   "foo.go",
-			ChangeType: "edit",
-			Timestamp:  fileTime,
-		}},
-	)
-
-	if len(entries) != 4 {
-		t.Fatalf("expected 4 timeline entries, got %d", len(entries))
-	}
-	for i := 1; i < len(entries); i++ {
-		if entries[i].time.Before(entries[i-1].time) {
-			t.Fatalf("entries not ordered: %+v", entries)
-		}
-	}
-}
-
 func TestClearMsgExpandedOnlyRemovesMessageKeys(t *testing.T) {
 	m := Model{
 		expandedCalls: map[string]bool{
@@ -198,10 +161,6 @@ func TestRefreshFilteredViewsCachesCurrentFilterResults(t *testing.T) {
 			{CallID: "call-1", ToolName: "Edit", ParamsSummary: "alpha.txt"},
 			{CallID: "call-2", ToolName: "Bash", ParamsSummary: "ls beta"},
 		},
-		timelineEntries: []timelineEntry{
-			{kind: "tool", detail: "Edit alpha.txt"},
-			{kind: "file", detail: "edit beta.txt"},
-		},
 	}
 
 	m.setFilterText("beta")
@@ -212,9 +171,6 @@ func TestRefreshFilteredViewsCachesCurrentFilterResults(t *testing.T) {
 	if got := len(m.filteredToolCalls()); got != 1 || m.filteredToolCalls()[0].CallID != "call-2" {
 		t.Fatalf("unexpected filtered tool calls: %#v", m.filteredToolCalls())
 	}
-	if got := len(m.filteredTimeline()); got != 1 || m.filteredTimeline()[0].detail != "edit beta.txt" {
-		t.Fatalf("unexpected filtered timeline: %#v", m.filteredTimeline())
-	}
 
 	m.setFilterText("")
 	if got := len(m.filteredSessions()); got != 2 {
@@ -222,9 +178,6 @@ func TestRefreshFilteredViewsCachesCurrentFilterResults(t *testing.T) {
 	}
 	if got := len(m.filteredToolCalls()); got != 2 {
 		t.Fatalf("expected all tool calls after clearing filter, got %d", got)
-	}
-	if got := len(m.filteredTimeline()); got != 2 {
-		t.Fatalf("expected all timeline entries after clearing filter, got %d", got)
 	}
 }
 

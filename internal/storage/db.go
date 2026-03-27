@@ -298,11 +298,11 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 				ELSE latest_token_time
 			END,
 			model = CASE
-				WHEN ? != '' AND (latest_token_time = '' OR latest_token_time <= ?) THEN ?
+				WHEN ? != '' AND ? NOT LIKE '<%' AND (latest_token_time = '' OR latest_token_time <= ?) THEN ?
 				ELSE model
 			END
 		WHERE session_id = ?
-	`, inputTokens, outputTokens, costUSD, cacheReadTokens, cacheCreationTokens, tsStr, inputTokens, tsStr, tsStr, model, tsStr, model, sessionID)
+	`, inputTokens, outputTokens, costUSD, cacheReadTokens, cacheCreationTokens, tsStr, inputTokens, tsStr, tsStr, model, model, tsStr, model, sessionID)
 	if err != nil {
 		return err
 	}
@@ -375,6 +375,23 @@ func (s *DB) PruneEmptyCodexSessions() (int64, error) {
 	return result.RowsAffected()
 }
 
+// RepairSyntheticModels fixes sessions whose model field is set to "<synthetic>"
+// by looking up the most recent real model from their token_usage rows.
+func (s *DB) RepairSyntheticModels() (int64, error) {
+	result, err := s.db.Exec(`
+		UPDATE sessions SET model = COALESCE((
+			SELECT model FROM token_usage
+			WHERE session_id = sessions.session_id
+			  AND model != '' AND model NOT LIKE '<%'
+			ORDER BY timestamp DESC LIMIT 1
+		), model) WHERE model LIKE '<%'
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // BackfillEmptyTokenModel updates token_usage rows with empty model for a session,
 // setting the model and recalculating cost using the given per-million-token prices.
 // Returns the number of rows affected.
@@ -400,7 +417,7 @@ func (s *DB) BackfillEmptyTokenModel(sessionID, model string, inputPricePerM, ou
 func (s *DB) ListEmptyModelSessions() ([]struct{ SessionID, Model, Platform string }, error) {
 	rows, err := s.db.Query(`
 		SELECT sub.session_id,
-		       COALESCE((SELECT t2.model FROM token_usage t2 WHERE t2.session_id = sub.session_id AND t2.model != '' LIMIT 1), ''),
+		       COALESCE((SELECT t2.model FROM token_usage t2 WHERE t2.session_id = sub.session_id AND t2.model != '' AND t2.model NOT LIKE '<%' LIMIT 1), ''),
 		       s.platform
 		FROM (SELECT DISTINCT session_id FROM token_usage WHERE model = '') sub
 		JOIN sessions s ON sub.session_id = s.session_id
@@ -431,7 +448,7 @@ func (s *DB) UpdateSessionTokens(sessionID string) error {
 			total_cache_creation_tokens = COALESCE((SELECT SUM(cache_creation_tokens) FROM token_usage WHERE session_id = ?), 0),
 			latest_token_time = COALESCE((SELECT timestamp FROM token_usage WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1), ''),
 			latest_context_tokens = COALESCE((SELECT input_tokens FROM token_usage WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1), 0),
-			model = COALESCE(NULLIF((SELECT model FROM token_usage WHERE session_id = ? AND model != '' ORDER BY timestamp DESC LIMIT 1), ''), model)
+			model = COALESCE(NULLIF((SELECT model FROM token_usage WHERE session_id = ? AND model != '' AND model NOT LIKE '<%' ORDER BY timestamp DESC LIMIT 1), ''), model)
 		WHERE session_id = ?
 	`, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID, sessionID)
 	return err

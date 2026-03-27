@@ -42,8 +42,8 @@ func (m Model) View() string {
 		content = m.viewMessages(contentWidth)
 	case tabToolCalls:
 		content = m.viewToolCalls(contentWidth)
-	case tabTimeline:
-		content = m.viewTimeline(contentWidth)
+	case tabStats:
+		content = m.viewStats(contentWidth)
 	}
 
 	b.WriteString(boxStyle.Width(contentWidth).Render(content))
@@ -94,7 +94,7 @@ func (m Model) footer() string {
 			enterHint = fmt.Sprintf("  %s", fmtKey("Enter", "expand"))
 		}
 		filterHint := ""
-		if m.activeTab != tabMessages {
+		if m.activeTab != tabMessages && m.activeTab != tabStats {
 			filterHint = fmt.Sprintf("  %s", fmtKey("/", "filter"))
 		}
 		footer = fmt.Sprintf(" %s  %s  %s  %s%s%s  %s%s",

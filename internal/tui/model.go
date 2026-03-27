@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -23,7 +22,7 @@ const (
 	tabDashboard tab = iota
 	tabMessages
 	tabToolCalls
-	tabTimeline
+	tabStats
 	tabCount // sentinel for modulo
 )
 
@@ -41,7 +40,7 @@ const (
 
 var rangeNames = []string{"Today", "Week", "Month", "3 Mon", "Year", "All"}
 
-var tabNames = []string{"Dashboard", "Messages", "Tool Calls", "Timeline"}
+var tabNames = []string{"Dashboard", "Messages", "Tool Calls", "Stats"}
 
 type sessionPlatformFilter int
 
@@ -97,13 +96,6 @@ func contextWindowForModel(model string) int {
 	}
 }
 
-type timelineEntry struct {
-	time   time.Time
-	kind   string
-	detail string
-	status string
-}
-
 type Model struct {
 	db                     *storage.DB
 	eventCh                chan EventMsg
@@ -114,12 +106,12 @@ type Model struct {
 	agents                 []storage.AgentRow
 	toolCalls              []storage.ToolCallRow
 	fileChanges            []storage.FileChangeRow
-	timelineEntries        []timelineEntry
+	toolStats              []storage.ToolStatRow
+	agentStats             []storage.AgentStatRow
 	messages               []collector.UserMessage
 	messagesCacheID        string // session ID for which messages were loaded
 	filteredSessionsCache  []storage.SessionRow
 	filteredToolCallsCache []storage.ToolCallRow
-	filteredTimelineCache  []timelineEntry
 	selectedSession        int
 	selectedRow            int
 	viewOffset             int
@@ -137,6 +129,7 @@ type Model struct {
 	activeCount            int
 	flashMsg               string
 	flashExpire            time.Time
+	statsLineCount         int    // total lines in stats view (for scrolling)
 	updateAvailable        string // latest version if update available
 	err                    error
 }
@@ -201,10 +194,6 @@ func (m Model) filteredToolCalls() []storage.ToolCallRow {
 	return m.filteredToolCallsCache
 }
 
-func (m Model) filteredTimeline() []timelineEntry {
-	return m.filteredTimelineCache
-}
-
 func (m Model) currentTabRowCount() int {
 	switch m.activeTab {
 	case tabDashboard:
@@ -213,8 +202,8 @@ func (m Model) currentTabRowCount() int {
 		return len(m.messages)
 	case tabToolCalls:
 		return len(m.filteredToolCalls())
-	case tabTimeline:
-		return len(m.filteredTimeline())
+	case tabStats:
+		return m.statsLineCount
 	}
 	return 0
 }
@@ -230,7 +219,7 @@ func (m Model) tabVisibleRows() int {
 		return base - 3
 	case tabToolCalls:
 		return base - 2
-	default: // tabTimeline
+	default: // tabStats
 		return base
 	}
 }
@@ -379,8 +368,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
-			if m.activeTab == tabMessages {
-				return m, nil // Messages tab does not support filtering
+			if m.activeTab == tabMessages || m.activeTab == tabStats {
+				return m, nil // Messages and Stats tabs do not support filtering
 			}
 			// Enter filter mode; pressing / again clears the existing filter.
 			m.filterMode = true
@@ -598,7 +587,9 @@ func (m *Model) refresh() {
 		m.agents, _ = m.db.ListAgents(sid)
 		m.toolCalls, _ = m.db.ListToolCalls(sid, 500)
 		m.fileChanges, _ = m.db.ListFileChanges(sid)
-		m.timelineEntries = buildTimeline(m.agents, m.toolCalls, m.fileChanges)
+		m.toolStats, _ = m.db.ListToolStats(sid)
+		m.agentStats, _ = m.db.ListAgentStats(sid)
+		m.statsLineCount = m.computeStatsLineCount()
 		// Load user messages. Cache by session ID, but always reload for active sessions.
 		if m.messagesCacheID != sid || s.Status == "active" {
 			m.messages = collector.ReadUserMessages(event.Platform(s.Platform), sid, s.CWD, 200)
@@ -608,9 +599,11 @@ func (m *Model) refresh() {
 		m.agents = nil
 		m.toolCalls = nil
 		m.fileChanges = nil
+		m.toolStats = nil
+		m.agentStats = nil
+		m.statsLineCount = 0
 		m.messages = nil
 		m.messagesCacheID = ""
-		m.timelineEntries = nil
 	}
 
 	m.refreshFilteredViews()
@@ -637,53 +630,6 @@ func (m *Model) refresh() {
 	m.adjustScroll()
 }
 
-func buildTimeline(agents []storage.AgentRow, toolCalls []storage.ToolCallRow, fileChanges []storage.FileChangeRow) []timelineEntry {
-	var entries []timelineEntry
-
-	for _, a := range agents {
-		role := a.Role
-		if role == "" {
-			role = "agent"
-		}
-		entries = append(entries, timelineEntry{
-			time:   a.StartTime,
-			kind:   "agent",
-			detail: fmt.Sprintf("spawn %s", role),
-			status: "start",
-		})
-		if a.EndTime != nil {
-			entries = append(entries, timelineEntry{
-				time:   *a.EndTime,
-				kind:   "agent",
-				detail: fmt.Sprintf("%s complete", role),
-				status: "end",
-			})
-		}
-	}
-
-	for _, tc := range toolCalls {
-		entries = append(entries, timelineEntry{
-			time:   tc.StartTime,
-			kind:   "tool",
-			detail: fmt.Sprintf("%s %s", tc.ToolName, truncate(tc.ParamsSummary, 40)),
-			status: tc.Status,
-		})
-	}
-
-	for _, fc := range fileChanges {
-		entries = append(entries, timelineEntry{
-			time:   fc.Timestamp,
-			kind:   "file",
-			detail: fmt.Sprintf("%s %s", fc.ChangeType, fc.FilePath),
-			status: "ok",
-		})
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].time.Before(entries[j].time)
-	})
-	return entries
-}
 
 func sessionDisplayName(s storage.SessionRow) string {
 	project := ""

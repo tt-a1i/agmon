@@ -111,6 +111,13 @@ func (d *Daemon) Start() error {
 		log.Printf("pruned %d empty Codex sessions", n)
 	}
 
+	// Fix sessions with "<synthetic>" model from Claude internal messages.
+	if n, err := d.db.RepairSyntheticModels(); err != nil {
+		log.Printf("repair synthetic models: %v", err)
+	} else if n > 0 {
+		log.Printf("repaired %d sessions with synthetic model", n)
+	}
+
 	// Repair token_usage rows that have empty model (Codex turn_context ordering issue).
 	d.repairEmptyTokenModels()
 

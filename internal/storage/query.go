@@ -54,6 +54,24 @@ type FileChangeRow struct {
 	Timestamp  time.Time
 }
 
+type ToolStatRow struct {
+	ToolName string
+	Count    int
+	AvgMs    int64
+	FailCount int
+}
+
+type AgentStatRow struct {
+	AgentID       string
+	ParentAgentID string
+	Role          string
+	Status        string
+	ToolCallCount int
+	InputTokens   int
+	OutputTokens  int
+	CostUSD       float64
+}
+
 func parseTime(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
 	return t.Local()
@@ -219,6 +237,69 @@ func (s *DB) ListFileChanges(sessionID string) ([]FileChangeRow, error) {
 			return nil, err
 		}
 		r.Timestamp = parseTime(tsStr)
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+func (s *DB) ListToolStats(sessionID string) ([]ToolStatRow, error) {
+	rows, err := s.db.Query(`
+		SELECT tool_name,
+		       COUNT(*) as cnt,
+		       CAST(COALESCE(AVG(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) AS INTEGER) as avg_ms,
+		       SUM(CASE WHEN status IN ('fail','error') THEN 1 ELSE 0 END) as fail_cnt
+		FROM tool_calls WHERE session_id = ?
+		GROUP BY tool_name ORDER BY cnt DESC
+	`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ToolStatRow
+	for rows.Next() {
+		var r ToolStatRow
+		if err := rows.Scan(&r.ToolName, &r.Count, &r.AvgMs, &r.FailCount); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+func (s *DB) ListAgentStats(sessionID string) ([]AgentStatRow, error) {
+	rows, err := s.db.Query(`
+		SELECT a.agent_id, COALESCE(a.parent_agent_id, ''), COALESCE(a.role, ''),
+		       a.status,
+		       COALESCE(tc.cnt, 0),
+		       COALESCE(t.in_tok, 0), COALESCE(t.out_tok, 0), COALESCE(t.cost, 0)
+		FROM agents a
+		LEFT JOIN (
+			SELECT agent_id, COUNT(*) as cnt
+			FROM tool_calls WHERE session_id = ? GROUP BY agent_id
+		) tc ON a.agent_id = tc.agent_id
+		LEFT JOIN (
+			SELECT agent_id,
+			       SUM(input_tokens + cache_creation_tokens + cache_read_tokens) as in_tok,
+			       SUM(output_tokens) as out_tok,
+			       SUM(cost_usd) as cost
+			FROM token_usage WHERE session_id = ? AND agent_id != '' GROUP BY agent_id
+		) t ON a.agent_id = t.agent_id
+		WHERE a.session_id = ?
+		ORDER BY a.start_time ASC
+	`, sessionID, sessionID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []AgentStatRow
+	for rows.Next() {
+		var r AgentStatRow
+		if err := rows.Scan(&r.AgentID, &r.ParentAgentID, &r.Role, &r.Status,
+			&r.ToolCallCount, &r.InputTokens, &r.OutputTokens, &r.CostUSD); err != nil {
+			return nil, err
+		}
 		result = append(result, r)
 	}
 	return result, rows.Err()
