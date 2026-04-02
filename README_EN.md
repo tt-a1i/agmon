@@ -39,9 +39,10 @@
 - **Multi-platform** — Claude Code + Codex in one unified view
 - **Token tracking** — input, output, cache creation, cache read — per session, per model
 - **Cost estimation** — model-aware pricing (Opus / Sonnet / Haiku / GPT-5 / GPT-4.1)
+- **7-day cost chart** — vertical bar chart in Stats view showing daily spend at a glance
 - **Tool call traces** — name, params, result, duration, success/failure status
-- **Session timeline** — chronological event stream with file changes
-- **Conversation messages** — browse user prompts within each session
+- **Conversation messages** — browse user prompts within each session, with `/` search
+- **Session tags** — `agmon tag <id> "note"` to label sessions for easy recall
 - **Time range stats** — Today / Week / Month / All token & cost aggregation
 - **Live updates** — daemon broadcasts events, TUI refreshes in real time
 - **Zero config** — `agmon setup` + `agmon`, single binary, no dependencies
@@ -106,6 +107,7 @@ That's it. Use Claude Code or Codex normally — agmon captures everything in th
 | `agmon report [session]` | Detailed text report |
 | `agmon cost [today\|week]` | Token usage statistics |
 | `agmon clean [days]` | Remove sessions older than N days (default: 7) |
+| `agmon tag <id> [text]` | Tag a session with a note (omit text to clear) |
 | `agmon setup` | Configure Claude Code hooks |
 | `agmon uninstall` | Remove hooks and stop daemon |
 | `agmon version` | Show version |
@@ -116,10 +118,10 @@ Press **Tab** to switch between views:
 
 | View | Content |
 |------|---------|
-| **Dashboard** | Session list with cost, context usage, status; summary bar with time range toggle (`t` key) |
-| **Messages** | User conversation messages from Claude / Codex JSONL logs |
+| **Dashboard** | Session list with cost, context usage, status, tags; summary bar with time range toggle (`t` key) |
+| **Messages** | User conversation messages from Claude / Codex JSONL logs, with `/` search |
 | **Tool Calls** | Real-time tool call stream with duration and expand/collapse details |
-| **Timeline** | Chronological events: agent lifecycle, tool calls, file changes |
+| **Stats** | 7-day cost bar chart, tool usage stats, agent breakdown, file change summary |
 
 ## Keybindings
 
@@ -132,6 +134,8 @@ Press **Tab** to switch between views:
 | `[` / `]` | Switch session (any view) |
 | `/` | Filter current list |
 | `t` | Cycle time range (Today → Week → Month → All) |
+| `p` | Cycle platform filter (All / Claude / Codex) |
+| `s` | Cycle sort order (Recent / Cost) |
 | `c` | Copy session resume command |
 | `Esc` | Clear filter |
 | `q` | Quit |
