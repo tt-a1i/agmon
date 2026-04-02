@@ -387,7 +387,7 @@ func startOfToday() time.Time {
 
 // DailyCost holds cost data for a single day.
 type DailyCost struct {
-	Date string  // YYYY-MM-DD
+	Date string // YYYY-MM-DD
 	Cost float64
 }
 
