@@ -17,6 +17,11 @@ func (m Model) buildStatsLines(width int) []string {
 
 	var lines []string
 
+	// --- 7-Day cost chart ---
+	chartLines := renderCostChart(m.dailyCosts, width)
+	lines = append(lines, chartLines...)
+	lines = append(lines, "")
+
 	s := m.sessions[m.selectedSession]
 	lines = append(lines, sessionHeader(s))
 	lines = append(lines, "")
@@ -62,15 +67,15 @@ func (m Model) buildStatsLines(width int) []string {
 		}
 		for i := 0; i < limit; i++ {
 			ts := m.toolStats[i]
-			avgStr := "-"
+			avgStr := fmt.Sprintf("%8s", "-")
 			if ts.AvgMs > 0 {
-				avgStr = fmt.Sprintf("%.1fs", float64(ts.AvgMs)/1000)
+				avgStr = fmt.Sprintf("%8s", fmt.Sprintf("%.1fs", float64(ts.AvgMs)/1000))
 			}
-			failStr := "-"
+			failStr := fmt.Sprintf("%6s", "-")
 			if ts.FailCount > 0 {
-				failStr = errorStyle.Render(fmt.Sprintf("%d", ts.FailCount))
+				failStr = errorStyle.Render(fmt.Sprintf("%6d", ts.FailCount))
 			}
-			lines = append(lines, fmt.Sprintf("  %-16s %6d %8s %6s",
+			lines = append(lines, fmt.Sprintf("  %-16s %6d %s %s",
 				displayTruncate(ts.ToolName, 16), ts.Count, avgStr, failStr))
 		}
 		if len(m.toolStats) > limit {
@@ -87,22 +92,25 @@ func (m Model) buildStatsLines(width int) []string {
 		lines = append(lines, mutedStyle.Render(fmt.Sprintf("  %-20s %6s %6s %8s", "ROLE", "COUNT", "DONE", "TOOLS")))
 
 		for _, g := range groups {
-			statusStr := fmt.Sprintf("%d/%d", g.ended, g.count)
+			rawStatus := fmt.Sprintf("%d/%d", g.ended, g.count)
+			paddedStatus := fmt.Sprintf("%6s", rawStatus)
 			if g.ended == g.count {
-				statusStr = mutedStyle.Render(statusStr)
+				paddedStatus = mutedStyle.Render(paddedStatus)
 			} else {
-				statusStr = headerStyle.Render(statusStr)
+				paddedStatus = headerStyle.Render(paddedStatus)
 			}
-			toolStr := "-"
+			toolStr := fmt.Sprintf("%8s", "-")
 			if g.toolCalls > 0 {
-				toolStr = fmt.Sprintf("%d", g.toolCalls)
+				toolStr = fmt.Sprintf("%8d", g.toolCalls)
 			}
 			prefix := "  "
+			roleWidth := 18
 			if g.isChild {
 				prefix = "  └ "
+				roleWidth = 16
 			}
-			lines = append(lines, fmt.Sprintf("%s%-18s %6d %6s %8s",
-				prefix, displayTruncate(g.role, 18), g.count, statusStr, toolStr))
+			lines = append(lines, fmt.Sprintf("%s%-*s %6d %s %s",
+				prefix, roleWidth, displayTruncate(g.role, roleWidth), g.count, paddedStatus, toolStr))
 		}
 		lines = append(lines, "")
 	}

@@ -131,6 +131,7 @@ func (s *DB) migrate() error {
 	s.addColumnIfMissing("sessions", "model", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("sessions", "total_cache_read_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("sessions", "total_cache_creation_tokens", "INT NOT NULL DEFAULT 0")
+	s.addColumnIfMissing("sessions", "tag", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("token_usage", "source_id", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("token_usage", "cache_creation_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("token_usage", "cache_read_tokens", "INT NOT NULL DEFAULT 0")

@@ -14,22 +14,33 @@ func (m Model) viewMessages(width int) string {
 
 	s := m.sessions[m.selectedSession]
 	b.WriteString(sessionHeader(s) + "\n")
-	b.WriteString(mutedStyle.Render(fmt.Sprintf("  %d messages", len(m.messages))) + "\n\n")
+
+	filtered := m.filteredMessages()
+	if m.filterText != "" {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  %d/%d messages", len(filtered), len(m.messages))) + "\n\n")
+	} else {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  %d messages", len(m.messages))) + "\n\n")
+	}
 
 	if len(m.messages) == 0 {
 		b.WriteString(mutedStyle.Render("  No user messages found"))
 		return b.String()
 	}
 
+	if len(filtered) == 0 && m.filterText != "" {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  No messages match %q", m.filterText)))
+		return b.String()
+	}
+
 	visible := m.tabVisibleRows()
 	start := m.viewOffset
 	end := start + visible
-	if end > len(m.messages) {
-		end = len(m.messages)
+	if end > len(filtered) {
+		end = len(filtered)
 	}
 
 	for i := start; i < end; i++ {
-		msg := m.messages[i]
+		msg := filtered[i]
 		timeStr := msg.Timestamp.Format("15:04")
 		expanded := m.expandedCalls[fmt.Sprintf("msg-%d", i)]
 
@@ -76,8 +87,8 @@ func (m Model) viewMessages(width int) string {
 		b.WriteString(line + "\n")
 	}
 
-	if end < len(m.messages) {
-		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ... %d more (j to scroll)", len(m.messages)-end)) + "\n")
+	if end < len(filtered) {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ... %d more (j to scroll)", len(filtered)-end)) + "\n")
 	}
 
 	return b.String()

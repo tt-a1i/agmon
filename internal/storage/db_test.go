@@ -538,6 +538,99 @@ func TestDefaultDBPath(t *testing.T) {
 	}
 }
 
+func TestSetSessionTag(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	db.UpsertSession("s1", event.PlatformClaude, now)
+	db.InsertTokenUsage("a1", "s1", 100, 50, 0, 0, "sonnet", 0.01, now, "src-tag")
+
+	// Set tag
+	if err := db.SetSessionTag("s1", "refactoring auth"); err != nil {
+		t.Fatalf("set tag: %v", err)
+	}
+
+	sessions, _ := db.ListSessions()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].Tag != "refactoring auth" {
+		t.Errorf("tag: got %q, want %q", sessions[0].Tag, "refactoring auth")
+	}
+
+	// Clear tag
+	if err := db.SetSessionTag("s1", ""); err != nil {
+		t.Fatalf("clear tag: %v", err)
+	}
+
+	s, found, _ := db.GetSessionByIDPrefix("s1")
+	if !found {
+		t.Fatal("session not found")
+	}
+	if s.Tag != "" {
+		t.Errorf("tag should be empty after clear, got %q", s.Tag)
+	}
+}
+
+func TestGetDailyCosts(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+
+	db.UpsertSession("s1", event.PlatformClaude, today)
+
+	// Insert costs for today and yesterday
+	db.InsertTokenUsage("a1", "s1", 1000, 500, 0, 0, "sonnet", 1.50, today, "src-today")
+	db.InsertTokenUsage("a1", "s1", 800, 400, 0, 0, "sonnet", 0.80, today.AddDate(0, 0, -1), "src-yesterday")
+
+	costs, err := db.GetDailyCosts(7)
+	if err != nil {
+		t.Fatalf("get daily costs: %v", err)
+	}
+	if len(costs) != 7 {
+		t.Fatalf("expected 7 days, got %d", len(costs))
+	}
+
+	// Last entry should be today
+	todayEntry := costs[6]
+	if todayEntry.Date != today.Format("2006-01-02") {
+		t.Errorf("last day: got %q, want %q", todayEntry.Date, today.Format("2006-01-02"))
+	}
+	if todayEntry.Cost < 1.49 || todayEntry.Cost > 1.51 {
+		t.Errorf("today cost: got %f, want ~1.50", todayEntry.Cost)
+	}
+
+	// Yesterday
+	yesterdayEntry := costs[5]
+	if yesterdayEntry.Cost < 0.79 || yesterdayEntry.Cost > 0.81 {
+		t.Errorf("yesterday cost: got %f, want ~0.80", yesterdayEntry.Cost)
+	}
+
+	// Earlier days should be zero
+	for i := 0; i < 5; i++ {
+		if costs[i].Cost != 0 {
+			t.Errorf("day %d cost: got %f, want 0", i, costs[i].Cost)
+		}
+	}
+}
+
+func TestGetDailyCostsEmpty(t *testing.T) {
+	db := testDB(t)
+
+	costs, err := db.GetDailyCosts(7)
+	if err != nil {
+		t.Fatalf("get daily costs: %v", err)
+	}
+	if len(costs) != 7 {
+		t.Fatalf("expected 7 days, got %d", len(costs))
+	}
+	for _, c := range costs {
+		if c.Cost != 0 {
+			t.Errorf("expected zero cost for %s, got %f", c.Date, c.Cost)
+		}
+	}
+}
+
 func TestListSessionsShowsActiveAndTokenSessions(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()

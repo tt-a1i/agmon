@@ -94,7 +94,7 @@ func (m Model) footer() string {
 			enterHint = fmt.Sprintf("  %s", fmtKey("Enter", "expand"))
 		}
 		filterHint := ""
-		if m.activeTab != tabMessages && m.activeTab != tabStats {
+		if m.activeTab != tabStats {
 			filterHint = fmt.Sprintf("  %s", fmtKey("/", "filter"))
 		}
 		footer = fmt.Sprintf(" %s  %s  %s  %s%s%s  %s%s",

@@ -88,6 +88,8 @@ func main() {
 		runCost()
 	case "clean":
 		runClean()
+	case "tag":
+		runTag()
 	case "update":
 		runUpdate()
 	case "version", "-v", "--version":
@@ -684,6 +686,42 @@ func runClean() {
 	}
 }
 
+func runTag() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Usage: agmon tag <session-id> [text]\n")
+		fmt.Fprintf(os.Stderr, "  Set a tag:   agmon tag abc123 \"refactoring auth\"\n")
+		fmt.Fprintf(os.Stderr, "  Clear tag:   agmon tag abc123\n")
+		os.Exit(1)
+	}
+
+	db := mustOpenDB()
+	defer db.Close()
+
+	prefix := os.Args[2]
+	s, found, err := db.GetSessionByIDPrefix(prefix)
+	if err != nil {
+		log.Fatalf("lookup session: %v", err)
+	}
+	if !found {
+		log.Fatalf("session not found: %s", prefix)
+	}
+
+	tag := ""
+	if len(os.Args) > 3 {
+		tag = strings.Join(os.Args[3:], " ")
+	}
+
+	if err := db.SetSessionTag(s.SessionID, tag); err != nil {
+		log.Fatalf("set tag: %v", err)
+	}
+
+	if tag == "" {
+		fmt.Printf("Cleared tag for session %s\n", s.SessionID[:8])
+	} else {
+		fmt.Printf("Tagged session %s: %s\n", s.SessionID[:8], tag)
+	}
+}
+
 func fmtTokens(n int) string {
 	if n >= 1_000_000 {
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
@@ -718,6 +756,7 @@ Usage:
   agmon report [session]   Detailed session report
   agmon cost [today|week]  Token usage statistics
   agmon clean [days]       Remove sessions older than N days (default: 7)
+  agmon tag <id> [text]    Tag a session with a note (omit text to clear)
   agmon update             Update to the latest version
   agmon version            Show version
   agmon help               Show this help

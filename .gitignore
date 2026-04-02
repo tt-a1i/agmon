@@ -17,3 +17,5 @@ Thumbs.db
 
 # Data
 *.db
+.squad/
+.harnessed/

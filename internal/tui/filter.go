@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tt-a1i/agmon/internal/collector"
 	"github.com/tt-a1i/agmon/internal/storage"
 )
 
@@ -12,6 +13,7 @@ func (m *Model) refreshFilteredViews() {
 	filter := strings.ToLower(m.filterText)
 	m.filteredSessionsCache = filterSessions(m.sessions, filter, m.platformFilter, m.dashboardSort)
 	m.filteredToolCallsCache = filterToolCalls(m.toolCalls, filter)
+	m.filteredMessagesCache = filterMessages(m.messages, filter)
 }
 
 func (m *Model) setFilterText(text string) {
@@ -104,6 +106,19 @@ func filterToolCalls(toolCalls []storage.ToolCallRow, filter string) []storage.T
 		if strings.Contains(strings.ToLower(tc.ToolName), filter) ||
 			strings.Contains(strings.ToLower(tc.ParamsSummary), filter) {
 			out = append(out, tc)
+		}
+	}
+	return out
+}
+
+func filterMessages(messages []collector.UserMessage, filter string) []collector.UserMessage {
+	if filter == "" {
+		return messages
+	}
+	out := make([]collector.UserMessage, 0, len(messages))
+	for _, msg := range messages {
+		if strings.Contains(strings.ToLower(msg.Content), filter) {
+			out = append(out, msg)
 		}
 	}
 	return out

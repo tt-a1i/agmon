@@ -112,6 +112,7 @@ type Model struct {
 	messagesCacheID        string // session ID for which messages were loaded
 	filteredSessionsCache  []storage.SessionRow
 	filteredToolCallsCache []storage.ToolCallRow
+	filteredMessagesCache  []collector.UserMessage
 	selectedSession        int
 	selectedRow            int
 	viewOffset             int
@@ -124,6 +125,7 @@ type Model struct {
 	todayInput             int
 	todayOutput            int
 	todayCost              float64
+	dailyCosts             []storage.DailyCost
 	width                  int
 	height                 int
 	activeCount            int
@@ -194,12 +196,16 @@ func (m Model) filteredToolCalls() []storage.ToolCallRow {
 	return m.filteredToolCallsCache
 }
 
+func (m Model) filteredMessages() []collector.UserMessage {
+	return m.filteredMessagesCache
+}
+
 func (m Model) currentTabRowCount() int {
 	switch m.activeTab {
 	case tabDashboard:
 		return len(m.filteredSessions())
 	case tabMessages:
-		return len(m.messages)
+		return len(m.filteredMessages())
 	case tabToolCalls:
 		return len(m.filteredToolCalls())
 	case tabStats:
@@ -368,8 +374,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
-			if m.activeTab == tabMessages || m.activeTab == tabStats {
-				return m, nil // Messages and Stats tabs do not support filtering
+			if m.activeTab == tabStats {
+				return m, nil // Stats tab does not support filtering
 			}
 			// Enter filter mode; pressing / again clears the existing filter.
 			m.filterMode = true
@@ -480,7 +486,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if m.activeTab == tabMessages {
-				if m.selectedRow < len(m.messages) {
+				filtered := m.filteredMessages()
+				if m.selectedRow < len(filtered) {
 					key := fmt.Sprintf("msg-%d", m.selectedRow)
 					wasOpen := m.expandedCalls[key]
 					// Accordion: close all, then toggle this one
@@ -577,6 +584,7 @@ func (m *Model) refresh() {
 	cutoff := rangeCutoff(m.summaryRange)
 	m.todayInput, m.todayOutput, _ = m.db.GetTokensSince(cutoff)
 	m.todayCost, _ = m.db.GetCostSince(cutoff)
+	m.dailyCosts, _ = m.db.GetDailyCosts(7)
 
 	if len(m.sessions) > 0 {
 		if m.selectedSession >= len(m.sessions) {

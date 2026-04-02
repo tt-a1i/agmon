@@ -66,12 +66,18 @@ func (m Model) viewDashboard(width int) string {
 		}
 		outPad := fmt.Sprintf("%-8s", outText)
 
+		tagText := ""
+		if s.Tag != "" {
+			tagText = " " + tagStyle.Render(truncateTag(s.Tag))
+		}
+
 		line := fmt.Sprintf("  %s %-16s %s  %s  %s  %s",
 			badge, name,
 			mutedStyle.Render(fmt.Sprintf("%-14s", started)),
 			costStyle.Render(costPad),
 			dashboardMetricStyle.Render(inPad),
 			dashboardMetricStyle.Render(outPad))
+		line += tagText
 
 		if i == m.selectedRow {
 			line = selectedStyle.Render(line)
@@ -90,6 +96,9 @@ func (m Model) viewDashboard(width int) string {
 			mutedStyle.Render("▸"), headerStyle.Render(sessionDisplayName(s)),
 			mutedStyle.Render("Ctx"), contextPercent(s.LatestContextTokens, s.Model),
 			mutedStyle.Render("Status"), dashboardStatus(s.Status))
+		if s.Tag != "" {
+			preview += "    " + tagStyle.Render(truncateTag(s.Tag))
+		}
 		if s.CWD != "" {
 			preview += "\n " + mutedStyle.Render(displayTruncate(s.CWD, width-4))
 		}

@@ -21,6 +21,7 @@ type SessionRow struct {
 	Model                    string
 	TotalCacheReadTokens     int
 	TotalCacheCreationTokens int
+	Tag                      string
 }
 
 type AgentRow struct {
@@ -90,7 +91,7 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		SELECT session_id, platform, start_time, end_time, status,
 		       total_input_tokens, total_output_tokens, total_cost_usd,
 		       cwd, git_branch, latest_context_tokens, model,
-		       total_cache_read_tokens, total_cache_creation_tokens
+		       total_cache_read_tokens, total_cache_creation_tokens, tag
 		FROM sessions
 		WHERE status = 'active'
 		   OR total_input_tokens > 0 OR total_output_tokens > 0
@@ -110,7 +111,7 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		if err := rows.Scan(&r.SessionID, &r.Platform, &startStr, &endStr,
 			&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD,
 			&r.CWD, &r.GitBranch, &r.LatestContextTokens, &r.Model,
-			&r.TotalCacheReadTokens, &r.TotalCacheCreationTokens); err != nil {
+			&r.TotalCacheReadTokens, &r.TotalCacheCreationTokens, &r.Tag); err != nil {
 			return nil, err
 		}
 		r.StartTime = parseTime(startStr)
@@ -139,7 +140,7 @@ func (s *DB) GetSessionByIDPrefix(prefix string) (SessionRow, bool, error) {
 		SELECT session_id, platform, start_time, end_time, status,
 		       total_input_tokens, total_output_tokens, total_cost_usd,
 		       cwd, git_branch, latest_context_tokens, model,
-		       total_cache_read_tokens, total_cache_creation_tokens
+		       total_cache_read_tokens, total_cache_creation_tokens, tag
 		FROM sessions WHERE session_id LIKE ? || '%' LIMIT 1
 	`, prefix)
 	var r SessionRow
@@ -148,7 +149,7 @@ func (s *DB) GetSessionByIDPrefix(prefix string) (SessionRow, bool, error) {
 	err := row.Scan(&r.SessionID, &r.Platform, &startStr, &endStr,
 		&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD,
 		&r.CWD, &r.GitBranch, &r.LatestContextTokens, &r.Model,
-		&r.TotalCacheReadTokens, &r.TotalCacheCreationTokens)
+		&r.TotalCacheReadTokens, &r.TotalCacheCreationTokens, &r.Tag)
 	if err == sql.ErrNoRows {
 		return SessionRow{}, false, nil
 	}
@@ -314,6 +315,12 @@ func (s *DB) ListAgentStats(sessionID string) ([]AgentStatRow, error) {
 	return result, rows.Err()
 }
 
+// SetSessionTag sets or clears the tag on a session.
+func (s *DB) SetSessionTag(sessionID, tag string) error {
+	_, err := s.db.Exec(`UPDATE sessions SET tag = ? WHERE session_id = ?`, tag, sessionID)
+	return err
+}
+
 // GetTokensSince returns total input and output tokens since the given time.
 // If since is nil, returns all-time totals.
 func (s *DB) GetTokensSince(since *time.Time) (input, output int, err error) {
@@ -376,4 +383,48 @@ func (s *DB) GetTodayCost() (float64, error) {
 func startOfToday() time.Time {
 	now := time.Now().UTC()
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// DailyCost holds cost data for a single day.
+type DailyCost struct {
+	Date string  // YYYY-MM-DD
+	Cost float64
+}
+
+// GetDailyCosts returns per-day cost totals for the last N days (including today).
+// Results are ordered oldest-first.
+func (s *DB) GetDailyCosts(days int) ([]DailyCost, error) {
+	since := startOfToday().AddDate(0, 0, -(days - 1))
+	rows, err := s.db.Query(`
+		SELECT DATE(timestamp) as day, SUM(cost_usd) as cost
+		FROM token_usage
+		WHERE timestamp >= ?
+		GROUP BY day ORDER BY day ASC
+	`, since.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	costMap := make(map[string]float64)
+	for rows.Next() {
+		var day string
+		var cost float64
+		if err := rows.Scan(&day, &cost); err != nil {
+			return nil, err
+		}
+		costMap[day] = cost
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Fill in all days (including zeros) so the sparkline has no gaps.
+	result := make([]DailyCost, days)
+	for i := 0; i < days; i++ {
+		d := since.AddDate(0, 0, i)
+		key := d.Format("2006-01-02")
+		result[i] = DailyCost{Date: key, Cost: costMap[key]}
+	}
+	return result, nil
 }

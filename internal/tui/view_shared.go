@@ -13,6 +13,7 @@ import (
 	"github.com/tt-a1i/agmon/internal/storage"
 )
 
+
 const splashLogo = `
      ██████╗  ██████╗ ███╗   ███╗ ██████╗ ███╗   ██╗
     ██╔══██╗██╔════╝ ████╗ ████║██╔═══██╗████╗  ██║
@@ -207,6 +208,131 @@ func copyToClipboard(text string) error {
 	}
 	cmd.Stdin = strings.NewReader(text)
 	return cmd.Run()
+}
+
+// truncateTag truncates a tag to 30 visible characters (rune-aware).
+func truncateTag(tag string) string {
+	runes := []rune(tag)
+	if len(runes) > 30 {
+		return string(runes[:27]) + "..."
+	}
+	return tag
+}
+
+// renderCostChart renders a vertical bar chart of daily costs.
+// Returns a slice of lines ready for display.
+func renderCostChart(daily []storage.DailyCost, width int) []string {
+	if len(daily) == 0 {
+		return []string{mutedStyle.Render("  No cost data")}
+	}
+
+	// Find total and max for scaling.
+	maxCost := 0.0
+	totalCost := 0.0
+	for _, d := range daily {
+		totalCost += d.Cost
+		if d.Cost > maxCost {
+			maxCost = d.Cost
+		}
+	}
+
+	const chartHeight = 8
+	const colWidth = 8   // chars per bar column
+	const labelWidth = 8 // left axis label width
+
+	var lines []string
+	// Title line
+	totalStr := fmt.Sprintf("$%.2f", totalCost)
+	lines = append(lines, fmt.Sprintf("  %s    %s %s",
+		headerStyle.Render("7-Day Cost"),
+		mutedStyle.Render("Total:"), costStyle.Render(totalStr)))
+	lines = append(lines, "")
+
+	if maxCost < 0.001 {
+		lines = append(lines, mutedStyle.Render("  No cost in the past 7 days"))
+		return lines
+	}
+
+	// Build the chart rows from top to bottom.
+	for row := chartHeight; row >= 1; row-- {
+		threshold := maxCost * float64(row) / float64(chartHeight)
+
+		// Y-axis label (only on top, middle, bottom)
+		label := strings.Repeat(" ", labelWidth)
+		switch row {
+		case chartHeight:
+			label = fmt.Sprintf("%*s", labelWidth, formatCost(maxCost))
+		case chartHeight / 2:
+			label = fmt.Sprintf("%*s", labelWidth, formatCost(maxCost/2))
+		case 1:
+			label = fmt.Sprintf("%*s", labelWidth, formatCost(0))
+		}
+
+		var rowBuf strings.Builder
+		rowBuf.WriteString(mutedStyle.Render(label) + " ")
+
+		for _, d := range daily {
+			if d.Cost >= threshold {
+				rowBuf.WriteString(costStyle.Render("  ███  ") + " ")
+			} else {
+				rowBuf.WriteString(strings.Repeat(" ", colWidth))
+			}
+		}
+		lines = append(lines, rowBuf.String())
+	}
+
+	// X-axis line
+	var axisBuf strings.Builder
+	axisBuf.WriteString(mutedStyle.Render(strings.Repeat(" ", labelWidth) + " "))
+	for range daily {
+		axisBuf.WriteString(mutedStyle.Render("────────"))
+	}
+	lines = append(lines, axisBuf.String())
+
+	// Date labels
+	var dateBuf strings.Builder
+	dateBuf.WriteString(strings.Repeat(" ", labelWidth) + " ")
+	for _, d := range daily {
+		day := d.Date
+		if len(day) >= 10 {
+			day = day[5:10]
+			day = strings.ReplaceAll(day, "-", "/")
+		}
+		dateBuf.WriteString(mutedStyle.Render(fmt.Sprintf(" %-7s", day)))
+	}
+	lines = append(lines, dateBuf.String())
+
+	// Cost values below each bar
+	var valBuf strings.Builder
+	valBuf.WriteString(strings.Repeat(" ", labelWidth) + " ")
+	for _, d := range daily {
+		if d.Cost < 0.005 {
+			valBuf.WriteString(mutedStyle.Render(fmt.Sprintf(" %-7s", "-")))
+		} else {
+			valBuf.WriteString(costStyle.Render(fmt.Sprintf(" %-7s", formatCost(d.Cost))))
+		}
+	}
+	lines = append(lines, valBuf.String())
+
+	return lines
+}
+
+// formatCost formats a cost value compactly for chart labels.
+func formatCost(c float64) string {
+	switch {
+	case c >= 1000:
+		return fmt.Sprintf("$%.0f", c)
+	case c >= 100:
+		return fmt.Sprintf("$%.0f", c)
+	case c >= 10:
+		return fmt.Sprintf("$%.1f", c)
+	case c >= 1:
+		return fmt.Sprintf("$%.2f", c)
+	case c >= 0.01:
+		return fmt.Sprintf("$%.2f", c)
+	default:
+		return "$0"
+	}
 }
 
 func claudeHooksConfigured() bool {

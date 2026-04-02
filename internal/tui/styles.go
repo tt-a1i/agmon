@@ -125,4 +125,9 @@ var (
 
 	msgTextStyle = lipgloss.NewStyle().
 			Foreground(colorWhite)
+
+	// Session tag
+	tagStyle = lipgloss.NewStyle().
+			Foreground(colorHighlight).
+			Italic(true)
 )
