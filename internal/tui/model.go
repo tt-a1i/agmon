@@ -86,6 +86,29 @@ func rangeCutoff(r timeRange) *time.Time {
 	return &t
 }
 
+// prevPeriodCost returns the cost for the period before the current range
+// (e.g. yesterday when range is Today, last week when range is Week).
+func prevPeriodCost(db *storage.DB, r timeRange) float64 {
+	now := time.Now().UTC()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var from, to time.Time
+	switch r {
+	case rangeToday:
+		from = startOfDay.AddDate(0, 0, -1)
+		to = startOfDay
+	case rangeWeek:
+		from = startOfDay.AddDate(0, 0, -14)
+		to = startOfDay.AddDate(0, 0, -7)
+	case rangeMonth:
+		from = startOfDay.AddDate(0, -2, 0)
+		to = startOfDay.AddDate(0, -1, 0)
+	default:
+		return 0
+	}
+	cost, _ := db.GetCostBetween(from, to)
+	return cost
+}
+
 // contextWindowForModel returns the context window size for a given model name.
 func contextWindowForModel(model string) int {
 	switch {
@@ -125,6 +148,7 @@ type Model struct {
 	todayInput             int
 	todayOutput            int
 	todayCost              float64
+	prevCost               float64 // previous period cost for trend
 	dailyCosts             []storage.DailyCost
 	width                  int
 	height                 int
@@ -584,6 +608,7 @@ func (m *Model) refresh() {
 	cutoff := rangeCutoff(m.summaryRange)
 	m.todayInput, m.todayOutput, _ = m.db.GetTokensSince(cutoff)
 	m.todayCost, _ = m.db.GetCostSince(cutoff)
+	m.prevCost = prevPeriodCost(m.db, m.summaryRange)
 	m.dailyCosts, _ = m.db.GetDailyCosts(7)
 
 	if len(m.sessions) > 0 {

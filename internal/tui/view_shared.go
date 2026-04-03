@@ -209,6 +209,22 @@ func copyToClipboard(text string) error {
 	return cmd.Run()
 }
 
+// renderTrend shows a trend arrow comparing current vs previous period cost.
+func renderTrend(current, prev float64) string {
+	if prev < 0.01 {
+		return ""
+	}
+	pct := (current - prev) / prev * 100
+	switch {
+	case pct > 10:
+		return lipgloss.NewStyle().Foreground(colorError).Render(fmt.Sprintf(" ↑%.0f%%", pct))
+	case pct < -10:
+		return lipgloss.NewStyle().Foreground(colorSuccess).Render(fmt.Sprintf(" ↓%.0f%%", -pct))
+	default:
+		return mutedStyle.Render(" →")
+	}
+}
+
 // truncateTag truncates a tag to 30 visible characters (rune-aware).
 func truncateTag(tag string) string {
 	runes := []rune(tag)

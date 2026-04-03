@@ -89,7 +89,8 @@ var (
 			Foreground(colorError).
 			Bold(true)
 
-	costStyle = lipgloss.NewStyle().Foreground(colorWarning).Bold(true)
+	costStyle    = lipgloss.NewStyle().Foreground(colorWarning).Bold(true)
+	bigCostStyle = lipgloss.NewStyle().Foreground(colorWarning).Bold(true)
 
 	// Context window usage
 	contextOkStyle     = lipgloss.NewStyle().Foreground(colorSuccess)

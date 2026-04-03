@@ -9,10 +9,16 @@ func (m Model) viewDashboard(width int) string {
 	var b strings.Builder
 
 	rangeName := rangeNames[m.summaryRange]
-	b.WriteString(fmt.Sprintf(" %s %s %s %s    %s %s\n\n",
-		mutedStyle.Render(rangeName+" In"), headerStyle.Render(formatTokens(m.todayInput)),
-		mutedStyle.Render("/ Out"), headerStyle.Render(formatTokens(m.todayOutput)),
-		mutedStyle.Render("Cost"), costStyle.Render(fmt.Sprintf("$%.2f", m.todayCost))))
+
+	// Big cost with trend
+	costStr := fmt.Sprintf("$%.2f", m.todayCost)
+	trend := renderTrend(m.todayCost, m.prevCost)
+
+	b.WriteString(fmt.Sprintf(" %s  %s %s    %s %s %s %s\n\n",
+		mutedStyle.Render(rangeName),
+		bigCostStyle.Render(costStr), trend,
+		mutedStyle.Render("In"), headerStyle.Render(formatTokens(m.todayInput)),
+		mutedStyle.Render("Out"), headerStyle.Render(formatTokens(m.todayOutput))))
 
 	filtered := m.filteredSessions()
 	if len(filtered) == 0 {

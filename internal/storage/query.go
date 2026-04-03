@@ -375,6 +375,16 @@ func (s *DB) GetCostSince(since *time.Time) (float64, error) {
 	return cost, err
 }
 
+// GetCostBetween returns total cost between two times.
+func (s *DB) GetCostBetween(from, to time.Time) (float64, error) {
+	var cost float64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(cost_usd), 0)
+		FROM token_usage WHERE timestamp >= ? AND timestamp < ?
+	`, from.Format(time.RFC3339), to.Format(time.RFC3339)).Scan(&cost)
+	return cost, err
+}
+
 func (s *DB) GetTodayCost() (float64, error) {
 	t := startOfToday()
 	return s.GetCostSince(&t)
