@@ -63,6 +63,20 @@ const (
 
 var dashboardSortNames = []string{"Recent", "Cost"}
 
+// startOfCalendarWeek returns the Monday 00:00 UTC of the week containing t.
+func startOfCalendarWeek(t time.Time) time.Time {
+	wd := t.Weekday()
+	if wd == 0 { // Sunday
+		wd = 7
+	}
+	return t.AddDate(0, 0, -int(wd-1))
+}
+
+// startOfCalendarMonth returns the 1st day 00:00 UTC of the month containing t.
+func startOfCalendarMonth(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
 // rangeCutoff converts a timeRange to a *time.Time cutoff for DB queries.
 // Returns nil for rangeAll (meaning no time filter).
 func rangeCutoff(r timeRange) *time.Time {
@@ -71,17 +85,11 @@ func rangeCutoff(r timeRange) *time.Time {
 	var t time.Time
 	switch r {
 	case rangeWeek:
-		// Start of current calendar week (Monday)
-		wd := startOfDay.Weekday()
-		if wd == 0 { // Sunday
-			wd = 7
-		}
-		t = startOfDay.AddDate(0, 0, -int(wd-1))
+		t = startOfCalendarWeek(startOfDay)
 	case rangeMonth:
-		// Start of current calendar month
-		t = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		t = startOfCalendarMonth(startOfDay)
 	case range3Month:
-		t = time.Date(now.Year(), now.Month()-2, 1, 0, 0, 0, 0, time.UTC)
+		t = startOfCalendarMonth(startOfDay).AddDate(0, -2, 0)
 	case rangeYear:
 		t = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
 	case rangeAll:
@@ -103,15 +111,11 @@ func prevPeriodCost(db *storage.DB, r timeRange) float64 {
 		from = startOfDay.AddDate(0, 0, -1)
 		to = startOfDay
 	case rangeWeek:
-		wd := startOfDay.Weekday()
-		if wd == 0 {
-			wd = 7
-		}
-		thisMonday := startOfDay.AddDate(0, 0, -int(wd-1))
+		thisMonday := startOfCalendarWeek(startOfDay)
 		from = thisMonday.AddDate(0, 0, -7)
 		to = thisMonday
 	case rangeMonth:
-		thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		thisMonth := startOfCalendarMonth(startOfDay)
 		from = thisMonth.AddDate(0, -1, 0)
 		to = thisMonth
 	default:

@@ -646,7 +646,7 @@ func runCost() {
 		t := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 		since, label = &t, "This month"
 	case "3month":
-		t := time.Date(now.Year(), now.Month()-2, 1, 0, 0, 0, 0, time.UTC)
+		t := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -2, 0)
 		since, label = &t, "Last 3 months"
 	case "year":
 		t := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
