@@ -636,16 +636,20 @@ func runCost() {
 		t := startOfDay
 		since, label = &t, "Today"
 	case "week":
-		t := startOfDay.AddDate(0, 0, -7)
+		wd := startOfDay.Weekday()
+		if wd == 0 {
+			wd = 7
+		}
+		t := startOfDay.AddDate(0, 0, -int(wd-1))
 		since, label = &t, "This week"
 	case "month":
-		t := startOfDay.AddDate(0, -1, 0)
+		t := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 		since, label = &t, "This month"
 	case "3month":
-		t := startOfDay.AddDate(0, -3, 0)
+		t := time.Date(now.Year(), now.Month()-2, 1, 0, 0, 0, 0, time.UTC)
 		since, label = &t, "Last 3 months"
 	case "year":
-		t := startOfDay.AddDate(-1, 0, 0)
+		t := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
 		since, label = &t, "This year"
 	case "all":
 		since, label = nil, "All time"

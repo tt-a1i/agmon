@@ -71,13 +71,19 @@ func rangeCutoff(r timeRange) *time.Time {
 	var t time.Time
 	switch r {
 	case rangeWeek:
-		t = startOfDay.AddDate(0, 0, -7)
+		// Start of current calendar week (Monday)
+		wd := startOfDay.Weekday()
+		if wd == 0 { // Sunday
+			wd = 7
+		}
+		t = startOfDay.AddDate(0, 0, -int(wd-1))
 	case rangeMonth:
-		t = startOfDay.AddDate(0, -1, 0)
+		// Start of current calendar month
+		t = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	case range3Month:
-		t = startOfDay.AddDate(0, -3, 0)
+		t = time.Date(now.Year(), now.Month()-2, 1, 0, 0, 0, 0, time.UTC)
 	case rangeYear:
-		t = startOfDay.AddDate(-1, 0, 0)
+		t = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
 	case rangeAll:
 		return nil
 	default: // rangeToday
@@ -97,11 +103,17 @@ func prevPeriodCost(db *storage.DB, r timeRange) float64 {
 		from = startOfDay.AddDate(0, 0, -1)
 		to = startOfDay
 	case rangeWeek:
-		from = startOfDay.AddDate(0, 0, -14)
-		to = startOfDay.AddDate(0, 0, -7)
+		wd := startOfDay.Weekday()
+		if wd == 0 {
+			wd = 7
+		}
+		thisMonday := startOfDay.AddDate(0, 0, -int(wd-1))
+		from = thisMonday.AddDate(0, 0, -7)
+		to = thisMonday
 	case rangeMonth:
-		from = startOfDay.AddDate(0, -2, 0)
-		to = startOfDay.AddDate(0, -1, 0)
+		thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		from = thisMonth.AddDate(0, -1, 0)
+		to = thisMonth
 	default:
 		return 0
 	}
