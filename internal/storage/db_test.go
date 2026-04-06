@@ -631,6 +631,129 @@ func TestGetDailyCostsEmpty(t *testing.T) {
 	}
 }
 
+func TestGetModelCostBreakdown(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+
+	db.UpsertSession("s1", event.PlatformClaude, today)
+	db.InsertTokenUsage("a1", "s1", 1000, 500, 0, 0, "claude-sonnet-4-6", 1.50, today, "src-1")
+	db.InsertTokenUsage("a1", "s1", 2000, 800, 0, 0, "claude-opus-4-6", 3.20, today, "src-2")
+	db.InsertTokenUsage("a1", "s1", 500, 200, 0, 0, "claude-sonnet-4-6", 0.80, today, "src-3")
+
+	from := today.Add(-time.Hour)
+	to := today.Add(time.Hour)
+	models, err := db.GetModelCostBreakdown(from, to)
+	if err != nil {
+		t.Fatalf("get model cost breakdown: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+	// Ordered by cost DESC: opus first
+	if models[0].Model != "claude-opus-4-6" {
+		t.Errorf("expected opus first, got %q", models[0].Model)
+	}
+	if models[0].CostUSD < 3.19 || models[0].CostUSD > 3.21 {
+		t.Errorf("opus cost: got %f, want ~3.20", models[0].CostUSD)
+	}
+	// Sonnet: 1.50 + 0.80 = 2.30
+	if models[1].CostUSD < 2.29 || models[1].CostUSD > 2.31 {
+		t.Errorf("sonnet cost: got %f, want ~2.30", models[1].CostUSD)
+	}
+}
+
+func TestGetTopSessionsByCost(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+
+	db.UpsertSession("s1", event.PlatformClaude, today)
+	db.UpsertSession("s2", event.PlatformClaude, today)
+	db.InsertTokenUsage("a1", "s1", 1000, 500, 0, 0, "sonnet", 1.00, today, "src-1")
+	db.InsertTokenUsage("a1", "s2", 2000, 800, 0, 0, "sonnet", 5.00, today, "src-2")
+
+	from := today.Add(-time.Hour)
+	to := today.Add(time.Hour)
+	top, err := db.GetTopSessionsByCost(from, to, 10)
+	if err != nil {
+		t.Fatalf("get top sessions: %v", err)
+	}
+	if len(top) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(top))
+	}
+	// s2 should be first (higher cost)
+	if top[0].SessionID != "s2" {
+		t.Errorf("expected s2 first, got %q", top[0].SessionID)
+	}
+	if top[0].CostUSD < 4.99 || top[0].CostUSD > 5.01 {
+		t.Errorf("s2 cost: got %f, want ~5.00", top[0].CostUSD)
+	}
+}
+
+func TestGetDailyCostsBetween(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	from := today.AddDate(0, 0, -2)
+	to := today.AddDate(0, 0, 1)
+
+	db.UpsertSession("s1", event.PlatformClaude, today)
+	db.InsertTokenUsage("a1", "s1", 1000, 500, 0, 0, "sonnet", 2.50, today, "src-1")
+	db.InsertTokenUsage("a1", "s1", 500, 200, 0, 0, "sonnet", 1.00, today.AddDate(0, 0, -1), "src-2")
+
+	costs, err := db.GetDailyCostsBetween(from, to)
+	if err != nil {
+		t.Fatalf("get daily costs between: %v", err)
+	}
+	if len(costs) != 3 {
+		t.Fatalf("expected 3 days, got %d", len(costs))
+	}
+	// First day (2 days ago) should be 0
+	if costs[0].Cost != 0 {
+		t.Errorf("day 0 cost: got %f, want 0", costs[0].Cost)
+	}
+	// Yesterday should be ~1.00
+	if costs[1].Cost < 0.99 || costs[1].Cost > 1.01 {
+		t.Errorf("day 1 cost: got %f, want ~1.00", costs[1].Cost)
+	}
+	// Today should be ~2.50
+	if costs[2].Cost < 2.49 || costs[2].Cost > 2.51 {
+		t.Errorf("day 2 cost: got %f, want ~2.50", costs[2].Cost)
+	}
+}
+
+func TestAllToolStats(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+
+	db.UpsertSession("s1", event.PlatformClaude, today)
+	db.InsertToolCallStart("tc1", "a1", "s1", "Read", "file.go", today)
+	db.UpdateToolCallEnd("tc1", "ok", event.StatusSuccess, 100, today.Add(100*time.Millisecond))
+	db.InsertToolCallStart("tc2", "a1", "s1", "Read", "main.go", today)
+	db.UpdateToolCallEnd("tc2", "ok", event.StatusSuccess, 200, today.Add(200*time.Millisecond))
+	db.InsertToolCallStart("tc3", "a1", "s1", "Edit", "file.go", today)
+	db.UpdateToolCallEnd("tc3", "err", event.StatusFail, 50, today.Add(50*time.Millisecond))
+
+	from := today.Add(-time.Hour)
+	to := today.Add(time.Hour)
+	stats, err := db.AllToolStats(from, to)
+	if err != nil {
+		t.Fatalf("all tool stats: %v", err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(stats))
+	}
+	// Read should be first (2 calls vs 1)
+	if stats[0].ToolName != "Read" || stats[0].Count != 2 {
+		t.Errorf("expected Read with 2 calls, got %q with %d", stats[0].ToolName, stats[0].Count)
+	}
+	if stats[1].ToolName != "Edit" || stats[1].FailCount != 1 {
+		t.Errorf("expected Edit with 1 fail, got %q with %d fails", stats[1].ToolName, stats[1].FailCount)
+	}
+}
+
 func TestListSessionsShowsActiveAndTokenSessions(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()

@@ -43,6 +43,8 @@
 - **对话消息** — 浏览每个会话中的用户提示词，支持 `/` 搜索过滤
 - **会话标签** — `agmon tag <id> "备注"` 给会话打标签，方便回忆
 - **时间范围统计** — 今日 / 本周 / 本月 / 全部 Token 与费用聚合
+- **费用报告** — `agmon report --weekly/--monthly` 生成 Markdown 费用报告（按模型、按会话细分）
+- **Web Dashboard** — `agmon web` 启动本地 Web 面板，支持深色/浅色模式、面积图、会话详情、对话回顾
 - **实时更新** — daemon 广播事件，TUI 实时刷新
 - **零配置** — `agmon setup` + `agmon`，单二进制文件，无依赖
 
@@ -104,7 +106,10 @@ agmon
 | `agmon daemon` | 仅启动 daemon |
 | `agmon status` | 快速查看会话摘要 |
 | `agmon report [session]` | 详细文本报告 |
+| `agmon report --weekly` | 本周 Markdown 费用报告 |
+| `agmon report --monthly` | 本月 Markdown 费用报告 |
 | `agmon cost [today\|week]` | Token 用量统计 |
+| `agmon web [--port N]` | 启动 Web Dashboard（默认端口 8370） |
 | `agmon clean [days]` | 清理 N 天前的历史数据（默认 7 天） |
 | `agmon tag <id> [text]` | 给会话打标签（省略 text 则清除） |
 | `agmon setup` | 配置 Claude Code hooks |
@@ -139,6 +144,22 @@ agmon
 | `Esc` | 清除过滤 |
 | `q` | 退出 |
 
+## Web Dashboard
+
+```bash
+agmon web              # 打开 http://localhost:8370
+agmon web --port 9000  # 自定义端口
+```
+
+浏览器面板功能：
+
+- 费用面积图（Canvas 绘制，hover 显示详情，点击按天筛选会话）
+- 模型费用占比 + 工具调用排行
+- 会话列表（搜索、排序、费用色标）
+- 会话详情（对话消息、工具时间线、文件变更、Agent 层级）
+- 深色/浅色模式切换（自动检测系统偏好）
+- 键盘导航（`j`/`k` 选择、`Enter` 打开、`/` 搜索、`←`/`→` 切换、`Esc` 返回、`?` 帮助）
+
 ## 架构
 
 ```
@@ -153,12 +174,15 @@ Codex JSONL 日志  ──→ CodexWatcher ──────→│
                                     SQLite (~/.agmon/data/agmon.db)
                                          │
                                     agmon TUI (Bubbletea)
+                                         │
+                                    agmon web (HTTP Dashboard)
 ```
 
 - **Daemon** — 通过 Unix socket 接收事件，存入 SQLite，广播给 TUI
 - **Claude hooks** — `PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd` 等
 - **日志监听器** — Claude watcher 轮询项目日志；Codex watcher 启动时全量发现一次，之后只跟踪已知文件和最近会话目录
 - **TUI** — 连接 daemon，4 个视图实时刷新
+- **Web** — 独立 HTTP 服务，读取 SQLite + JSONL 日志，提供 REST API + 嵌入式前端
 
 ## 数据存储
 

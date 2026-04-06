@@ -28,13 +28,23 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=10000")
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 	// SQLite allows only one writer at a time. A single connection serializes
 	// all access and eliminates SQLITE_BUSY when multiple goroutines write concurrently.
 	db.SetMaxOpenConns(1)
+
+	// Set pragmas explicitly — DSN parameters may not be recognized by modernc.org/sqlite.
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set WAL mode: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=10000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set busy_timeout: %w", err)
+	}
 
 	s := &DB{db: db}
 	if err := s.migrate(); err != nil {

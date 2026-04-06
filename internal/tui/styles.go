@@ -14,7 +14,7 @@ var (
 	colorWhite       = lipgloss.Color("#E5E7EB") // white-ish for normal text
 	colorHighlight   = lipgloss.Color("#A78BFA") // lighter purple for highlights
 	colorInfo        = lipgloss.Color("#93C5FD") // soft blue for dashboard values
-	colorClaudeBadge = lipgloss.Color("#94A3B8") // slate blue for Claude badge
+	colorClaudeBadge = lipgloss.Color("#F97316") // orange for Claude badge
 
 	// Title
 	titleStyle = lipgloss.NewStyle().

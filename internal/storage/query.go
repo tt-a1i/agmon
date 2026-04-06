@@ -395,6 +395,143 @@ func startOfToday() time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 }
 
+// ModelCostRow holds cost data for a single model.
+type ModelCostRow struct {
+	Model       string
+	InputTokens int
+	OutputTokens int
+	CostUSD     float64
+}
+
+// GetModelCostBreakdown returns per-model cost aggregation in a time range.
+func (s *DB) GetModelCostBreakdown(from, to time.Time) ([]ModelCostRow, error) {
+	rows, err := s.db.Query(`
+		SELECT COALESCE(NULLIF(model, ''), 'unknown') as m,
+		       SUM(input_tokens + cache_creation_tokens + cache_read_tokens),
+		       SUM(output_tokens),
+		       SUM(cost_usd)
+		FROM token_usage
+		WHERE timestamp >= ? AND timestamp < ?
+		GROUP BY m ORDER BY SUM(cost_usd) DESC
+	`, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ModelCostRow
+	for rows.Next() {
+		var r ModelCostRow
+		if err := rows.Scan(&r.Model, &r.InputTokens, &r.OutputTokens, &r.CostUSD); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// TopSessionRow holds session cost data for ranking.
+type TopSessionRow struct {
+	SessionID   string
+	Platform    string
+	GitBranch   string
+	CWD         string
+	CostUSD     float64
+	InputTokens int
+	OutputTokens int
+}
+
+// GetTopSessionsByCost returns the top sessions by cost in a time range.
+func (s *DB) GetTopSessionsByCost(from, to time.Time, limit int) ([]TopSessionRow, error) {
+	rows, err := s.db.Query(`
+		SELECT t.session_id, s.platform, s.git_branch, s.cwd,
+		       SUM(t.cost_usd), SUM(t.input_tokens + t.cache_creation_tokens + t.cache_read_tokens), SUM(t.output_tokens)
+		FROM token_usage t
+		JOIN sessions s ON t.session_id = s.session_id
+		WHERE t.timestamp >= ? AND t.timestamp < ?
+		GROUP BY t.session_id
+		ORDER BY SUM(t.cost_usd) DESC
+		LIMIT ?
+	`, from.Format(time.RFC3339), to.Format(time.RFC3339), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []TopSessionRow
+	for rows.Next() {
+		var r TopSessionRow
+		if err := rows.Scan(&r.SessionID, &r.Platform, &r.GitBranch, &r.CWD,
+			&r.CostUSD, &r.InputTokens, &r.OutputTokens); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// GetDailyCostsBetween returns per-day cost totals between from and to.
+// Results are ordered oldest-first, with zero-filled gaps.
+func (s *DB) GetDailyCostsBetween(from, to time.Time) ([]DailyCost, error) {
+	rows, err := s.db.Query(`
+		SELECT DATE(timestamp) as day, SUM(cost_usd) as cost
+		FROM token_usage
+		WHERE timestamp >= ? AND timestamp < ?
+		GROUP BY day ORDER BY day ASC
+	`, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	costMap := make(map[string]float64)
+	for rows.Next() {
+		var day string
+		var cost float64
+		if err := rows.Scan(&day, &cost); err != nil {
+			return nil, err
+		}
+		costMap[day] = cost
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var result []DailyCost
+	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		result = append(result, DailyCost{Date: key, Cost: costMap[key]})
+	}
+	return result, nil
+}
+
+// AllToolStats returns aggregated tool stats across all sessions in a time range.
+func (s *DB) AllToolStats(from, to time.Time) ([]ToolStatRow, error) {
+	rows, err := s.db.Query(`
+		SELECT tool_name,
+		       COUNT(*) as cnt,
+		       CAST(COALESCE(AVG(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) AS INTEGER) as avg_ms,
+		       SUM(CASE WHEN status IN ('fail','error') THEN 1 ELSE 0 END) as fail_cnt
+		FROM tool_calls
+		WHERE start_time >= ? AND start_time < ?
+		GROUP BY tool_name ORDER BY cnt DESC
+	`, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ToolStatRow
+	for rows.Next() {
+		var r ToolStatRow
+		if err := rows.Scan(&r.ToolName, &r.Count, &r.AvgMs, &r.FailCount); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 // DailyCost holds cost data for a single day.
 type DailyCost struct {
 	Date string // YYYY-MM-DD
