@@ -684,6 +684,40 @@ func runWeb() {
 	db := mustOpenDB()
 	defer db.Close()
 
+	sockPath := daemon.DefaultSocketPath()
+
+	// Start embedded daemon if not already running, so web dashboard has live data.
+	var d *daemon.Daemon
+	if running, _ := daemon.IsRunning(); !running {
+		d = daemon.New(db, sockPath)
+		if err := d.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "start daemon: %v\n", err)
+		} else {
+			daemon.WritePID()
+			defer daemon.RemovePID()
+			defer d.Stop()
+
+			// Start Codex watcher
+			codexWatcher := collector.NewCodexWatcher(func(ev event.Event) {
+				d.ProcessExternalEventAsync(ev)
+			})
+			collector.RegisterCodexWatcher(codexWatcher)
+			codexWatcher.Start()
+			defer codexWatcher.Stop()
+
+			// Start Claude log watcher
+			claudeLogWatcher := collector.NewClaudeLogWatcher(func(ev event.Event) {
+				d.ProcessExternalEventAsync(ev)
+			})
+			claudeLogWatcher.Start()
+			defer claudeLogWatcher.Stop()
+
+			fmt.Println("daemon + watchers started (live data collection)")
+		}
+	} else {
+		fmt.Println("daemon already running (connecting to existing)")
+	}
+
 	srv := web.NewServer(db, port)
 	fmt.Printf("agmon web dashboard: http://localhost:%s\n", port)
 
