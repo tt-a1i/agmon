@@ -110,6 +110,11 @@ func TestHandleCosts(t *testing.T) {
 	if len(resp.DailyCosts) == 0 {
 		t.Error("expected daily costs")
 	}
+	// "all" range must not return thousands of days from 2020 — it should start
+	// from the first token date, so the result is at most a few days.
+	if len(resp.DailyCosts) > 60 {
+		t.Errorf("all range returned %d days; expected <= 60 (should start from first token date)", len(resp.DailyCosts))
+	}
 }
 
 func TestHandleStats(t *testing.T) {

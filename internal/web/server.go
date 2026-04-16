@@ -92,10 +92,10 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 type costResponse struct {
-	Range      string             `json:"range"`
-	TotalCost  float64            `json:"total_cost"`
-	PrevCost   float64            `json:"prev_cost"`
-	DailyCosts []storage.DailyCost `json:"daily_costs"`
+	Range      string                 `json:"range"`
+	TotalCost  float64                `json:"total_cost"`
+	PrevCost   float64                `json:"prev_cost"`
+	DailyCosts []storage.DailyCost    `json:"daily_costs"`
 	Models     []storage.ModelCostRow `json:"models"`
 }
 
@@ -120,7 +120,12 @@ func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
 	case "month":
 		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	case "all":
-		from = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+		firstDate, err := s.db.GetFirstTokenDate()
+		if err != nil || firstDate.IsZero() {
+			from = time.Now().UTC().AddDate(0, 0, -29)
+		} else {
+			from = firstDate
+		}
 	default:
 		from = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -6)
 	}
@@ -144,12 +149,12 @@ func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
 }
 
 type statsResponse struct {
-	TotalSessions int                  `json:"total_sessions"`
-	ActiveCount   int                  `json:"active_count"`
-	TodayCost     float64              `json:"today_cost"`
-	WeekCost      float64              `json:"week_cost"`
-	DailyCosts    []storage.DailyCost  `json:"daily_costs"`
-	TopTools      []storage.ToolStatRow `json:"top_tools"`
+	TotalSessions int                     `json:"total_sessions"`
+	ActiveCount   int                     `json:"active_count"`
+	TodayCost     float64                 `json:"today_cost"`
+	WeekCost      float64                 `json:"week_cost"`
+	DailyCosts    []storage.DailyCost     `json:"daily_costs"`
+	TopTools      []storage.ToolStatRow   `json:"top_tools"`
 	TopSessions   []storage.TopSessionRow `json:"top_sessions"`
 }
 

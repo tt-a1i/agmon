@@ -397,10 +397,10 @@ func startOfToday() time.Time {
 
 // ModelCostRow holds cost data for a single model.
 type ModelCostRow struct {
-	Model       string
-	InputTokens int
+	Model        string
+	InputTokens  int
 	OutputTokens int
-	CostUSD     float64
+	CostUSD      float64
 }
 
 // GetModelCostBreakdown returns per-model cost aggregation in a time range.
@@ -432,12 +432,12 @@ func (s *DB) GetModelCostBreakdown(from, to time.Time) ([]ModelCostRow, error) {
 
 // TopSessionRow holds session cost data for ranking.
 type TopSessionRow struct {
-	SessionID   string
-	Platform    string
-	GitBranch   string
-	CWD         string
-	CostUSD     float64
-	InputTokens int
+	SessionID    string
+	Platform     string
+	GitBranch    string
+	CWD          string
+	CostUSD      float64
+	InputTokens  int
 	OutputTokens int
 }
 
@@ -536,6 +536,20 @@ func (s *DB) AllToolStats(from, to time.Time) ([]ToolStatRow, error) {
 type DailyCost struct {
 	Date string // YYYY-MM-DD
 	Cost float64
+}
+
+// GetFirstTokenDate returns the earliest date in token_usage, truncated to day start (UTC).
+// Returns zero time if the table is empty.
+func (s *DB) GetFirstTokenDate() (time.Time, error) {
+	var ts *string
+	if err := s.db.QueryRow("SELECT MIN(timestamp) FROM token_usage").Scan(&ts); err != nil {
+		return time.Time{}, err
+	}
+	if ts == nil || *ts == "" {
+		return time.Time{}, nil
+	}
+	t := parseTime(*ts).UTC()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC), nil
 }
 
 // GetDailyCosts returns per-day cost totals for the last N days (including today).

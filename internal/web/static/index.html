@@ -88,7 +88,7 @@ nav{display:flex;align-items:center;justify-content:space-between;height:48px;ma
 .chart-wrap canvas{display:block;width:100%;height:100%;transition:opacity .2s}
 .chart-tip{position:absolute;top:8px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text-strong);font-weight:600;pointer-events:none;opacity:0;transition:opacity .1s;box-shadow:var(--card-shadow);z-index:5}
 .chart-tip .td{font-size:10px;color:var(--text-muted);font-weight:500}
-.chart-labels{display:flex;justify-content:space-between;padding:6px 4px 0;font-size:10px;color:var(--text-muted)}
+.chart-labels{position:relative;height:20px;padding-top:6px;font-size:10px;color:var(--text-muted)}
 
 /* Grid */
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
@@ -559,6 +559,10 @@ const api=u=>fetch(u).then(r=>r.json());
 function renderChart(days){
   const canvas=$('chartCanvas'),wrap=$('chartWrap'),labels=$('chartLabels'),tip=$('chartTip');
   if(!days||!days.length){canvas.width=0;labels.innerHTML='';$('chartAvg').textContent='';return}
+  // Trim leading zero-cost days so the chart doesn't look empty on the left.
+  // Keep at most one zero-day before the first active day for visual context.
+  const firstNonZero=days.findIndex(d=>d.Cost>0);
+  if(firstNonZero>1)days=days.slice(firstNonZero-1);
   lastCostDays=days;
   const avg=days.reduce((s,d)=>s+d.Cost,0)/days.length;
   $('chartAvg').textContent='avg '+fc(avg)+'/day';
@@ -605,7 +609,11 @@ function renderChart(days){
   // Dots
   pts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fillStyle=lineColor;ctx.fill();ctx.strokeStyle=bgColor;ctx.lineWidth=1.5;ctx.stroke()});
 
-  labels.innerHTML=days.map(d=>`<span>${new Date(d.Date+'T12:00:00').toLocaleDateString('en',{weekday:'short'})}</span>`).join('');
+  const maxLbls=7,lblStep=Math.max(1,Math.round(days.length/maxLbls)),lblIdxs=[];
+  for(let i=0;i<days.length;i+=lblStep)lblIdxs.push(i);
+  if(lblIdxs[lblIdxs.length-1]!==days.length-1)lblIdxs.push(days.length-1);
+  const fmtLbl=ds=>{const dt=new Date(ds+'T12:00:00');return days.length>14?dt.toLocaleDateString('en',{month:'short',day:'numeric'}):dt.toLocaleDateString('en',{weekday:'short'})};
+  labels.innerHTML=lblIdxs.map(i=>`<span style="position:absolute;left:${(gx(i)/W*100).toFixed(1)}%;transform:translateX(-50%)">${fmtLbl(days[i].Date)}</span>`).join('');
 
   let lastHi=-1;
   wrap.onmousemove=e=>{

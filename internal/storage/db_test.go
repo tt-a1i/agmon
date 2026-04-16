@@ -754,6 +754,36 @@ func TestAllToolStats(t *testing.T) {
 	}
 }
 
+func TestGetFirstTokenDate(t *testing.T) {
+	db := testDB(t)
+
+	// Empty table returns zero time without error.
+	got, err := db.GetFirstTokenDate()
+	if err != nil {
+		t.Fatalf("empty table: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("empty table: want zero time, got %v", got)
+	}
+
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	older := today.AddDate(0, 0, -5)
+
+	db.UpsertSession("s1", event.PlatformClaude, today)
+	db.InsertTokenUsage("a1", "s1", 100, 50, 0, 0, "sonnet", 0.10, today, "src-today")
+	db.InsertTokenUsage("a1", "s1", 200, 100, 0, 0, "sonnet", 0.20, older, "src-older")
+
+	got, err = db.GetFirstTokenDate()
+	if err != nil {
+		t.Fatalf("with data: %v", err)
+	}
+	want := time.Date(older.Year(), older.Month(), older.Day(), 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("first token date: got %v, want %v", got, want)
+	}
+}
+
 func TestListSessionsShowsActiveAndTokenSessions(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()
