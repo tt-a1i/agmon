@@ -214,6 +214,13 @@ func (w *ClaudeLogWatcher) scanParallel(jobs []claudeFileJob) {
 	}
 }
 
+// ParseClaudeFileEvents parses a Claude session JSONL file and returns the
+// TokenUsage events that would be emitted to the daemon. Intended for tests
+// and offline tooling; does not touch any watcher state.
+func ParseClaudeFileEvents(path, sessionID string) []event.Event {
+	return processClaudeFileCollect(path, sessionID, 0, "", nil).events
+}
+
 // processClaudeFileCollect parses a Claude JSONL file without touching watcher state.
 func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGitBranch string, cancelled func() bool) claudeFileResult {
 	result := claudeFileResult{path: path, offset: startOffset, sessionID: sessionID, gitBranch: prevGitBranch}

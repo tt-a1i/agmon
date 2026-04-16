@@ -1,12 +1,15 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/tt-a1i/agmon/internal/collector"
 	"github.com/tt-a1i/agmon/internal/event"
 	"github.com/tt-a1i/agmon/internal/storage"
 )
@@ -241,5 +244,164 @@ func TestProcessEventToolCallEndInsertsFileChange(t *testing.T) {
 	}
 	if changes[0].ChangeType != string(event.FileEdit) {
 		t.Fatalf("unexpected change type: %q", changes[0].ChangeType)
+	}
+}
+
+// TestProcessEventClaudeWatcherToDB exercises the full Claude watcher → daemon
+// → DB path: parse a real JSONL file via collector, feed each emitted event
+// through d.processEvent, assert session totals match hand-calculated cost
+// AND that FillSessionMeta populated cwd/git_branch. A second pass simulates
+// daemon restart and must not double-count (UUID-based source_id dedup).
+func TestProcessEventClaudeWatcherToDB(t *testing.T) {
+	d, db := testDaemon(t)
+
+	const (
+		sessionID    = "sess-daemon-claude-1"
+		msgUUID      = "uuid-daemon-1"
+		model        = "claude-sonnet-4-6"
+		inputTokens  = 1000
+		outputTokens = 500
+		cacheCreate  = 200
+		cacheRead    = 300
+		expectedCost = 0.011340 // (1000*3 + 500*15 + 200*3.75 + 300*0.30) / 1e6
+	)
+
+	jsonl := map[string]any{
+		"type":      "assistant",
+		"sessionId": sessionID,
+		"uuid":      msgUUID,
+		"cwd":       "/tmp/agmon/daemon-test",
+		"gitBranch": "feature/daemon-e2e",
+		"timestamp": "2026-04-16T10:00:00.000Z",
+		"message": map[string]any{
+			"model": model,
+			"usage": map[string]any{
+				"input_tokens":                inputTokens,
+				"output_tokens":               outputTokens,
+				"cache_creation_input_tokens": cacheCreate,
+				"cache_read_input_tokens":     cacheRead,
+			},
+		},
+	}
+	body, _ := json.Marshal(jsonl)
+	path := filepath.Join(t.TempDir(), sessionID+".jsonl")
+	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+
+	// First pass: parse + process through the daemon.
+	events := collector.ParseClaudeFileEvents(path, sessionID)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event from parser, got %d", len(events))
+	}
+	for _, ev := range events {
+		if err := d.processEvent(ev); err != nil {
+			t.Fatalf("processEvent: %v", err)
+		}
+	}
+
+	sess, found, err := db.GetSessionByIDPrefix(sessionID)
+	if err != nil || !found {
+		t.Fatalf("session lookup: err=%v found=%v", err, found)
+	}
+	if math.Abs(sess.TotalCostUSD-expectedCost) > 1e-6 {
+		t.Fatalf("total_cost_usd = %f, want %f", sess.TotalCostUSD, expectedCost)
+	}
+	if sess.CWD != "/tmp/agmon/daemon-test" {
+		t.Errorf("cwd = %q, want /tmp/agmon/daemon-test (FillSessionMeta not wired)", sess.CWD)
+	}
+	if sess.GitBranch != "feature/daemon-e2e" {
+		t.Errorf("git_branch = %q, want feature/daemon-e2e (FillSessionMeta not wired)", sess.GitBranch)
+	}
+
+	// Second pass: replay same file (simulating daemon restart). UUID-based
+	// source_id dedup in InsertTokenUsage must prevent double counting.
+	replay := collector.ParseClaudeFileEvents(path, sessionID)
+	for _, ev := range replay {
+		if err := d.processEvent(ev); err != nil {
+			t.Fatalf("processEvent replay: %v", err)
+		}
+	}
+	sess2, _, _ := db.GetSessionByIDPrefix(sessionID)
+	if math.Abs(sess2.TotalCostUSD-expectedCost) > 1e-6 {
+		t.Fatalf("after replay total_cost_usd = %f, want %f (dedup failed)", sess2.TotalCostUSD, expectedCost)
+	}
+}
+
+// TestProcessEventCodexEmptyModelBackfill targets the branch at
+// daemon.go:271 — Codex token_count events can arrive before turn_context
+// sets the model. Earlier rows have model="" until a later event with a
+// known model triggers BackfillEmptyTokenModel + UpdateSessionTokens.
+func TestProcessEventCodexEmptyModelBackfill(t *testing.T) {
+	d, db := testDaemon(t)
+	now := time.Now().UTC()
+
+	const sessionID = "sess-daemon-codex-backfill"
+
+	// Event 1: token_count arrives before turn_context — model is empty,
+	// cost is 0. Row goes into token_usage with model=''.
+	event1 := event.Event{
+		ID:        "codex-tokens-1",
+		Type:      event.EventTokenUsage,
+		SessionID: sessionID,
+		Platform:  event.PlatformCodex,
+		Timestamp: now,
+		Data: event.EventData{
+			InputTokens:     300,
+			OutputTokens:    50,
+			CacheReadTokens: 100,
+			Model:           "",
+			CostUSD:         0,
+		},
+	}
+	if err := d.processEvent(event1); err != nil {
+		t.Fatalf("processEvent #1: %v", err)
+	}
+
+	// Before the backfill event arrives, session cost must be 0.
+	sess0, _, _ := db.GetSessionByIDPrefix(sessionID)
+	if sess0.TotalCostUSD != 0 {
+		t.Fatalf("pre-backfill total_cost_usd = %f, want 0", sess0.TotalCostUSD)
+	}
+
+	// Event 2: same session, now with model="gpt-5.4" and a pre-computed
+	// cost. Daemon should (a) insert this row, (b) detect empty-model rows
+	// in this session and backfill them with gpt-5.4 rates, (c) re-sum
+	// session totals.
+	//
+	// gpt-5.4 rates: input=$2.50/M, output=$15/M, cache_read=$0.25/M.
+	//   Row 1 backfilled cost: ((300-100)*2.50 + 100*0.25 + 50*15) / 1e6
+	//                        = (500 + 25 + 750) / 1e6 = 0.001275
+	//   Row 2 cost:           ((500-200)*2.50 + 200*0.25 + 100*15) / 1e6
+	//                        = (750 + 50 + 1500) / 1e6 = 0.002300
+	//   Session total:        0.001275 + 0.002300 = 0.003575
+	event2 := event.Event{
+		ID:        "codex-tokens-2",
+		Type:      event.EventTokenUsage,
+		SessionID: sessionID,
+		Platform:  event.PlatformCodex,
+		Timestamp: now.Add(5 * time.Second),
+		Data: event.EventData{
+			InputTokens:     500,
+			OutputTokens:    100,
+			CacheReadTokens: 200,
+			Model:           "gpt-5.4",
+			CostUSD:         0.002300,
+		},
+	}
+	if err := d.processEvent(event2); err != nil {
+		t.Fatalf("processEvent #2: %v", err)
+	}
+
+	sess, _, _ := db.GetSessionByIDPrefix(sessionID)
+	const wantCost = 0.003575
+	if math.Abs(sess.TotalCostUSD-wantCost) > 1e-6 {
+		t.Fatalf("post-backfill total_cost_usd = %f, want %f", sess.TotalCostUSD, wantCost)
+	}
+	if sess.TotalInputTokens != 800 {
+		t.Errorf("total_input_tokens = %d, want 800", sess.TotalInputTokens)
+	}
+	if sess.TotalOutputTokens != 150 {
+		t.Errorf("total_output_tokens = %d, want 150", sess.TotalOutputTokens)
 	}
 }
