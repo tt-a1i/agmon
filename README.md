@@ -23,7 +23,7 @@
 
 ---
 
-> 在一个终端面板中监控 Claude Code 和 Codex 的 Token 消耗、费用、工具调用和文件变更。
+> 在一个终端面板中监控 Claude Code 和 Codex 的 Token 消耗、费用、工具调用，消息列表，支持tui和web面板。
 
 <p align="center">
   <img width="732" alt="仪表盘" src="https://github.com/user-attachments/assets/7dd5f211-7a44-483c-92d1-4bcf490cd5b5" />
