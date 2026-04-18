@@ -25,12 +25,17 @@
 
 > 在一个终端面板中监控 Claude Code 和 Codex 的 Token 消耗、费用、工具调用，消息列表，支持tui和web面板。
 <p align="center">
-<img width="1192" height="903" alt="image" src="https://github.com/user-attachments/assets/b1dc6609-868e-4c24-bfc0-73baa9c81432" />
+  <img width="711" alt="image" src="https://github.com/user-attachments/assets/b1dc6609-868e-4c24-bfc0-73baa9c81432" />
 </p>
 
 <p align="center">
-  <img width="711" alt="工具调用" src="https://github.com/user-attachments/assets/30e28c15-09b9-40b1-94e1-7cf4c47c8503" />
+  <img width="711" alt="工具调用" src="https://github.com/user-attachments/assets/1fcc7162-0af7-49c3-93f4-2e947c531549" />
 </p>
+
+<p align="center">
+<img width="711" alt="image" src="https://github.com/user-attachments/assets/90389a23-352d-4159-ad78-aed5a0b1a54a" />
+</p>
+
 
 <p align="center">
   <picture>
