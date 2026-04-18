@@ -33,6 +33,14 @@
   <img width="711" alt="工具调用" src="https://github.com/user-attachments/assets/30e28c15-09b9-40b1-94e1-7cf4c47c8503" />
 </p>
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/architecture.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/architecture-light.svg">
+    <img src="docs/architecture.svg" alt="agmon 架构图" width="100%">
+  </picture>
+</p>
+
 ## 功能
 
 - **多平台** — Claude Code + Codex 统一视图
@@ -162,38 +170,29 @@ agmon web --port 9000  # 自定义端口
 
 ## 架构
 
-<p align="center">
-  <img src="docs/architecture.svg" alt="agmon 架构图" width="100%">
-</p>
+顶部的架构图展示了完整数据流。下面是组件职责速查：
 
-<details>
-<summary>文本版（ASCII 回退）</summary>
-
-```
-Claude Code hooks ──→ agmon emit ──→ Unix socket
-                                         │
-Claude JSONL 日志 ──→ ClaudeLogWatcher ──→│
-                                         │
-Codex JSONL 日志  ──→ CodexWatcher ──────→│
-                                         ▼
-                                    agmon daemon
-                                         │
-                                    SQLite (~/.agmon/data/agmon.db)
-                                         │
-                                    agmon TUI (Bubbletea)
-                                         │
-                                    agmon web (HTTP Dashboard)
-```
-
-</details>
-
-- **Daemon** — 通过 Unix socket 接收事件，存入 SQLite，广播给 TUI / Web
-- **Claude hooks** — `PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd` 等 8 个事件
-- **日志监听器** — Claude watcher 扫描 `~/.claude/projects/` 的 JSONL 取 token；Codex watcher 轮询 `~/.codex/sessions/`，内存去重
+- **Daemon** — 通过 Unix socket 接收 Claude hook 事件，存入 SQLite，实时广播给 TUI / Web
+- **Claude hooks** — `PreToolUse` / `PostToolUse` / `SessionStart` / `SessionEnd` 等 8 个事件
+- **日志监听器** — Claude watcher 扫描 `~/.claude/projects/` 的 JSONL 提取 token；Codex watcher 轮询 `~/.codex/sessions/`，内存去重
 - **TUI** — bubbletea 四视图（Dashboard / Messages / Tool Calls / Timeline），订阅 daemon 实时事件
 - **Web** — 独立 HTTP 服务 + 嵌入式 SPA，读取 SQLite，提供 REST API 与费用报表
 
-> 交互版架构图（含深/浅主题切换与 PNG/SVG 导出）：[`docs/architecture.html`](docs/architecture.html)
+> 交互版架构图（主题切换 + PNG/SVG 导出）：[`docs/architecture.html`](docs/architecture.html)
+>
+> ASCII 版速写：
+>
+> ```
+> Claude Code hooks ──→ agmon emit ──→ Unix socket ─┐
+> Claude JSONL 日志 ──→ ClaudeLogWatcher ───────────┤
+> Codex  JSONL 日志 ──→ CodexWatcher ───────────────┘
+>                                                    ▼
+>                                              agmon daemon
+>                                                    │
+>                                          SQLite (~/.agmon/data/agmon.db)
+>                                                    │
+>                                  agmon TUI  ◄─────┴─────►  agmon web
+> ```
 
 ## 数据存储
 

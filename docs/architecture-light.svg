@@ -7,28 +7,28 @@
     @font-face { font-family: 'JetBrains Mono'; font-weight: 700; src: local('JetBrains Mono'), local('JetBrainsMono-Bold'); }
 
     svg {
-      --bg: #020617;
-      --grid: #1e293b;
-      --text: #ffffff;
-      --text-muted: #94a3b8;
-      --text-dim: #475569;
-      --arrow: #64748b;
-      --arrow-emphasis: #34d399;
-      --mask: #0f172a;
-      --frontend-fill: rgba(8, 51, 68, 0.4);
-      --frontend-stroke: #22d3ee;
-      --backend-fill: rgba(6, 78, 59, 0.4);
-      --backend-stroke: #34d399;
-      --database-fill: rgba(76, 29, 149, 0.4);
-      --database-stroke: #a78bfa;
-      --cloud-fill: rgba(120, 53, 15, 0.3);
-      --cloud-stroke: #fbbf24;
-      --security-fill: rgba(136, 19, 55, 0.4);
-      --security-stroke: #fb7185;
-      --messagebus-fill: rgba(251, 146, 60, 0.3);
-      --messagebus-stroke: #fb923c;
-      --external-fill: rgba(30, 41, 59, 0.5);
-      --external-stroke: #94a3b8;
+      --bg: #f8fafc;
+      --grid: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --text-dim: #94a3b8;
+      --arrow: #94a3b8;
+      --arrow-emphasis: #059669;
+      --mask: #ffffff;
+      --frontend-fill: rgba(34, 211, 238, 0.15);
+      --frontend-stroke: #0891b2;
+      --backend-fill: rgba(52, 211, 153, 0.18);
+      --backend-stroke: #059669;
+      --database-fill: rgba(167, 139, 250, 0.2);
+      --database-stroke: #7c3aed;
+      --cloud-fill: rgba(251, 191, 36, 0.18);
+      --cloud-stroke: #d97706;
+      --security-fill: rgba(251, 113, 133, 0.15);
+      --security-stroke: #e11d48;
+      --messagebus-fill: rgba(251, 146, 60, 0.15);
+      --messagebus-stroke: #ea580c;
+      --external-fill: rgba(148, 163, 184, 0.18);
+      --external-stroke: #64748b;
     }
 
     .c-bg-rect   { fill: var(--bg); }
