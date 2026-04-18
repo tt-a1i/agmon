@@ -33,6 +33,13 @@
   <img width="711" alt="Tool Calls" src="https://github.com/user-attachments/assets/32d70f5b-e6ab-48be-98c0-12209ddcd621" />
 </p>
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/architecture.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/architecture-light.svg">
+    <img src="docs/architecture.svg" alt="agmon architecture diagram" width="100%">
+  </picture>
+</p>
 
 ## Features
 
@@ -142,24 +149,29 @@ Press **Tab** to switch between views:
 
 ## Architecture
 
-```
-Claude Code hooks ──→ agmon emit ──→ Unix socket
-                                         │
-Claude JSONL logs ──→ ClaudeLogWatcher ──→│
-                                         │
-Codex JSONL logs  ──→ CodexWatcher ──────→│
-                                         ▼
-                                    agmon daemon
-                                         │
-                                    SQLite (~/.agmon/data/agmon.db)
-                                         │
-                                    agmon TUI (Bubbletea)
-```
+The diagram at the top shows the full data flow. Component cheat sheet:
 
-- **Daemon** — receives events via Unix socket, stores to SQLite, broadcasts to TUI
-- **Claude hooks** — `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, etc.
-- **Log watchers** — Claude watcher polls project logs; Codex watcher does one full discovery on startup, then follows known files plus recent session directories
-- **TUI** — connects to daemon, renders 4 views with live refresh
+- **Daemon** — receives Claude hook events over a Unix socket, persists them to SQLite, and broadcasts live events to TUI / Web
+- **Claude hooks** — 8 events: `PreToolUse`, `PostToolUse`, `SessionStart`, `SessionEnd`, etc.
+- **Log watchers** — Claude watcher scans JSONL under `~/.claude/projects/` for tokens; Codex watcher polls `~/.codex/sessions/` with in-memory deduplication
+- **TUI** — bubbletea with four views (Dashboard / Messages / Tool Calls / Timeline), subscribes to the daemon's live event stream
+- **Web** — standalone HTTP server + embedded SPA, reads SQLite, serves REST API and cost reports
+
+> Interactive diagram (theme toggle + PNG/SVG export): [`docs/architecture.html`](docs/architecture.html)
+>
+> ASCII sketch:
+>
+> ```
+> Claude Code hooks ──→ agmon emit ──→ Unix socket ─┐
+> Claude JSONL logs ──→ ClaudeLogWatcher ───────────┤
+> Codex  JSONL logs ──→ CodexWatcher ───────────────┘
+>                                                    ▼
+>                                              agmon daemon
+>                                                    │
+>                                          SQLite (~/.agmon/data/agmon.db)
+>                                                    │
+>                                  agmon TUI  ◄─────┴─────►  agmon web
+> ```
 
 ## Data Storage
 
