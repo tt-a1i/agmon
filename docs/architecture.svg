@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 660" width="1040" height="660" font-family="JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace">
+  <style>
+    @font-face { font-family: 'JetBrains Mono'; font-weight: 400; src: local('JetBrains Mono'), local('JetBrainsMono-Regular'); }
+    @font-face { font-family: 'JetBrains Mono'; font-weight: 500; src: local('JetBrains Mono'), local('JetBrainsMono-Medium'); }
+    @font-face { font-family: 'JetBrains Mono'; font-weight: 600; src: local('JetBrains Mono'), local('JetBrainsMono-SemiBold'); }
+    @font-face { font-family: 'JetBrains Mono'; font-weight: 700; src: local('JetBrains Mono'), local('JetBrainsMono-Bold'); }
+
+    svg {
+      --bg: #020617;
+      --grid: #1e293b;
+      --text: #ffffff;
+      --text-muted: #94a3b8;
+      --text-dim: #475569;
+      --arrow: #64748b;
+      --arrow-emphasis: #34d399;
+      --mask: #0f172a;
+      --frontend-fill: rgba(8, 51, 68, 0.4);
+      --frontend-stroke: #22d3ee;
+      --backend-fill: rgba(6, 78, 59, 0.4);
+      --backend-stroke: #34d399;
+      --database-fill: rgba(76, 29, 149, 0.4);
+      --database-stroke: #a78bfa;
+      --cloud-fill: rgba(120, 53, 15, 0.3);
+      --cloud-stroke: #fbbf24;
+      --security-fill: rgba(136, 19, 55, 0.4);
+      --security-stroke: #fb7185;
+      --messagebus-fill: rgba(251, 146, 60, 0.3);
+      --messagebus-stroke: #fb923c;
+      --external-fill: rgba(30, 41, 59, 0.5);
+      --external-stroke: #94a3b8;
+    }
+
+    @media (prefers-color-scheme: light) {
+      svg {
+        --bg: #f8fafc;
+        --grid: #e2e8f0;
+        --text: #0f172a;
+        --text-muted: #64748b;
+        --text-dim: #94a3b8;
+        --arrow: #94a3b8;
+        --arrow-emphasis: #059669;
+        --mask: #ffffff;
+        --frontend-fill: rgba(34, 211, 238, 0.15);
+        --frontend-stroke: #0891b2;
+        --backend-fill: rgba(52, 211, 153, 0.18);
+        --backend-stroke: #059669;
+        --database-fill: rgba(167, 139, 250, 0.2);
+        --database-stroke: #7c3aed;
+        --cloud-fill: rgba(251, 191, 36, 0.18);
+        --cloud-stroke: #d97706;
+        --security-fill: rgba(251, 113, 133, 0.15);
+        --security-stroke: #e11d48;
+        --messagebus-fill: rgba(251, 146, 60, 0.15);
+        --messagebus-stroke: #ea580c;
+        --external-fill: rgba(148, 163, 184, 0.18);
+        --external-stroke: #64748b;
+      }
+    }
+
+    .c-bg-rect   { fill: var(--bg); }
+    .c-grid      { stroke: var(--grid); fill: none; }
+    .c-mask      { fill: var(--mask); stroke: none; }
+    .c-frontend  { fill: var(--frontend-fill);   stroke: var(--frontend-stroke); }
+    .c-backend   { fill: var(--backend-fill);    stroke: var(--backend-stroke); }
+    .c-database  { fill: var(--database-fill);   stroke: var(--database-stroke); }
+    .c-external  { fill: var(--external-fill);   stroke: var(--external-stroke); }
+    .c-messagebus{ fill: var(--messagebus-fill); stroke: var(--messagebus-stroke); }
+
+    .t-primary    { fill: var(--text); }
+    .t-muted      { fill: var(--text-muted); }
+    .t-dim        { fill: var(--text-dim); }
+    .t-frontend   { fill: var(--frontend-stroke); }
+    .t-backend    { fill: var(--backend-stroke); }
+    .t-database   { fill: var(--database-stroke); }
+    .t-messagebus { fill: var(--messagebus-stroke); }
+    .t-external   { fill: var(--external-stroke); }
+
+    .a-default   { stroke: var(--arrow); fill: none; }
+    .a-emphasis  { stroke: var(--arrow-emphasis); fill: none; }
+    .a-dashed    { stroke: var(--database-stroke); fill: none; stroke-dasharray: 4,4; }
+
+    .m-default   { fill: var(--arrow); }
+    .m-emphasis  { fill: var(--arrow-emphasis); }
+    .m-dashed    { fill: var(--database-stroke); }
+  </style>
+
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" class="m-default"/>
+    </marker>
+    <marker id="arrowhead-emphasis" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" class="m-emphasis"/>
+    </marker>
+    <marker id="arrowhead-dashed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" class="m-dashed"/>
+    </marker>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" class="c-grid" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+
+  <rect width="100%" height="100%" class="c-bg-rect"/>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+
+  <!-- Arrows (drawn first, sit under boxes) -->
+  <line x1="160" y1="102" x2="208" y2="102" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="184" y="96" class="t-muted" font-size="8" text-anchor="middle">hook stdin</text>
+  <line x1="360" y1="102" x2="393" y2="102" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="532" y1="102" x2="548" y2="102" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <line x1="160" y1="292" x2="208" y2="292" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="184" y="286" class="t-muted" font-size="8" text-anchor="middle">tail</text>
+  <line x1="360" y1="292" x2="548" y2="292" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="454" y="286" class="t-muted" font-size="8" text-anchor="middle">token usage</text>
+
+  <line x1="160" y1="512" x2="208" y2="512" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="184" y="506" class="t-muted" font-size="8" text-anchor="middle">poll 2s</text>
+  <line x1="360" y1="512" x2="548" y2="512" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="454" y="506" class="t-muted" font-size="8" text-anchor="middle">events + tokens</text>
+
+  <line x1="740" y1="107" x2="773" y2="107" class="a-emphasis" stroke-width="1.5" marker-end="url(#arrowhead-emphasis)"/>
+  <text x="756" y="101" class="t-backend" font-size="8" text-anchor="middle">live</text>
+  <line x1="740" y1="275" x2="773" y2="275" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="756" y="269" class="t-muted" font-size="8" text-anchor="middle">persist</text>
+  <line x1="740" y1="442" x2="773" y2="442" class="a-emphasis" stroke-width="1.5" marker-end="url(#arrowhead-emphasis)"/>
+  <text x="756" y="436" class="t-backend" font-size="8" text-anchor="middle">live</text>
+
+  <line x1="895" y1="195" x2="895" y2="158" class="a-dashed" stroke-width="1.2" marker-end="url(#arrowhead-dashed)"/>
+  <text x="905" y="180" class="t-database" font-size="8">query</text>
+
+  <line x1="895" y1="355" x2="895" y2="392" class="a-dashed" stroke-width="1.2" marker-end="url(#arrowhead-dashed)"/>
+  <text x="905" y="378" class="t-database" font-size="8">query</text>
+
+  <line x1="895" y1="490" x2="895" y2="522" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <text x="905" y="510" class="t-muted" font-size="8">HTTP</text>
+
+  <!-- Sources column -->
+  <rect x="30" y="70" width="130" height="65" rx="6" class="c-mask"/>
+  <rect x="30" y="70" width="130" height="65" rx="6" class="c-external" stroke-width="1.5"/>
+  <text x="95" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Claude Code</text>
+  <text x="95" y="110" class="t-muted" font-size="9" text-anchor="middle">CLI · 8 hooks</text>
+  <text x="95" y="125" class="t-muted" font-size="8" text-anchor="middle">Pre/PostToolUse, Stop…</text>
+
+  <rect x="30" y="260" width="130" height="65" rx="6" class="c-mask"/>
+  <rect x="30" y="260" width="130" height="65" rx="6" class="c-database" stroke-width="1.5"/>
+  <text x="95" y="284" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Claude JSONL</text>
+  <text x="95" y="300" class="t-muted" font-size="9" text-anchor="middle">session logs</text>
+  <text x="95" y="315" class="t-database" font-size="8" text-anchor="middle">~/.claude/projects/</text>
+
+  <rect x="30" y="480" width="130" height="65" rx="6" class="c-mask"/>
+  <rect x="30" y="480" width="130" height="65" rx="6" class="c-database" stroke-width="1.5"/>
+  <text x="95" y="504" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Codex JSONL</text>
+  <text x="95" y="520" class="t-muted" font-size="9" text-anchor="middle">session logs</text>
+  <text x="95" y="535" class="t-database" font-size="8" text-anchor="middle">~/.codex/sessions/</text>
+
+  <!-- Collectors column -->
+  <rect x="210" y="70" width="150" height="65" rx="6" class="c-mask"/>
+  <rect x="210" y="70" width="150" height="65" rx="6" class="c-backend" stroke-width="1.5"/>
+  <text x="285" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">agmon emit</text>
+  <text x="285" y="110" class="t-muted" font-size="9" text-anchor="middle">hook CLI</text>
+  <text x="285" y="125" class="t-backend" font-size="8" text-anchor="middle">stdin → unix sock</text>
+
+  <rect x="210" y="260" width="150" height="65" rx="6" class="c-mask"/>
+  <rect x="210" y="260" width="150" height="65" rx="6" class="c-backend" stroke-width="1.5"/>
+  <text x="285" y="284" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">ClaudeLogWatcher</text>
+  <text x="285" y="300" class="t-muted" font-size="9" text-anchor="middle">goroutine · in daemon</text>
+  <text x="285" y="315" class="t-backend" font-size="8" text-anchor="middle">INSERT OR IGNORE</text>
+
+  <rect x="210" y="480" width="150" height="65" rx="6" class="c-mask"/>
+  <rect x="210" y="480" width="150" height="65" rx="6" class="c-backend" stroke-width="1.5"/>
+  <text x="285" y="504" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">CodexWatcher</text>
+  <text x="285" y="520" class="t-muted" font-size="9" text-anchor="middle">goroutine · poll 2s</text>
+  <text x="285" y="535" class="t-backend" font-size="8" text-anchor="middle">in-memory dedup</text>
+
+  <!-- Unix socket bus -->
+  <rect x="395" y="85" width="135" height="35" rx="4" class="c-messagebus" stroke-width="1.2"/>
+  <text x="462" y="100" class="t-primary" font-size="9" font-weight="600" text-anchor="middle">Unix socket</text>
+  <text x="462" y="113" class="t-messagebus" font-size="7" text-anchor="middle">~/.agmon/agmon.sock</text>
+
+  <!-- Daemon -->
+  <rect x="550" y="50" width="190" height="540" rx="8" class="c-mask"/>
+  <rect x="550" y="50" width="190" height="540" rx="8" class="c-backend" stroke-width="1.5"/>
+
+  <text x="645" y="80" class="t-primary" font-size="13" font-weight="700" text-anchor="middle">agmon daemon</text>
+  <text x="645" y="98" class="t-backend" font-size="9" text-anchor="middle">Go 1.24 · single binary</text>
+
+  <text x="565" y="136" class="t-primary" font-size="10" font-weight="600">▸ Socket listener</text>
+  <text x="565" y="152" class="t-muted" font-size="8">net.Listen · JSON frames</text>
+
+  <text x="565" y="186" class="t-primary" font-size="10" font-weight="600">▸ Event router</text>
+  <text x="565" y="202" class="t-muted" font-size="8">Pre ↔ Post correlator</text>
+  <text x="565" y="214" class="t-muted" font-size="8">via tool_use_id</text>
+
+  <text x="565" y="246" class="t-primary" font-size="10" font-weight="600">▸ Cost estimator</text>
+  <text x="565" y="262" class="t-muted" font-size="8">pricing.go · per-model</text>
+  <text x="565" y="274" class="t-muted" font-size="8">Claude + Codex rates</text>
+
+  <text x="565" y="306" class="t-primary" font-size="10" font-weight="600">▸ SQLite writer</text>
+  <text x="565" y="322" class="t-muted" font-size="8">source_id dedup</text>
+
+  <text x="565" y="354" class="t-primary" font-size="10" font-weight="600">▸ Broadcast hub</text>
+  <text x="565" y="370" class="t-muted" font-size="8">subscribers: TUI, web</text>
+  <text x="565" y="382" class="t-muted" font-size="8">2s heartbeat tick</text>
+
+  <text x="565" y="414" class="t-primary" font-size="10" font-weight="600">▸ Session lifecycle</text>
+  <text x="565" y="430" class="t-muted" font-size="8">SessionEnd → interrupt</text>
+  <text x="565" y="442" class="t-muted" font-size="8">stale GC (2h cutoff)</text>
+
+  <text x="645" y="492" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">single-instance PID lock</text>
+  <text x="645" y="506" class="t-dim" font-size="8" text-anchor="middle">~/.agmon/daemon.pid</text>
+  <text x="645" y="520" class="t-dim" font-size="8" text-anchor="middle">auto-spawn on `agmon`</text>
+
+  <text x="645" y="560" class="t-dim" font-size="8" text-anchor="middle">internal/daemon · internal/event</text>
+  <text x="645" y="572" class="t-dim" font-size="8" text-anchor="middle">internal/collector</text>
+
+  <!-- Right column -->
+  <rect x="775" y="60" width="240" height="95" rx="6" class="c-mask"/>
+  <rect x="775" y="60" width="240" height="95" rx="6" class="c-frontend" stroke-width="1.5"/>
+  <text x="895" y="84" class="t-primary" font-size="12" font-weight="700" text-anchor="middle">agmon TUI</text>
+  <text x="895" y="101" class="t-muted" font-size="9" text-anchor="middle">bubbletea · 4 tabs</text>
+  <text x="895" y="122" class="t-frontend" font-size="8" text-anchor="middle">Dashboard · Messages</text>
+  <text x="895" y="136" class="t-frontend" font-size="8" text-anchor="middle">Tool Calls · Timeline</text>
+  <text x="895" y="150" class="t-muted" font-size="7" text-anchor="middle">j/k · Enter · / · [ ]</text>
+
+  <rect x="775" y="195" width="240" height="160" rx="6" class="c-mask"/>
+  <rect x="775" y="195" width="240" height="160" rx="6" class="c-database" stroke-width="1.5"/>
+  <text x="895" y="219" class="t-primary" font-size="12" font-weight="700" text-anchor="middle">SQLite</text>
+  <text x="895" y="236" class="t-muted" font-size="9" text-anchor="middle">modernc · pure Go</text>
+  <text x="895" y="252" class="t-database" font-size="8" text-anchor="middle">~/.agmon/data/agmon.db</text>
+  <text x="895" y="274" class="t-muted" font-size="8" text-anchor="middle">• sessions</text>
+  <text x="895" y="288" class="t-muted" font-size="8" text-anchor="middle">• agents (parent_agent_id)</text>
+  <text x="895" y="302" class="t-muted" font-size="8" text-anchor="middle">• tool_calls</text>
+  <text x="895" y="316" class="t-muted" font-size="8" text-anchor="middle">• token_usage</text>
+  <text x="895" y="330" class="t-muted" font-size="8" text-anchor="middle">• file_changes</text>
+  <text x="895" y="348" class="t-dim" font-size="7" text-anchor="middle">idempotent migrations</text>
+
+  <rect x="775" y="395" width="240" height="95" rx="6" class="c-mask"/>
+  <rect x="775" y="395" width="240" height="95" rx="6" class="c-frontend" stroke-width="1.5"/>
+  <text x="895" y="419" class="t-primary" font-size="12" font-weight="700" text-anchor="middle">agmon web</text>
+  <text x="895" y="436" class="t-muted" font-size="9" text-anchor="middle">HTTP Dashboard</text>
+  <text x="895" y="457" class="t-frontend" font-size="8" text-anchor="middle">REST API + embedded SPA</text>
+  <text x="895" y="471" class="t-frontend" font-size="8" text-anchor="middle">cost reports · daily spend</text>
+  <text x="895" y="485" class="t-muted" font-size="7" text-anchor="middle">auto-starts daemon + watchers</text>
+
+  <rect x="775" y="525" width="240" height="65" rx="6" class="c-mask"/>
+  <rect x="775" y="525" width="240" height="65" rx="6" class="c-external" stroke-width="1.5"/>
+  <text x="895" y="549" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Browser</text>
+  <text x="895" y="565" class="t-muted" font-size="9" text-anchor="middle">localhost:port</text>
+  <text x="895" y="580" class="t-external" font-size="8" text-anchor="middle">dark / light mode</text>
+
+  <!-- Legend -->
+  <text x="30" y="608" class="t-primary" font-size="10" font-weight="600">Legend</text>
+
+  <rect x="30"  y="620" width="14" height="10" rx="2" class="c-external" stroke-width="1"/>
+  <text x="50"  y="628" class="t-muted" font-size="8">Source</text>
+
+  <rect x="100" y="620" width="14" height="10" rx="2" class="c-backend" stroke-width="1"/>
+  <text x="120" y="628" class="t-muted" font-size="8">Process / goroutine</text>
+
+  <rect x="230" y="620" width="14" height="10" rx="2" class="c-database" stroke-width="1"/>
+  <text x="250" y="628" class="t-muted" font-size="8">Persistent store</text>
+
+  <rect x="350" y="620" width="14" height="10" rx="2" class="c-frontend" stroke-width="1"/>
+  <text x="370" y="628" class="t-muted" font-size="8">UI consumer</text>
+
+  <rect x="450" y="620" width="14" height="10" rx="2" class="c-messagebus" stroke-width="1"/>
+  <text x="470" y="628" class="t-muted" font-size="8">Transport</text>
+
+  <line x1="540" y1="625" x2="560" y2="625" class="a-emphasis" stroke-width="1.5" marker-end="url(#arrowhead-emphasis)"/>
+  <text x="566" y="628" class="t-muted" font-size="8">live broadcast</text>
+
+  <line x1="670" y1="625" x2="690" y2="625" class="a-dashed" stroke-width="1.2" marker-end="url(#arrowhead-dashed)"/>
+  <text x="696" y="628" class="t-muted" font-size="8">SQLite query</text>
+</svg>

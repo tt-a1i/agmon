@@ -162,6 +162,13 @@ agmon web --port 9000  # 自定义端口
 
 ## 架构
 
+<p align="center">
+  <img src="docs/architecture.svg" alt="agmon 架构图" width="100%">
+</p>
+
+<details>
+<summary>文本版（ASCII 回退）</summary>
+
 ```
 Claude Code hooks ──→ agmon emit ──→ Unix socket
                                          │
@@ -178,11 +185,15 @@ Codex JSONL 日志  ──→ CodexWatcher ──────→│
                                     agmon web (HTTP Dashboard)
 ```
 
-- **Daemon** — 通过 Unix socket 接收事件，存入 SQLite，广播给 TUI
-- **Claude hooks** — `PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd` 等
-- **日志监听器** — Claude watcher 轮询项目日志；Codex watcher 启动时全量发现一次，之后只跟踪已知文件和最近会话目录
-- **TUI** — 连接 daemon，4 个视图实时刷新
-- **Web** — 独立 HTTP 服务，读取 SQLite + JSONL 日志，提供 REST API + 嵌入式前端
+</details>
+
+- **Daemon** — 通过 Unix socket 接收事件，存入 SQLite，广播给 TUI / Web
+- **Claude hooks** — `PreToolUse`、`PostToolUse`、`SessionStart`、`SessionEnd` 等 8 个事件
+- **日志监听器** — Claude watcher 扫描 `~/.claude/projects/` 的 JSONL 取 token；Codex watcher 轮询 `~/.codex/sessions/`，内存去重
+- **TUI** — bubbletea 四视图（Dashboard / Messages / Tool Calls / Timeline），订阅 daemon 实时事件
+- **Web** — 独立 HTTP 服务 + 嵌入式 SPA，读取 SQLite，提供 REST API 与费用报表
+
+> 交互版架构图（含深/浅主题切换与 PNG/SVG 导出）：[`docs/architecture.html`](docs/architecture.html)
 
 ## 数据存储
 
