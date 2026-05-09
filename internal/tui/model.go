@@ -8,9 +8,9 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tt-a1i/agmon/internal/collector"
-	"github.com/tt-a1i/agmon/internal/event"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/collector"
+	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 // EventMsg signals new data is available from the daemon.

@@ -1,8 +1,8 @@
 version: 2
 
 builds:
-  - main: ./cmd/agmon
-    binary: agmon
+  - main: ./cmd/tokenmeter
+    binary: tokenmeter
     env:
       - CGO_ENABLED=0
     goos:
@@ -33,7 +33,7 @@ brews:
       owner: tt-a1i
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/tt-a1i/agmon"
+    homepage: "https://github.com/tt-a1i/tokenmeter"
     description: "Real-time observability for AI coding agents"
     install: |
-      bin.install "agmon"
+      bin.install "tokenmeter"

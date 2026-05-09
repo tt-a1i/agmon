@@ -14,25 +14,25 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tt-a1i/agmon/internal/collector"
-	"github.com/tt-a1i/agmon/internal/daemon"
-	"github.com/tt-a1i/agmon/internal/event"
-	"github.com/tt-a1i/agmon/internal/storage"
-	"github.com/tt-a1i/agmon/internal/tui"
-	"github.com/tt-a1i/agmon/internal/web"
+	"github.com/tt-a1i/tokenmeter/internal/appdir"
+	"github.com/tt-a1i/tokenmeter/internal/collector"
+	"github.com/tt-a1i/tokenmeter/internal/daemon"
+	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/tui"
+	"github.com/tt-a1i/tokenmeter/internal/web"
 )
 
 var version = "dev"
 
-var agmonHookNames = []string{
+var tokenmeterHookNames = []string{
 	"SessionStart", "SessionEnd", "Stop",
 	"PreToolUse", "PostToolUse", "PostToolUseFailure",
 	"SubagentStart", "SubagentStop",
 }
 
 func defaultLogPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agmon", "agmon.log")
+	return appdir.PathFor("tokenmeter.log", "agmon.log")
 }
 
 func configureTUILogging(logPath string) (func() error, error) {
@@ -96,7 +96,7 @@ func main() {
 	case "update":
 		runUpdate()
 	case "version", "-v", "--version":
-		fmt.Printf("agmon v%s\n", version)
+		fmt.Printf("tokenmeter v%s\n", version)
 	case "help", "-h", "--help":
 		printHelp()
 	default:
@@ -242,7 +242,7 @@ func runDaemon() {
 	claudeLogWatcher.Start()
 	defer claudeLogWatcher.Stop()
 
-	fmt.Printf("agmon daemon running (socket: %s)\n", sockPath)
+	fmt.Printf("tokenmeter daemon running (socket: %s)\n", sockPath)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -282,7 +282,7 @@ func runEmitWithReader(sockPath string, r io.Reader) error {
 	return nil
 }
 
-// agmon setup hook format:
+// tokenmeter setup hook format:
 // Claude Code settings.json uses: [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }]
 func runSetup() {
 	home, _ := os.UserHomeDir()
@@ -299,14 +299,14 @@ func runSetup() {
 		settings = make(map[string]any)
 	}
 
-	agmonPath, _ := os.Executable()
-	if agmonPath == "" {
-		agmonPath = "agmon"
+	tokenmeterPath, _ := os.Executable()
+	if tokenmeterPath == "" {
+		tokenmeterPath = "tokenmeter"
 	}
 	// Quote the path if it contains spaces or quotes so the shell doesn't split it.
-	quoted := agmonPath
-	if strings.ContainsAny(agmonPath, " \t\"") {
-		quoted = `"` + strings.ReplaceAll(agmonPath, `"`, `\"`) + `"`
+	quoted := tokenmeterPath
+	if strings.ContainsAny(tokenmeterPath, " \t\"") {
+		quoted = `"` + strings.ReplaceAll(tokenmeterPath, `"`, `\"`) + `"`
 	}
 	emitCmd := quoted + " emit"
 
@@ -315,7 +315,8 @@ func runSetup() {
 		hooks = make(map[string]any)
 	}
 
-	for _, hookName := range agmonHookNames {
+	for _, hookName := range tokenmeterHookNames {
+		removeTokenMeterHook(hooks, hookName)
 		addHookEntry(hooks, hookName, emitCmd)
 	}
 
@@ -337,33 +338,33 @@ func runSetup() {
 	fmt.Println("✓ Claude Code hooks configured")
 	fmt.Printf("  Settings: %s\n", settingsPath)
 	fmt.Printf("  Command:  %s\n", emitCmd)
-	fmt.Printf("  Events:   %s\n", strings.Join(agmonHookNames, ", "))
+	fmt.Printf("  Events:   %s\n", strings.Join(tokenmeterHookNames, ", "))
 	fmt.Println()
-	fmt.Println("Run `agmon` to start monitoring.")
+	fmt.Println("Run `tokenmeter` to start monitoring.")
 }
 
-// addHookEntry adds an agmon hook entry in the correct Claude Code format:
+// addHookEntry adds a TokenMeter hook entry in the correct Claude Code format:
 // [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }]
 func addHookEntry(hooks map[string]any, hookName, emitCmd string) {
-	agmonHook := map[string]any{
+	tokenmeterHook := map[string]any{
 		"type":    "command",
 		"command": emitCmd,
 	}
 
 	matcherEntry := map[string]any{
 		"matcher": "",
-		"hooks":   []any{agmonHook},
+		"hooks":   []any{tokenmeterHook},
 	}
 
 	existing, ok := hooks[hookName].([]any)
 	if ok {
-		// Check if agmon hook already exists in any matcher entry
+		// Check if this exact hook already exists in any matcher entry.
 		for _, entry := range existing {
 			if entryMap, ok := entry.(map[string]any); ok {
 				if innerHooks, ok := entryMap["hooks"].([]any); ok {
 					for _, h := range innerHooks {
 						if hm, ok := h.(map[string]any); ok {
-							if cmd, ok := hm["command"].(string); ok && strings.HasSuffix(cmd, " emit") {
+							if cmd, ok := hm["command"].(string); ok && cmd == emitCmd {
 								return // already installed
 							}
 						}
@@ -386,8 +387,8 @@ func runUninstall() {
 		var settings map[string]any
 		if json.Unmarshal(data, &settings) == nil {
 			if hooks, ok := settings["hooks"].(map[string]any); ok {
-				for _, hookName := range agmonHookNames {
-					removeAgmonHook(hooks, hookName)
+				for _, hookName := range tokenmeterHookNames {
+					removeTokenMeterHook(hooks, hookName)
 				}
 				settings["hooks"] = hooks
 				out, _ := json.MarshalIndent(settings, "", "  ")
@@ -406,12 +407,12 @@ func runUninstall() {
 
 	fmt.Println("✓ Removed Claude Code hooks")
 	fmt.Println()
-	fmt.Println("Data preserved at ~/.agmon/")
-	fmt.Println("To remove all data: rm -rf ~/.agmon")
+	fmt.Printf("Data preserved at %s/\n", appdir.Base())
+	fmt.Printf("To remove all data: rm -rf %s\n", appdir.Base())
 }
 
-// removeAgmonHook removes agmon entries from the nested hook format.
-func removeAgmonHook(hooks map[string]any, hookName string) {
+// removeTokenMeterHook removes TokenMeter entries from the nested hook format.
+func removeTokenMeterHook(hooks map[string]any, hookName string) {
 	existing, ok := hooks[hookName].([]any)
 	if !ok {
 		return
@@ -431,11 +432,12 @@ func removeAgmonHook(hooks map[string]any, hookName string) {
 			continue
 		}
 
-		// Filter out agmon hooks from this matcher entry
+		// Filter out TokenMeter hooks from this matcher entry. During the rename,
+		// old "agmon emit" hooks are also treated as TokenMeter hooks.
 		var cleanHooks []any
 		for _, h := range innerHooks {
 			if hm, ok := h.(map[string]any); ok {
-				if cmd, ok := hm["command"].(string); ok && strings.HasSuffix(cmd, " emit") {
+				if cmd, ok := hm["command"].(string); ok && isTokenMeterEmitCommand(cmd) {
 					continue
 				}
 			}
@@ -454,6 +456,14 @@ func removeAgmonHook(hooks map[string]any, hookName string) {
 	} else {
 		delete(hooks, hookName)
 	}
+}
+
+func isTokenMeterEmitCommand(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	if !strings.HasSuffix(cmd, " emit") {
+		return false
+	}
+	return strings.Contains(cmd, "tokenmeter") || strings.Contains(cmd, "agmon")
 }
 
 func runReport() {
@@ -670,7 +680,7 @@ func runPeriodReport(db *storage.DB, period string) {
 		fmt.Println()
 	}
 
-	fmt.Printf("---\n*Generated by agmon v%s at %s*\n", version, now.Format("2006-01-02 15:04:05 UTC"))
+	fmt.Printf("---\n*Generated by TokenMeter v%s at %s*\n", version, now.Format("2006-01-02 15:04:05 UTC"))
 }
 
 func runWeb() {
@@ -719,7 +729,7 @@ func runWeb() {
 	}
 
 	srv := web.NewServer(db, port)
-	fmt.Printf("agmon web dashboard: http://localhost:%s\n", port)
+	fmt.Printf("TokenMeter web dashboard: http://localhost:%s\n", port)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -861,9 +871,9 @@ func runClean() {
 
 func runTag() {
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: agmon tag <session-id> [text]\n")
-		fmt.Fprintf(os.Stderr, "  Set a tag:   agmon tag abc123 \"refactoring auth\"\n")
-		fmt.Fprintf(os.Stderr, "  Clear tag:   agmon tag abc123\n")
+		fmt.Fprintf(os.Stderr, "Usage: tokenmeter tag <session-id> [text]\n")
+		fmt.Fprintf(os.Stderr, "  Set a tag:   tokenmeter tag abc123 \"refactoring auth\"\n")
+		fmt.Fprintf(os.Stderr, "  Clear tag:   tokenmeter tag abc123\n")
 		os.Exit(1)
 	}
 
@@ -917,24 +927,24 @@ func checkAndNotifyUpdate(p *tea.Program) {
 }
 
 func printHelp() {
-	fmt.Printf(`agmon v%s - AI Agent Monitor
+	fmt.Printf(`TokenMeter v%s - AI coding agent usage meter
 
 Usage:
-  agmon                    Start TUI (auto-starts daemon)
-  agmon daemon             Start daemon only
-  agmon emit               Emit event from hook (reads stdin)
-  agmon setup              Configure Claude Code hooks
-  agmon uninstall          Remove hooks and stop daemon
-  agmon status             Show active sessions summary
-  agmon report [session]   Detailed session report
-  agmon report --weekly    Weekly cost report (Markdown)
-  agmon report --monthly   Monthly cost report (Markdown)
-  agmon cost [today|week]  Token usage statistics
-  agmon web [--port N]     Start web dashboard (default port: 8370)
-  agmon clean [days]       Remove sessions older than N days (default: 7)
-  agmon tag <id> [text]    Tag a session with a note (omit text to clear)
-  agmon update             Update to the latest version
-  agmon version            Show version
-  agmon help               Show this help
+  tokenmeter                    Start TUI (auto-starts daemon)
+  tokenmeter daemon             Start daemon only
+  tokenmeter emit               Emit event from hook (reads stdin)
+  tokenmeter setup              Configure Claude Code hooks
+  tokenmeter uninstall          Remove hooks and stop daemon
+  tokenmeter status             Show active sessions summary
+  tokenmeter report [session]   Detailed session report
+  tokenmeter report --weekly    Weekly cost report (Markdown)
+  tokenmeter report --monthly   Monthly cost report (Markdown)
+  tokenmeter cost [today|week]  Token usage statistics
+  tokenmeter web [--port N]     Start web dashboard (default port: 8370)
+  tokenmeter clean [days]       Remove sessions older than N days (default: 7)
+  tokenmeter tag <id> [text]    Tag a session with a note (omit text to clear)
+  tokenmeter update             Update to the latest version
+  tokenmeter version            Show version
+  tokenmeter help               Show this help
 `, version)
 }

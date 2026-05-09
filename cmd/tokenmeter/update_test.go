@@ -12,10 +12,10 @@ import (
 
 func TestFindAsset(t *testing.T) {
 	assets := []ghAsset{
-		{Name: "agmon_darwin_amd64.tar.gz", BrowserDownloadURL: "https://example.com/darwin_amd64"},
-		{Name: "agmon_darwin_arm64.tar.gz", BrowserDownloadURL: "https://example.com/darwin_arm64"},
-		{Name: "agmon_linux_amd64.tar.gz", BrowserDownloadURL: "https://example.com/linux_amd64"},
-		{Name: "agmon_windows_amd64.zip", BrowserDownloadURL: "https://example.com/windows_amd64"},
+		{Name: "tokenmeter_darwin_amd64.tar.gz", BrowserDownloadURL: "https://example.com/darwin_amd64"},
+		{Name: "tokenmeter_darwin_arm64.tar.gz", BrowserDownloadURL: "https://example.com/darwin_arm64"},
+		{Name: "tokenmeter_linux_amd64.tar.gz", BrowserDownloadURL: "https://example.com/linux_amd64"},
+		{Name: "tokenmeter_windows_amd64.zip", BrowserDownloadURL: "https://example.com/windows_amd64"},
 		{Name: "checksums.txt", BrowserDownloadURL: "https://example.com/checksums"},
 	}
 
@@ -23,9 +23,9 @@ func TestFindAsset(t *testing.T) {
 		goos, goarch string
 		wantName     string
 	}{
-		{"darwin", "arm64", "agmon_darwin_arm64.tar.gz"},
-		{"linux", "amd64", "agmon_linux_amd64.tar.gz"},
-		{"windows", "amd64", "agmon_windows_amd64.zip"},
+		{"darwin", "arm64", "tokenmeter_darwin_arm64.tar.gz"},
+		{"linux", "amd64", "tokenmeter_linux_amd64.tar.gz"},
+		{"windows", "amd64", "tokenmeter_windows_amd64.zip"},
 		{"freebsd", "amd64", ""},
 	}
 	for _, tt := range tests {
@@ -53,13 +53,13 @@ func TestFindAsset(t *testing.T) {
 }
 
 func TestParseChecksums(t *testing.T) {
-	content := "abc123  agmon_darwin_arm64.tar.gz\ndef456  agmon_linux_amd64.tar.gz\n"
+	content := "abc123  tokenmeter_darwin_arm64.tar.gz\ndef456  tokenmeter_linux_amd64.tar.gz\n"
 	m := parseChecksums(content)
-	if m["agmon_darwin_arm64.tar.gz"] != "abc123" {
-		t.Errorf("got %q, want abc123", m["agmon_darwin_arm64.tar.gz"])
+	if m["tokenmeter_darwin_arm64.tar.gz"] != "abc123" {
+		t.Errorf("got %q, want abc123", m["tokenmeter_darwin_arm64.tar.gz"])
 	}
-	if m["agmon_linux_amd64.tar.gz"] != "def456" {
-		t.Errorf("got %q, want def456", m["agmon_linux_amd64.tar.gz"])
+	if m["tokenmeter_linux_amd64.tar.gz"] != "def456" {
+		t.Errorf("got %q, want def456", m["tokenmeter_linux_amd64.tar.gz"])
 	}
 }
 
@@ -73,8 +73,8 @@ func TestSha256sum(t *testing.T) {
 }
 
 func TestExtractTarGz(t *testing.T) {
-	binContent := []byte("fake-agmon-binary")
-	data := buildTarGz(t, "agmon", binContent)
+	binContent := []byte("fake-tokenmeter-binary")
+	data := buildTarGz(t, "tokenmeter", binContent)
 
 	got, err := extractTarGz(data)
 	if err != nil {
@@ -94,8 +94,8 @@ func TestExtractTarGzMissing(t *testing.T) {
 }
 
 func TestExtractZip(t *testing.T) {
-	binContent := []byte("fake-agmon-binary")
-	data := buildZip(t, "agmon.exe", binContent)
+	binContent := []byte("fake-tokenmeter-binary")
+	data := buildZip(t, "tokenmeter.exe", binContent)
 
 	got, err := extractZip(data)
 	if err != nil {
@@ -116,7 +116,7 @@ func TestExtractZipMissing(t *testing.T) {
 
 func TestReplaceBinary(t *testing.T) {
 	dir := t.TempDir()
-	target := filepath.Join(dir, "agmon")
+	target := filepath.Join(dir, "tokenmeter")
 	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}

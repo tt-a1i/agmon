@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/event"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 func testDB(t *testing.T) *storage.DB {
@@ -300,7 +300,7 @@ func TestStaticFileServing(t *testing.T) {
 	if !strings.Contains(body, "<html") {
 		t.Error("expected HTML content")
 	}
-	if !strings.Contains(body, "agmon") {
-		t.Error("expected 'agmon' in HTML")
+	if !strings.Contains(body, "TokenMeter") {
+		t.Error("expected 'TokenMeter' in HTML")
 	}
 }

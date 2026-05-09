@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/event"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 func withArgs(t *testing.T, args []string) {
@@ -87,14 +87,62 @@ func TestRunSetupConfiguresClaudeHooks(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected hooks object, got %#v", settings["hooks"])
 	}
-	for _, hookName := range agmonHookNames {
+	for _, hookName := range tokenmeterHookNames {
 		if _, ok := hooks[hookName]; !ok {
 			t.Fatalf("expected hook %q to be configured", hookName)
 		}
 	}
 }
 
-func TestRunUninstallRemovesOnlyAgmonHooks(t *testing.T) {
+func TestRunUninstallRemovesOnlyTokenMeterHooks(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	settings := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"matcher": "",
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "tokenmeter emit"},
+						map[string]any{"type": "command", "command": "custom-hook"},
+					},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	if err := os.WriteFile(settingsPath, data, 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	out := captureStdout(t, runUninstall)
+	if !strings.Contains(out, "Removed Claude Code hooks") {
+		t.Fatalf("unexpected stdout: %q", out)
+	}
+
+	result := readSettingsJSON(t, home)
+	hooks := result["hooks"].(map[string]any)
+	sessionStart := hooks["SessionStart"].([]any)
+	entry := sessionStart[0].(map[string]any)
+	innerHooks := entry["hooks"].([]any)
+	if len(innerHooks) != 1 {
+		t.Fatalf("expected only non-tokenmeter hook to remain, got %#v", innerHooks)
+	}
+	got := innerHooks[0].(map[string]any)["command"].(string)
+	if got != "custom-hook" {
+		t.Fatalf("unexpected remaining hook: %q", got)
+	}
+}
+
+func TestRunSetupReplacesLegacyAgmonHook(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)
 
@@ -123,23 +171,47 @@ func TestRunUninstallRemovesOnlyAgmonHooks(t *testing.T) {
 		t.Fatalf("write settings: %v", err)
 	}
 
-	out := captureStdout(t, runUninstall)
-	if !strings.Contains(out, "Removed Claude Code hooks") {
-		t.Fatalf("unexpected stdout: %q", out)
-	}
+	_ = captureStdout(t, runSetup)
 
 	result := readSettingsJSON(t, home)
 	hooks := result["hooks"].(map[string]any)
 	sessionStart := hooks["SessionStart"].([]any)
-	entry := sessionStart[0].(map[string]any)
-	innerHooks := entry["hooks"].([]any)
-	if len(innerHooks) != 1 {
-		t.Fatalf("expected only non-agmon hook to remain, got %#v", innerHooks)
+	var commands []string
+	for _, rawEntry := range sessionStart {
+		entry := rawEntry.(map[string]any)
+		for _, rawHook := range entry["hooks"].([]any) {
+			commands = append(commands, rawHook.(map[string]any)["command"].(string))
+		}
 	}
-	got := innerHooks[0].(map[string]any)["command"].(string)
-	if got != "custom-hook" {
-		t.Fatalf("unexpected remaining hook: %q", got)
+	for _, cmd := range commands {
+		if cmd == "agmon emit" {
+			t.Fatalf("legacy agmon hook was not removed: %#v", commands)
+		}
 	}
+	if !containsCommand(commands, "custom-hook") {
+		t.Fatalf("custom hook should be preserved: %#v", commands)
+	}
+	if !hasTokenMeterEmit(commands) {
+		t.Fatalf("tokenmeter emit hook was not added: %#v", commands)
+	}
+}
+
+func containsCommand(commands []string, want string) bool {
+	for _, cmd := range commands {
+		if cmd == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTokenMeterEmit(commands []string) bool {
+	for _, cmd := range commands {
+		if strings.Contains(cmd, "tokenmeter") && strings.HasSuffix(cmd, " emit") {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRunReportFindsHiddenSessionByID(t *testing.T) {
@@ -154,7 +226,7 @@ func TestRunReportFindsHiddenSessionByID(t *testing.T) {
 		t.Fatalf("end session: %v", err)
 	}
 
-	withArgs(t, []string{"agmon", "report", "hidden-session"})
+	withArgs(t, []string{"tokenmeter", "report", "hidden-session"})
 	out := captureStdout(t, runReport)
 
 	if !strings.Contains(out, "ID:       hidden-session") {
@@ -180,7 +252,7 @@ func TestRunCostOutputsTotalsForRequestedPeriod(t *testing.T) {
 		t.Fatalf("update session tokens: %v", err)
 	}
 
-	withArgs(t, []string{"agmon", "cost", "all"})
+	withArgs(t, []string{"tokenmeter", "cost", "all"})
 	out := captureStdout(t, runCost)
 
 	if !strings.Contains(out, "All time:") {
@@ -212,7 +284,7 @@ func TestRunCleanRemovesOldSessions(t *testing.T) {
 		t.Fatalf("end session: %v", err)
 	}
 
-	withArgs(t, []string{"agmon", "clean", "7"})
+	withArgs(t, []string{"tokenmeter", "clean", "7"})
 	out := captureStdout(t, runClean)
 	if !strings.Contains(out, "Removed 1 session(s) older than 7 days.") {
 		t.Fatalf("unexpected stdout: %q", out)

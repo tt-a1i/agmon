@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
 // EmitEvent sends a single event to the daemon via socket.

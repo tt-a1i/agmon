@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
 // ClaudeLogWatcher scans ~/.claude/projects/*/*.jsonl for token usage.

@@ -46,20 +46,20 @@ Run: `go test ./internal/daemon && go test -race ./internal/daemon`
 ### Task 2: CLI Command Coverage
 
 **Files:**
-- Create: `cmd/agmon/cli_test.go`
-- Modify: `cmd/agmon/main.go`
+- Create: `cmd/tokenmeter/cli_test.go`
+- Modify: `cmd/tokenmeter/main.go`
 
 - [ ] **Step 1: Write failing tests for `setup`, `uninstall`, `report`, `cost`, and `clean`**
 
 Use temp HOME directories and helper functions to isolate:
 - `~/.claude/settings.json`
-- `~/.agmon` data
+- `~/.tokenmeter` data
 - `os.Args`
 - stdout/stderr capture
 
 - [ ] **Step 2: Run the CLI test subset and verify it fails**
 
-Run: `go test ./cmd/agmon -run 'TestRun(Setup|Uninstall|Report|Cost|Clean)'`
+Run: `go test ./cmd/tokenmeter -run 'TestRun(Setup|Uninstall|Report|Cost|Clean)'`
 
 - [ ] **Step 3: Make the smallest code changes needed for testability**
 
@@ -70,18 +70,18 @@ Preferred techniques:
 
 - [ ] **Step 4: Re-run the CLI test subset**
 
-Run: `go test ./cmd/agmon -run 'TestRun(Setup|Uninstall|Report|Cost|Clean)'`
+Run: `go test ./cmd/tokenmeter -run 'TestRun(Setup|Uninstall|Report|Cost|Clean)'`
 
 - [ ] **Step 5: Run full command package verification**
 
-Run: `go test ./cmd/agmon && go test -race ./cmd/agmon`
+Run: `go test ./cmd/tokenmeter && go test -race ./cmd/tokenmeter`
 
 ### Task 3: Silent Failure Surfacing
 
 **Files:**
 - Modify: `internal/collector/codex.go`
 - Modify: `internal/collector/claude_log.go`
-- Modify: `cmd/agmon/main.go`
+- Modify: `cmd/tokenmeter/main.go`
 
 - [ ] **Step 1: Write failing tests for non-fatal scan/parse error observability**
 
@@ -92,7 +92,7 @@ Cover:
 
 - [ ] **Step 2: Run the relevant package tests and verify failure**
 
-Run: `go test ./internal/collector ./cmd/agmon -run 'Test(Claude|Codex|RunEmit)'`
+Run: `go test ./internal/collector ./cmd/tokenmeter -run 'Test(Claude|Codex|RunEmit)'`
 
 - [ ] **Step 3: Add contextual non-fatal logging without polluting TUI**
 
@@ -100,7 +100,7 @@ Route background diagnostics through existing logging, not stdout UI rendering.
 
 - [ ] **Step 4: Re-run targeted tests**
 
-Run: `go test ./internal/collector ./cmd/agmon -run 'Test(Claude|Codex|RunEmit)'`
+Run: `go test ./internal/collector ./cmd/tokenmeter -run 'Test(Claude|Codex|RunEmit)'`
 
 ## Chunk 2: TUI Structural Cleanup
 
@@ -236,7 +236,7 @@ Replace `tabAgentTree` and any outdated UI descriptions with current behavior.
 
 - [ ] **Step 2: Verify docs against code**
 
-Cross-check with `internal/tui/model.go` and CLI commands in `cmd/agmon/main.go`.
+Cross-check with `internal/tui/model.go` and CLI commands in `cmd/tokenmeter/main.go`.
 
 ### Task 9: Windows CI And Release Path
 

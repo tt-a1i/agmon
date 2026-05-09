@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
 func setCollectorTestHome(t *testing.T, home string) {

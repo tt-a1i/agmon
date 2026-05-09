@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>agmon Architecture Diagram</title>
+  <title>tokenmeter Architecture Diagram</title>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root,
@@ -371,7 +371,7 @@
     <div class="header">
       <div class="header-row">
         <div class="pulse-dot"></div>
-        <h1>agmon Architecture</h1>
+        <h1>tokenmeter Architecture</h1>
       </div>
       <p class="subtitle">AI 编码 Agent 实时可观测性管道 &middot; Claude Code + Codex → SQLite → TUI / Web</p>
     </div>
@@ -452,7 +452,7 @@
         <!-- Collectors column -->
         <rect x="210" y="70" width="150" height="65" rx="6" class="c-mask"/>
         <rect x="210" y="70" width="150" height="65" rx="6" class="c-backend" stroke-width="1.5"/>
-        <text x="285" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">agmon emit</text>
+        <text x="285" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">tokenmeter emit</text>
         <text x="285" y="110" class="t-muted" font-size="9" text-anchor="middle">hook CLI</text>
         <text x="285" y="125" class="t-backend" font-size="8" text-anchor="middle">stdin → unix sock</text>
 
@@ -471,13 +471,13 @@
         <!-- Unix socket bus -->
         <rect x="395" y="85" width="135" height="35" rx="4" class="c-messagebus" stroke-width="1.2"/>
         <text x="462" y="100" class="t-primary" font-size="9" font-weight="600" text-anchor="middle">Unix socket</text>
-        <text x="462" y="113" class="t-messagebus" font-size="7" text-anchor="middle">~/.agmon/agmon.sock</text>
+        <text x="462" y="113" class="t-messagebus" font-size="7" text-anchor="middle">~/.tokenmeter/tokenmeter.sock</text>
 
         <!-- Daemon (the spine) -->
         <rect x="550" y="50" width="190" height="540" rx="8" class="c-mask"/>
         <rect x="550" y="50" width="190" height="540" rx="8" class="c-backend" stroke-width="1.5"/>
 
-        <text x="645" y="80" class="t-primary" font-size="13" font-weight="700" text-anchor="middle">agmon daemon</text>
+        <text x="645" y="80" class="t-primary" font-size="13" font-weight="700" text-anchor="middle">tokenmeter daemon</text>
         <text x="645" y="98" class="t-backend" font-size="9" text-anchor="middle">Go 1.24 &middot; single binary</text>
 
         <text x="565" y="136" class="t-primary" font-size="10" font-weight="600">▸ Socket listener</text>
@@ -503,8 +503,8 @@
         <text x="565" y="442" class="t-muted" font-size="8">stale GC (2h cutoff)</text>
 
         <text x="645" y="492" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">single-instance PID lock</text>
-        <text x="645" y="506" class="t-dim" font-size="8" text-anchor="middle">~/.agmon/daemon.pid</text>
-        <text x="645" y="520" class="t-dim" font-size="8" text-anchor="middle">auto-spawn on `agmon`</text>
+        <text x="645" y="506" class="t-dim" font-size="8" text-anchor="middle">~/.tokenmeter/daemon.pid</text>
+        <text x="645" y="520" class="t-dim" font-size="8" text-anchor="middle">auto-spawn on `tokenmeter`</text>
 
         <text x="645" y="560" class="t-dim" font-size="8" text-anchor="middle">internal/daemon &middot; internal/event</text>
         <text x="645" y="572" class="t-dim" font-size="8" text-anchor="middle">internal/collector</text>
@@ -512,7 +512,7 @@
         <!-- Right column: TUI / SQLite / web / Browser -->
         <rect x="775" y="60" width="240" height="95" rx="6" class="c-mask"/>
         <rect x="775" y="60" width="240" height="95" rx="6" class="c-frontend" stroke-width="1.5"/>
-        <text x="895" y="84" class="t-primary" font-size="12" font-weight="700" text-anchor="middle">agmon TUI</text>
+        <text x="895" y="84" class="t-primary" font-size="12" font-weight="700" text-anchor="middle">tokenmeter TUI</text>
         <text x="895" y="101" class="t-muted" font-size="9" text-anchor="middle">bubbletea &middot; 4 tabs</text>
         <text x="895" y="122" class="t-frontend" font-size="8" text-anchor="middle">Dashboard &middot; Messages</text>
         <text x="895" y="136" class="t-frontend" font-size="8" text-anchor="middle">Tool Calls &middot; Timeline</text>
@@ -522,7 +522,7 @@
         <rect x="775" y="195" width="240" height="160" rx="6" class="c-database" stroke-width="1.5"/>
         <text x="895" y="219" class="t-primary" font-size="12" font-weight="700" text-anchor="middle">SQLite</text>
         <text x="895" y="236" class="t-muted" font-size="9" text-anchor="middle">modernc &middot; pure Go</text>
-        <text x="895" y="252" class="t-database" font-size="8" text-anchor="middle">~/.agmon/data/agmon.db</text>
+        <text x="895" y="252" class="t-database" font-size="8" text-anchor="middle">~/.tokenmeter/data/tokenmeter.db</text>
         <text x="895" y="274" class="t-muted" font-size="8" text-anchor="middle">&bull; sessions</text>
         <text x="895" y="288" class="t-muted" font-size="8" text-anchor="middle">&bull; agents (parent_agent_id)</text>
         <text x="895" y="302" class="t-muted" font-size="8" text-anchor="middle">&bull; tool_calls</text>
@@ -532,7 +532,7 @@
 
         <rect x="775" y="395" width="240" height="95" rx="6" class="c-mask"/>
         <rect x="775" y="395" width="240" height="95" rx="6" class="c-frontend" stroke-width="1.5"/>
-        <text x="895" y="419" class="t-primary" font-size="12" font-weight="700" text-anchor="middle">agmon web</text>
+        <text x="895" y="419" class="t-primary" font-size="12" font-weight="700" text-anchor="middle">tokenmeter web</text>
         <text x="895" y="436" class="t-muted" font-size="9" text-anchor="middle">HTTP Dashboard</text>
         <text x="895" y="457" class="t-frontend" font-size="8" text-anchor="middle">REST API + embedded SPA</text>
         <text x="895" y="471" class="t-frontend" font-size="8" text-anchor="middle">cost reports &middot; daily spend</text>
@@ -607,13 +607,13 @@
           <li>&bull; <strong>TUI</strong> — bubbletea 4 tabs, 2s poll + live broadcast; keys: <code>j k Enter / [ ]</code></li>
           <li>&bull; <strong>Web</strong> — HTTP server reads SQLite, serves embedded SPA with daily cost reports</li>
           <li>&bull; Both receive the daemon's live event stream — TUI updates instantly, web refreshes via fetch</li>
-          <li>&bull; <code>agmon web</code> auto-spawns daemon + watchers on start (no manual daemon needed)</li>
+          <li>&bull; <code>tokenmeter web</code> auto-spawns daemon + watchers on start (no manual daemon needed)</li>
         </ul>
       </div>
     </div>
 
     <p class="footer">
-      agmon &bull; Go 1.24 &bull; Bubbletea TUI &bull; modernc SQLite &bull; Unix socket &bull; <code>~/.agmon/</code>
+      tokenmeter &bull; Go 1.24 &bull; Bubbletea TUI &bull; modernc SQLite &bull; Unix socket &bull; <code>~/.tokenmeter/</code>
     </p>
   </div>
 

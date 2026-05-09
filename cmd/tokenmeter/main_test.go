@@ -18,7 +18,7 @@ func TestConfigureTUILoggingRedirectsStandardLoggerToFile(t *testing.T) {
 		log.SetPrefix(prevPrefix)
 	})
 
-	logPath := filepath.Join(t.TempDir(), "agmon.log")
+	logPath := filepath.Join(t.TempDir(), "tokenmeter.log")
 	restore, err := configureTUILogging(logPath)
 	if err != nil {
 		t.Fatalf("configure tui logging: %v", err)

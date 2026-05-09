@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
 func subscriberSocketPath(sockPath string) string {

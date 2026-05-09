@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tt-a1i/agmon/internal/event"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 // newTestDB opens a fresh SQLite DB in a temp directory. Returns a DB that

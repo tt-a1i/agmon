@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tt-a1i/agmon/internal/collector"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/collector"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 func (m *Model) refreshFilteredViews() {

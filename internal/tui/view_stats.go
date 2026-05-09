@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 // buildStatsLines builds all display lines for the Stats tab.

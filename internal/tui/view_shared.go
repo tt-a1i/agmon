@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 const splashLogo = `
@@ -356,5 +356,5 @@ func claudeHooksConfigured() bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), "agmon emit")
+	return strings.Contains(string(data), "tokenmeter emit")
 }

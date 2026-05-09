@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/appdir"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 	_ "modernc.org/sqlite"
 )
 
@@ -18,8 +19,7 @@ type DB struct {
 }
 
 func DefaultDBPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agmon", "data", "agmon.db")
+	return appdir.PathFor("tokenmeter.db", "agmon.db", "data")
 }
 
 func Open(path string) (*DB, error) {

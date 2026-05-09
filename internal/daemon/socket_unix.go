@@ -6,11 +6,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+
+	"github.com/tt-a1i/tokenmeter/internal/appdir"
 )
 
 func DefaultSocketPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agmon", "agmon.sock")
+	return appdir.PathFor("tokenmeter.sock", "agmon.sock")
 }
 
 func listenSocket(path string) (net.Listener, error) {

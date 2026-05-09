@@ -7,15 +7,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/collector"
-	"github.com/tt-a1i/agmon/internal/event"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/collector"
+	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 //go:embed static
 var staticFiles embed.FS
 
-// Server serves the agmon web dashboard.
+// Server serves the tokenmeter web dashboard.
 type Server struct {
 	db   *storage.DB
 	addr string

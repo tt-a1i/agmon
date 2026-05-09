@@ -47,7 +47,7 @@ jobs:
         run: go test ./... -v
 
       - name: Build
-        run: go build -o agmon ./cmd/agmon/
+        run: go build -o tokenmeter ./cmd/tokenmeter/
 
   release:
     needs: test

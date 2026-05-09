@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/collector"
-	"github.com/tt-a1i/agmon/internal/event"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/collector"
+	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 func testDaemon(t *testing.T) (*Daemon, *storage.DB) {
@@ -22,7 +22,7 @@ func testDaemon(t *testing.T) (*Daemon, *storage.DB) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return New(db, filepath.Join(dir, "agmon.sock")), db
+	return New(db, filepath.Join(dir, "tokenmeter.sock")), db
 }
 
 func TestRemoteSubscriberReceivesBroadcast(t *testing.T) {
@@ -33,7 +33,7 @@ func TestRemoteSubscriberReceivesBroadcast(t *testing.T) {
 	}
 	defer db.Close()
 
-	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("agmon-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("tokenmeter-%d.sock", time.Now().UnixNano()))
 	d := New(db, sockPath)
 	if err := d.Start(); err != nil {
 		t.Fatalf("start daemon: %v", err)
@@ -45,6 +45,7 @@ func TestRemoteSubscriberReceivesBroadcast(t *testing.T) {
 		t.Fatalf("subscribe remote: %v", err)
 	}
 	defer closeFn()
+	waitForRemoteSubscribers(t, d, 1)
 
 	want := event.Event{
 		ID:        "session-start-s1",
@@ -69,6 +70,21 @@ func TestRemoteSubscriberReceivesBroadcast(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for broadcast")
 	}
+}
+
+func waitForRemoteSubscribers(t *testing.T, d *Daemon, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		d.mu.RLock()
+		got := len(d.remoteSubs)
+		d.mu.RUnlock()
+		if got >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d remote subscriber(s)", want)
 }
 
 func TestProcessEventEndsHistoricalSessionStart(t *testing.T) {
@@ -174,7 +190,7 @@ func TestProcessEventTokenUsageUpdatesSessionTotals(t *testing.T) {
 			CacheReadTokens:     5,
 			Model:               "sonnet",
 			CostUSD:             1.25,
-			CWD:                 "/tmp/agmon",
+			CWD:                 "/tmp/tokenmeter",
 			GitBranch:           "feature/test",
 		},
 	})
@@ -198,7 +214,7 @@ func TestProcessEventTokenUsageUpdatesSessionTotals(t *testing.T) {
 	if session.TotalCostUSD != 1.25 {
 		t.Fatalf("unexpected cost: %f", session.TotalCostUSD)
 	}
-	if session.CWD != "/tmp/agmon" || session.GitBranch != "feature/test" {
+	if session.CWD != "/tmp/tokenmeter" || session.GitBranch != "feature/test" {
 		t.Fatalf("unexpected meta: cwd=%q branch=%q", session.CWD, session.GitBranch)
 	}
 }
@@ -270,7 +286,7 @@ func TestProcessEventClaudeWatcherToDB(t *testing.T) {
 		"type":      "assistant",
 		"sessionId": sessionID,
 		"uuid":      msgUUID,
-		"cwd":       "/tmp/agmon/daemon-test",
+		"cwd":       "/tmp/tokenmeter/daemon-test",
 		"gitBranch": "feature/daemon-e2e",
 		"timestamp": "2026-04-16T10:00:00.000Z",
 		"message": map[string]any{
@@ -307,8 +323,8 @@ func TestProcessEventClaudeWatcherToDB(t *testing.T) {
 	if math.Abs(sess.TotalCostUSD-expectedCost) > 1e-6 {
 		t.Fatalf("total_cost_usd = %f, want %f", sess.TotalCostUSD, expectedCost)
 	}
-	if sess.CWD != "/tmp/agmon/daemon-test" {
-		t.Errorf("cwd = %q, want /tmp/agmon/daemon-test (FillSessionMeta not wired)", sess.CWD)
+	if sess.CWD != "/tmp/tokenmeter/daemon-test" {
+		t.Errorf("cwd = %q, want /tmp/tokenmeter/daemon-test (FillSessionMeta not wired)", sess.CWD)
 	}
 	if sess.GitBranch != "feature/daemon-e2e" {
 		t.Errorf("git_branch = %q, want feature/daemon-e2e (FillSessionMeta not wired)", sess.GitBranch)

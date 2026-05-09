@@ -25,7 +25,7 @@ func (m Model) viewDashboard(width int) string {
 		if len(m.sessions) == 0 {
 			msg := "  No sessions yet."
 			if !claudeHooksConfigured() {
-				msg += "\n\n  Run 'agmon setup' to configure Claude Code hooks,\n  then start using Claude Code normally."
+				msg += "\n\n  Run 'tokenmeter setup' to configure Claude Code hooks,\n  then start using Claude Code normally."
 			} else {
 				msg += "\n  Start using Claude Code or Codex to see data."
 			}

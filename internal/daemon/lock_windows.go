@@ -9,11 +9,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/tt-a1i/tokenmeter/internal/appdir"
 )
 
 func pidFilePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agmon", "daemon.pid")
+	return appdir.Path("daemon.pid")
 }
 
 // WritePID writes the current process PID to the lock file.

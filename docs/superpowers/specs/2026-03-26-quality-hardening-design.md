@@ -109,7 +109,7 @@ The rule is: background failures may be non-fatal, but they should not be invisi
 
 ## Success Criteria
 
-- non-zero coverage for `internal/tui` and meaningful new coverage for `cmd/agmon` and `internal/daemon`
+- non-zero coverage for `internal/tui` and meaningful new coverage for `cmd/tokenmeter` and `internal/daemon`
 - no silent watcher directory failures in key scan paths
 - `CLAUDE.md` reflects current tab names and behavior
 - CI runs on both Linux and Windows

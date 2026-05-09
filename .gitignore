@@ -1,5 +1,6 @@
 # Binaries
 /agmon
+/tokenmeter
 dist/
 
 # Dependencies

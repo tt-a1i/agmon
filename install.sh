@@ -1,9 +1,9 @@
 #!/bin/sh
 set -e
 
-# agmon installer — downloads the latest release binary from GitHub
+# tokenmeter installer — downloads the latest release binary from GitHub
 
-REPO="tt-a1i/agmon"
+REPO="tt-a1i/tokenmeter"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -28,31 +28,31 @@ if [ -z "$LATEST" ]; then
   exit 1
 fi
 
-URL="https://github.com/${REPO}/releases/download/${LATEST}/agmon_${OS}_${ARCH}.tar.gz"
-echo "Downloading agmon ${LATEST} for ${OS}/${ARCH}..."
+URL="https://github.com/${REPO}/releases/download/${LATEST}/tokenmeter_${OS}_${ARCH}.tar.gz"
+echo "Downloading tokenmeter ${LATEST} for ${OS}/${ARCH}..."
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-curl -sL "$URL" -o "$TMP/agmon.tar.gz"
-tar -xzf "$TMP/agmon.tar.gz" -C "$TMP"
+curl -sL "$URL" -o "$TMP/tokenmeter.tar.gz"
+tar -xzf "$TMP/tokenmeter.tar.gz" -C "$TMP"
 
-if [ ! -f "$TMP/agmon" ]; then
+if [ ! -f "$TMP/tokenmeter" ]; then
   echo "Error: binary not found in archive"
   exit 1
 fi
 
-chmod +x "$TMP/agmon"
+chmod +x "$TMP/tokenmeter"
 
 if [ -w "$INSTALL_DIR" ]; then
-  mv "$TMP/agmon" "$INSTALL_DIR/agmon"
+  mv "$TMP/tokenmeter" "$INSTALL_DIR/tokenmeter"
 else
   echo "Installing to $INSTALL_DIR (requires sudo)..."
-  sudo mv "$TMP/agmon" "$INSTALL_DIR/agmon"
+  sudo mv "$TMP/tokenmeter" "$INSTALL_DIR/tokenmeter"
 fi
 
-echo "agmon ${LATEST} installed to ${INSTALL_DIR}/agmon"
+echo "tokenmeter ${LATEST} installed to ${INSTALL_DIR}/tokenmeter"
 echo ""
 echo "Get started:"
-echo "  agmon setup    # configure Claude Code hooks"
-echo "  agmon          # launch dashboard"
+echo "  tokenmeter setup    # configure Claude Code hooks"
+echo "  tokenmeter          # launch dashboard"

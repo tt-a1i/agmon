@@ -2,7 +2,7 @@ package collector
 
 // Pricing tables for Claude and Codex models.
 //
-// TIER ASSUMPTION (Codex): agmon only sees the model name and token counts
+// TIER ASSUMPTION (Codex): tokenmeter only sees the model name and token counts
 // from JSONL logs. It cannot observe OpenAI's Standard / Batch (~50% off) /
 // Flex (~25% off) / Priority (premium) tiers, nor long-context (>128k)
 // pricing variants on some models. Rates here assume Standard tier

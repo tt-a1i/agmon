@@ -2,12 +2,11 @@ package storage
 
 import (
 	"database/sql"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
 func testDB(t *testing.T) *DB {
@@ -530,9 +529,14 @@ func TestCleanOldSessions(t *testing.T) {
 }
 
 func TestDefaultDBPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+
 	path := DefaultDBPath()
-	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".agmon", "data", "agmon.db")
+	expected := filepath.Join(home, ".tokenmeter", "data", "tokenmeter.db")
 	if path != expected {
 		t.Errorf("default path: got %q, want %q", path, expected)
 	}

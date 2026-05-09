@@ -112,7 +112,7 @@ func (m Model) footer() string {
 		footer += "  " + errorStyle.Render("err: "+m.err.Error())
 	}
 	if m.updateAvailable != "" {
-		footer += "  " + mutedStyle.Render("v"+m.updateAvailable+" available — ") + keyStyle.Render("agmon update")
+		footer += "  " + mutedStyle.Render("v"+m.updateAvailable+" available — ") + keyStyle.Render("tokenmeter update")
 	}
 	return footer
 }

@@ -1,4 +1,4 @@
-module github.com/tt-a1i/agmon
+module github.com/tt-a1i/tokenmeter
 
 go 1.24.2
 

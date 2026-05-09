@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const releaseAPI = "https://api.github.com/repos/tt-a1i/agmon/releases/latest"
+const releaseAPI = "https://api.github.com/repos/tt-a1i/tokenmeter/releases/latest"
 
 type ghRelease struct {
 	TagName string    `json:"tag_name"`
@@ -31,7 +31,7 @@ type ghAsset struct {
 }
 
 func runUpdate() {
-	fmt.Printf("agmon v%s — checking for updates...\n", version)
+	fmt.Printf("tokenmeter v%s — checking for updates...\n", version)
 
 	rel, err := fetchLatestRelease()
 	if err != nil {
@@ -208,7 +208,7 @@ func extractTarGz(data []byte) ([]byte, error) {
 			return nil, err
 		}
 		name := filepath.Base(hdr.Name)
-		if name == "agmon" || name == "agmon.exe" {
+		if name == "tokenmeter" || name == "tokenmeter.exe" {
 			return io.ReadAll(tr)
 		}
 	}
@@ -222,7 +222,7 @@ func extractZip(data []byte) ([]byte, error) {
 	}
 	for _, f := range zr.File {
 		name := filepath.Base(f.Name)
-		if name == "agmon" || name == "agmon.exe" {
+		if name == "tokenmeter" || name == "tokenmeter.exe" {
 			rc, err := f.Open()
 			if err != nil {
 				return nil, err
@@ -238,7 +238,7 @@ func replaceBinary(target string, newBin []byte) error {
 	dir := filepath.Dir(target)
 
 	// Write new binary to a temp file in the same directory.
-	tmp, err := os.CreateTemp(dir, ".agmon-update-*")
+	tmp, err := os.CreateTemp(dir, ".tokenmeter-update-*")
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}

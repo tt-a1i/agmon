@@ -1,17 +1,17 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/agmon-AI%20Agent%20%E5%8F%AF%E8%A7%82%E6%B5%8B%E6%80%A7-7C3AED?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxwYXRoIGQ9Ik0xMyAyTDMgMTRoOWwtMSA4IDEwLTEyaC05bDEtOHoiLz48L3N2Zz4=&logoColor=white" alt="agmon" height="28">
+  <img src="https://img.shields.io/badge/TokenMeter-AI%20Agent%20%E7%94%A8%E9%87%8F%E4%BB%AA%E8%A1%A8%E7%9B%98-7C3AED?style=flat-square&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxwYXRoIGQ9Ik0xMyAyTDMgMTRoOWwtMSA4IDEwLTEyaC05bDEtOHoiLz48L3N2Zz4=&logoColor=white" alt="TokenMeter" height="28">
 </p>
 
-<h1 align="center">agmon</h1>
+<h1 align="center">TokenMeter</h1>
 
 <p align="center">
-  <strong>AI 编码 Agent 实时可观测性工具</strong>
+  <strong>AI 编码 Agent 的本地用量仪表盘</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/tt-a1i/agmon/releases"><img src="https://img.shields.io/github/v/release/tt-a1i/agmon?style=flat-square&color=7C3AED&label=version" alt="版本"></a>
+  <a href="https://github.com/tt-a1i/tokenmeter/releases"><img src="https://img.shields.io/github/v/release/tt-a1i/tokenmeter?style=flat-square&color=7C3AED&label=version" alt="版本"></a>
   <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
-  <a href="https://github.com/tt-a1i/agmon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="许可证"></a>
+  <a href="https://github.com/tt-a1i/tokenmeter/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="许可证"></a>
   <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%7C%20Linux%20%7C%20Windows-6B7280?style=flat-square" alt="平台">
   <img src="https://img.shields.io/badge/Claude%20Code-%E5%B7%B2%E6%94%AF%E6%8C%81-F59E0B?style=flat-square" alt="Claude Code">
   <img src="https://img.shields.io/badge/Codex-%E5%B7%B2%E6%94%AF%E6%8C%81-22C55E?style=flat-square" alt="Codex">
@@ -23,7 +23,7 @@
 
 ---
 
-> 在一个终端面板中监控 Claude Code 和 Codex 的 Token 消耗、费用、工具调用，消息列表，支持tui和web面板。
+> 在一个终端面板中监控 Claude Code 和 Codex 的 Token 消耗、费用、工具调用和消息列表，支持 TUI 和 Web 面板。
 <p align="center">
   <img width="711" alt="image" src="https://github.com/user-attachments/assets/b1dc6609-868e-4c24-bfc0-73baa9c81432" />
 </p>
@@ -41,7 +41,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/architecture.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/architecture-light.svg">
-    <img src="docs/architecture.svg" alt="agmon 架构图" width="100%">
+    <img src="docs/architecture.svg" alt="tokenmeter 架构图" width="100%">
   </picture>
 </p>
 
@@ -53,18 +53,18 @@
 - **7 天费用趋势** — Stats 视图内置垂直柱状图，一眼看清每日花费走势
 - **工具调用追踪** — 名称、参数、结果、耗时、状态
 - **对话消息** — 浏览每个会话中的用户提示词，支持 `/` 搜索过滤
-- **会话标签** — `agmon tag <id> "备注"` 给会话打标签，方便回忆
+- **会话标签** — `tokenmeter tag <id> "备注"` 给会话打标签，方便回忆
 - **时间范围统计** — 今日 / 本周 / 本月 / 全部 Token 与费用聚合
-- **费用报告** — `agmon report --weekly/--monthly` 生成 Markdown 费用报告（按模型、按会话细分）
-- **Web Dashboard** — `agmon web` 启动本地 Web 面板，支持深色/浅色模式、面积图、会话详情、对话回顾
+- **费用报告** — `tokenmeter report --weekly/--monthly` 生成 Markdown 费用报告（按模型、按会话细分）
+- **Web Dashboard** — `tokenmeter web` 启动本地 Web 面板，支持深色/浅色模式、面积图、会话详情、对话回顾
 - **实时更新** — daemon 广播事件，TUI 实时刷新
-- **零配置** — `agmon setup` + `agmon`，单二进制文件，无依赖
+- **零配置** — `tokenmeter setup` + `tokenmeter`，单二进制文件，无依赖
 
 ## 支持平台
 
 | 平台 | 接入方式 | 说明 |
 |------|---------|------|
-| **Claude Code** | Hooks + JSONL 日志监听 | `agmon setup` 自动注入 hooks 到 `~/.claude/settings.json` |
+| **Claude Code** | Hooks + JSONL 日志监听 | `tokenmeter setup` 自动注入 hooks 到 `~/.claude/settings.json` |
 | **Codex** | JSONL 日志监听 | 自动轮询 `~/.codex/sessions/` |
 
 ## 安装
@@ -72,7 +72,7 @@
 ### 一键安装（推荐）
 
 ```bash
-curl -sL https://raw.githubusercontent.com/tt-a1i/agmon/main/install.sh | sh
+curl -sL https://raw.githubusercontent.com/tt-a1i/tokenmeter/main/install.sh | sh
 ```
 
 ### Homebrew
@@ -81,20 +81,20 @@ curl -sL https://raw.githubusercontent.com/tt-a1i/agmon/main/install.sh | sh
 发布细节见 [docs/release.md](docs/release.md)。
 
 ```bash
-brew install tt-a1i/tap/agmon
+brew install tt-a1i/tap/tokenmeter
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/tt-a1i/agmon/cmd/agmon@latest
+go install github.com/tt-a1i/tokenmeter/cmd/tokenmeter@latest
 ```
 
 ### 从源码构建
 
 ```bash
-git clone https://github.com/tt-a1i/agmon.git
-cd agmon
+git clone https://github.com/tt-a1i/tokenmeter.git
+cd tokenmeter
 make install
 ```
 
@@ -102,31 +102,31 @@ make install
 
 ```bash
 # 1. 配置 Claude Code hooks
-agmon setup
+tokenmeter setup
 
 # 2. 启动 TUI（自动启动 daemon）
-agmon
+tokenmeter
 ```
 
-就这样。正常使用 Claude Code 或 Codex，agmon 在后台自动采集所有数据。
+就这样。正常使用 Claude Code 或 Codex，TokenMeter 在后台自动采集所有数据。
 
 ## 命令
 
 | 命令 | 说明 |
 |------|------|
-| `agmon` | 启动 TUI（自动启动 daemon） |
-| `agmon daemon` | 仅启动 daemon |
-| `agmon status` | 快速查看会话摘要 |
-| `agmon report [session]` | 详细文本报告 |
-| `agmon report --weekly` | 本周 Markdown 费用报告 |
-| `agmon report --monthly` | 本月 Markdown 费用报告 |
-| `agmon cost [today\|week]` | Token 用量统计 |
-| `agmon web [--port N]` | 启动 Web Dashboard（默认端口 8370） |
-| `agmon clean [days]` | 清理 N 天前的历史数据（默认 7 天） |
-| `agmon tag <id> [text]` | 给会话打标签（省略 text 则清除） |
-| `agmon setup` | 配置 Claude Code hooks |
-| `agmon uninstall` | 卸载 hooks 并停止 daemon |
-| `agmon version` | 显示版本 |
+| `tokenmeter` | 启动 TUI（自动启动 daemon） |
+| `tokenmeter daemon` | 仅启动 daemon |
+| `tokenmeter status` | 快速查看会话摘要 |
+| `tokenmeter report [session]` | 详细文本报告 |
+| `tokenmeter report --weekly` | 本周 Markdown 费用报告 |
+| `tokenmeter report --monthly` | 本月 Markdown 费用报告 |
+| `tokenmeter cost [today\|week]` | Token 用量统计 |
+| `tokenmeter web [--port N]` | 启动 Web Dashboard（默认端口 8370） |
+| `tokenmeter clean [days]` | 清理 N 天前的历史数据（默认 7 天） |
+| `tokenmeter tag <id> [text]` | 给会话打标签（省略 text 则清除） |
+| `tokenmeter setup` | 配置 Claude Code hooks |
+| `tokenmeter uninstall` | 卸载 hooks 并停止 daemon |
+| `tokenmeter version` | 显示版本 |
 
 ## TUI 视图
 
@@ -159,8 +159,8 @@ agmon
 ## Web Dashboard
 
 ```bash
-agmon web              # 打开 http://localhost:8370
-agmon web --port 9000  # 自定义端口
+tokenmeter web              # 打开 http://localhost:8370
+tokenmeter web --port 9000  # 自定义端口
 ```
 
 浏览器面板功能：
@@ -187,31 +187,33 @@ agmon web --port 9000  # 自定义端口
 > ASCII 版速写：
 >
 > ```
-> Claude Code hooks ──→ agmon emit ──→ Unix socket ─┐
+> Claude Code hooks ──→ tokenmeter emit ──→ Unix socket ─┐
 > Claude JSONL 日志 ──→ ClaudeLogWatcher ───────────┤
 > Codex  JSONL 日志 ──→ CodexWatcher ───────────────┘
 >                                                    ▼
->                                              agmon daemon
+>                                              tokenmeter daemon
 >                                                    │
->                                          SQLite (~/.agmon/data/agmon.db)
+>                                          SQLite (~/.tokenmeter/data/tokenmeter.db)
 >                                                    │
->                                  agmon TUI  ◄─────┴─────►  agmon web
+>                                  tokenmeter TUI  ◄─────┴─────►  tokenmeter web
 > ```
 
 ## 数据存储
 
 ```
-~/.agmon/
-├── data/agmon.db    # SQLite 数据库
-├── agmon.sock       # Unix domain socket
+~/.tokenmeter/
+├── data/tokenmeter.db    # SQLite 数据库
+├── tokenmeter.sock       # Unix domain socket
 └── daemon.pid       # PID 锁文件
 ```
+
+从旧版升级时，如果本机已有 `~/.agmon/` 且尚未创建 `~/.tokenmeter/`，TokenMeter 会继续读取旧目录，避免历史数据丢失。
 
 ## 卸载
 
 ```bash
-agmon uninstall        # 移除 hooks，停止 daemon
-rm -rf ~/.agmon        # 删除所有数据
+tokenmeter uninstall        # 移除 hooks，停止 daemon
+rm -rf ~/.tokenmeter        # 删除所有数据
 ```
 
 ## 许可证

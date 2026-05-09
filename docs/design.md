@@ -1,4 +1,4 @@
-# agmon - AI Agent Observability Tool
+# TokenMeter - AI Agent Usage Meter
 
 ## Overview
 
@@ -9,22 +9,22 @@ Real-time observability for AI coding agents. TUI-based monitor that shows what 
 ## Architecture
 
 ```
-Claude Code hooks ──→ Unix socket ──→ agmon daemon (aggregate/store)
+Claude Code hooks ──→ Unix socket ──→ tokenmeter daemon (aggregate/store)
 Codex logs ─────────→                        ↓
-                                      ~/.agmon/data/agmon.db (SQLite)
+                                      ~/.tokenmeter/data/tokenmeter.db (SQLite)
                                              ↓
-                                      agmon tui (connect to daemon)
+                                      tokenmeter tui (connect to daemon)
 ```
 
 ### Components
 
-1. **agmon emit** — lightweight CLI called by hooks, sends events to daemon via Unix socket
-2. **agmon daemon** — receives events, parses logs, aggregates data, stores to SQLite
-3. **agmon tui** — connects to daemon, renders real-time TUI
+1. **tokenmeter emit** — lightweight CLI called by hooks, sends events to daemon via Unix socket
+2. **tokenmeter daemon** — receives events, parses logs, aggregates data, stores to SQLite
+3. **tokenmeter tui** — connects to daemon, renders real-time TUI
 
 ### Communication
 
-- Unix domain socket: `~/.agmon/agmon.sock`
+- Unix domain socket: `~/.tokenmeter/tokenmeter.sock`
 - JSON messages over socket
 
 ## Data Collection
@@ -44,7 +44,7 @@ Separate goroutine watches Codex log directory, parses into unified event format
 
 ## Storage
 
-SQLite database at `~/.agmon/data/agmon.db` (using modernc.org/sqlite, pure Go, no CGO).
+SQLite database at `~/.tokenmeter/data/tokenmeter.db` (using modernc.org/sqlite, pure Go, no CGO).
 
 ### Tables
 
@@ -85,13 +85,13 @@ SQLite database at `~/.agmon/data/agmon.db` (using modernc.org/sqlite, pure Go, 
 ## CLI Commands
 
 ```
-agmon                    # start TUI (auto-starts daemon)
-agmon daemon             # start daemon only
-agmon status             # quick summary of active sessions
-agmon report [session]   # text report for a session
-agmon cost [today|week]  # cost statistics
-agmon setup              # auto-configure hooks
-agmon uninstall          # clean up hooks and data
+tokenmeter                    # start TUI (auto-starts daemon)
+tokenmeter daemon             # start daemon only
+tokenmeter status             # quick summary of active sessions
+tokenmeter report [session]   # text report for a session
+tokenmeter cost [today|week]  # cost statistics
+tokenmeter setup              # auto-configure hooks
+tokenmeter uninstall          # clean up hooks and data
 ```
 
 ## V1 Metrics
@@ -114,5 +114,5 @@ agmon uninstall          # clean up hooks and data
 ## Distribution
 
 - GitHub Releases via goreleaser (darwin/linux × amd64/arm64)
-- Homebrew tap: `brew install agmon`
+- Homebrew tap: `brew install tokenmeter`
 - Single binary, zero dependencies

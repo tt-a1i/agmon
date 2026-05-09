@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
 func TestFillSessionMetaKeepsProjectRootWhenNewCWDIsChild(t *testing.T) {

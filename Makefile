@@ -3,11 +3,11 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o agmon ./cmd/agmon/
+	go build -ldflags "-X main.version=$(VERSION)" -o tokenmeter ./cmd/tokenmeter/
 
 install: build
-	cp agmon $(shell go env GOPATH)/bin/agmon
-	codesign --sign - --force $(shell go env GOPATH)/bin/agmon 2>/dev/null || true
+	cp tokenmeter $(shell go env GOPATH)/bin/tokenmeter
+	codesign --sign - --force $(shell go env GOPATH)/bin/tokenmeter 2>/dev/null || true
 
 test:
 	go test -cover ./...
@@ -16,4 +16,4 @@ lint:
 	go vet ./...
 
 clean:
-	rm -f agmon
+	rm -f tokenmeter

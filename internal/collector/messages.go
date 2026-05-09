@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tt-a1i/agmon/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
 // UserMessage represents a single user message extracted from a session log.

@@ -10,9 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"github.com/tt-a1i/agmon/internal/collector"
-	"github.com/tt-a1i/agmon/internal/event"
-	"github.com/tt-a1i/agmon/internal/storage"
+	"github.com/tt-a1i/tokenmeter/internal/collector"
+	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
 func testModelDB(t *testing.T) *storage.DB {
@@ -32,7 +32,7 @@ func seedModelSession(t *testing.T, db *storage.DB) {
 	if err := db.UpsertSession("session-1", event.PlatformClaude, now); err != nil {
 		t.Fatalf("upsert session: %v", err)
 	}
-	if err := db.UpdateSessionMeta("session-1", "/tmp/agmon", "main"); err != nil {
+	if err := db.UpdateSessionMeta("session-1", "/tmp/tokenmeter", "main"); err != nil {
 		t.Fatalf("update session meta: %v", err)
 	}
 	if err := db.UpsertAgent("agent-1", "session-1", "", "main", now); err != nil {
@@ -213,7 +213,7 @@ func TestViewDashboardMovesCtxStatusToPreviewAndShowsPath(t *testing.T) {
 		sessions: []storage.SessionRow{
 			{
 				SessionID:                "session-1",
-				CWD:                      "/Users/admin/code/agmon",
+				CWD:                      "/Users/admin/code/tokenmeter",
 				GitBranch:                "main",
 				TotalInputTokens:         527400,
 				TotalOutputTokens:        10400,
@@ -227,7 +227,7 @@ func TestViewDashboardMovesCtxStatusToPreviewAndShowsPath(t *testing.T) {
 		filteredSessionsCache: []storage.SessionRow{
 			{
 				SessionID:           "session-1",
-				CWD:                 "/Users/admin/code/agmon",
+				CWD:                 "/Users/admin/code/tokenmeter",
 				GitBranch:           "main",
 				LatestContextTokens: 33200,
 				TotalCostUSD:        2.86,
@@ -258,7 +258,7 @@ func TestViewDashboardMovesCtxStatusToPreviewAndShowsPath(t *testing.T) {
 	if strings.Contains(view, "Status ● run    Cost") {
 		t.Fatalf("dashboard preview should stop showing cost, got %q", view)
 	}
-	if !strings.Contains(view, "/Users/admin/code/agmon") {
+	if !strings.Contains(view, "/Users/admin/code/tokenmeter") {
 		t.Fatalf("dashboard preview should show cwd path, got %q", view)
 	}
 }

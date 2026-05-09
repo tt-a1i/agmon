@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tt-a1i/tokenmeter/internal/appdir"
 )
 
 // On Windows, use TCP localhost instead of Unix socket.
@@ -16,8 +18,7 @@ const listenAddr = "127.0.0.1:19847"
 const subscriberListenAddr = "127.0.0.1:19848"
 
 func DefaultSocketPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agmon", "agmon.port")
+	return appdir.PathFor("tokenmeter.port", "agmon.port")
 }
 
 func listenSocket(path string) (net.Listener, error) {
