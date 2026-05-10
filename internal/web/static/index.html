@@ -157,6 +157,20 @@ tr:hover td{background:var(--bg-hover)}
 /* Insight */
 .insight{font-size:11px;color:var(--text-muted);margin-bottom:8px;display:flex;align-items:center;gap:4px}
 .insight b{color:var(--text-strong)}
+.web-error{display:none;margin-bottom:12px;padding:10px 12px;border:1px solid var(--red-bg);background:var(--red-bg);color:var(--red);border-radius:8px;font-size:12px;font-weight:600;align-items:center;justify-content:space-between;gap:12px}
+.web-error.show{display:flex}
+.web-error button{border:1px solid color-mix(in srgb,var(--red) 35%,transparent);background:transparent;color:var(--red);border-radius:6px;padding:4px 10px;font:inherit;font-size:11px;font-weight:700;cursor:pointer}
+
+/* Operational insights */
+.ops-strip{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px;margin-bottom:24px}
+.op-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;min-height:92px;display:flex;flex-direction:column;justify-content:space-between;transition:border-color .15s,box-shadow .15s}
+.op-card:hover{border-color:var(--border-hover);box-shadow:var(--card-shadow)}
+.op-k{font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+.op-v{font-size:16px;font-weight:750;color:var(--text-strong);letter-spacing:-.2px;line-height:1.25}
+.op-sub{font-size:11px;color:var(--text-muted);margin-top:8px}
+.op-card.warn{border-color:color-mix(in srgb,var(--amber) 25%,var(--border))}
+.op-card.bad{border-color:color-mix(in srgb,var(--red) 25%,var(--border));background:linear-gradient(180deg,var(--bg2),var(--red-bg))}
+.op-card.good{border-color:color-mix(in srgb,var(--green) 25%,var(--border))}
 
 /* Detail */
 .detail{display:none}.detail.show{display:block;animation:slideIn .15s ease}
@@ -213,6 +227,16 @@ tr:hover td{background:var(--bg-hover)}
 .sort-btn{background:0;border:1px solid var(--border);border-radius:5px;padding:3px 10px;font:inherit;font-size:11px;font-weight:500;color:var(--text-muted);cursor:pointer;transition:all .1s}
 .sort-btn:hover{color:var(--text);border-color:var(--text-faint)}
 .sort-btn.on{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
+.session-controls{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:7px;overflow:hidden;background:var(--bg)}
+.seg button{border:0;border-right:1px solid var(--border);background:transparent;color:var(--text-muted);font:inherit;font-size:11px;font-weight:650;padding:4px 10px;cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button:hover{background:var(--bg-hover);color:var(--text)}
+.seg button.on{background:var(--accent-bg);color:var(--accent)}
+.sr-status{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;text-transform:uppercase;letter-spacing:.2px}
+.sr-status.active{background:var(--green-bg);color:var(--green)}
+.sr-status.stale{background:rgba(202,138,4,.12);color:var(--amber)}
+.sr-status.ended{background:var(--bg3);color:var(--text-muted)}
 
 /* Session row hover enhancement */
 .sr{display:flex;align-items:center;padding:11px 14px;gap:12px;border-bottom:1px solid var(--border-light);cursor:pointer;transition:all .12s;border-radius:0}
@@ -318,9 +342,20 @@ tr:hover td{background:var(--bg-hover)}
 .fade-up{animation:fadeUp .25s ease}
 
 /* Responsive */
+@media(max-width:900px){
+  .metrics{grid-template-columns:repeat(2,1fr);gap:10px}
+  .ops-strip{grid-template-columns:1fr;gap:10px}
+  .skel-metrics{grid-template-columns:repeat(2,1fr);gap:10px}
+}
 @media(max-width:640px){
   .page{padding:12px 16px 60px}
-  nav{margin-left:-16px;margin-right:-16px;padding:0 16px}
+  nav{margin-left:-16px;margin-right:-16px;padding:0 16px;gap:10px;overflow:hidden}
+  .nav-r{gap:6px;min-width:0}
+  .brand{font-size:14px}
+  .updated{display:none}
+  .range{min-width:0;flex-shrink:1}
+  .rb{padding:5px 7px}
+  .theme-btn{width:30px;height:30px}
   .metrics{grid-template-columns:repeat(2,1fr);gap:8px}
   .metric{padding:12px 14px}
   .metric-val{font-size:22px}
@@ -331,6 +366,13 @@ tr:hover td{background:var(--bg-hover)}
   .qstats{grid-template-columns:repeat(3,1fr)}
   .tabs{flex-wrap:nowrap;overflow-x:auto}
   .tab{padding:7px 10px;font-size:11px;white-space:nowrap}
+  .ops-strip{grid-template-columns:1fr;gap:8px}
+  .detail-nav{align-items:flex-start;gap:8px}
+  .sess-nav{flex-wrap:wrap;justify-content:flex-end}
+  .session-controls{align-items:stretch}
+  .session-controls .seg{width:100%}
+  .session-controls .seg button{flex:1}
+  .skel-metrics{grid-template-columns:repeat(2,1fr);gap:8px}
 }
 
 /* Footer */
@@ -393,6 +435,7 @@ tr:hover td{background:var(--bg-hover)}
   <div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div>
 </div>
 <div class="overview fade-up" id="overview" style="display:none">
+  <div class="web-error" id="webError"><span id="webErrorText">Dashboard refresh failed.</span><button onclick="refresh()">Retry</button></div>
   <div class="metrics">
     <div class="metric hero-metric"><div class="metric-label">Period Cost</div><div class="metric-val" id="hCost">—</div><div class="metric-sub" id="hCostSub"></div><div class="metric-spark"><canvas id="sparkCost"></canvas></div></div>
     <div class="metric"><div class="metric-label">Today</div><div class="metric-val" id="hToday">—</div><div class="metric-sub" id="hTodaySub"></div></div>
@@ -401,6 +444,7 @@ tr:hover td{background:var(--bg-hover)}
   </div>
 
   <div class="insight" id="insight"></div>
+  <div class="ops-strip" id="opsStrip"></div>
   <div class="chart-section">
     <div class="chart-head"><span class="chart-title">Daily spend</span><span class="chart-avg" id="chartAvg"></span></div>
     <div class="chart-wrap" id="chartWrap"><canvas id="chartCanvas"></canvas><div class="chart-tip" id="chartTip"></div></div>
@@ -425,7 +469,14 @@ tr:hover td{background:var(--bg-hover)}
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-title">📋 Sessions</span><span class="section-sub" id="sCnt"></span></div>
     <div id="dayFilter"></div>
     <input class="sess-search" id="sessSearch" placeholder="Search by name, model, tag..." autocomplete="off">
-    <div class="sort-row"><button class="sort-btn on" data-sort="time">Recent</button><button class="sort-btn" data-sort="cost">Highest cost</button></div>
+    <div class="session-controls">
+      <div class="seg" id="sessionPlatform">
+        <button class="on" data-platform="all">All</button>
+        <button data-platform="claude">Claude</button>
+        <button data-platform="codex">Codex</button>
+      </div>
+      <div class="sort-row"><button class="sort-btn on" data-sort="time">Recent</button><button class="sort-btn" data-sort="cost">Highest cost</button></div>
+    </div>
     <div class="sess-list" id="sList"></div>
     <button class="more-btn" id="sMore" style="display:none">Show more</button>
   </div>
@@ -499,7 +550,7 @@ function toggleTheme(){
   if(isDark){document.documentElement.setAttribute('data-theme','dark');$('themeBtn').textContent='☀️'}
 })();
 let lastCostDays=null;
-let range=localStorage.getItem('tokenmeter-range')||'week',sLim=20,allS=[],searchQ='',sessSort='time',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null;
+let range=localStorage.getItem('tokenmeter-range')||'week',sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null;
 document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r===range));
 
 const fc=v=>v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4);
@@ -659,19 +710,37 @@ function renderTools(tools){
   el.innerHTML=tools.slice(0,8).map(t=>`<div class="tool-row"><span class="tool-name">${toolIcon(t.ToolName)} ${escHtml(t.ToolName)}</span><div class="tool-track"><div class="tool-fill" style="width:${(t.Count/mx*100).toFixed(1)}%"></div></div><span class="tool-count">${t.Count}</span></div>`).join('');
 }
 
+function renderOpsStrip(stats,costs,sessions){
+  const el=$('opsStrip');if(!el)return;
+  const active=sessions.filter(s=>s.status==='active').length;
+  const stale=sessions.filter(s=>s.status==='stale').length;
+  const totalCost=costs.total_cost||0;
+  const highCost=sessions.slice().sort((a,b)=>b.cost_usd-a.cost_usd)[0];
+  const topTool=(stats.top_tools||[])[0];
+  const failed=(stats.top_tools||[]).reduce((a,t)=>a+(t.FailCount||t.fail_count||0),0);
+  const topModel=(costs.models||[]).slice().sort((a,b)=>b.CostUSD-a.CostUSD)[0];
+  const burnClass=totalCost>=10?'bad':totalCost>=1?'warn':'good';
+  const toolClass=failed>0?'bad':topTool?'good':'';
+  const modelCost=topModel?topModel.CostUSD:0;
+  el.innerHTML=`<div class="op-card ${burnClass}"><div><div class="op-k">Spend focus</div><div class="op-v">${highCost?`${sname(highCost)} is costliest at ${fc(highCost.cost_usd)}`:'No spend yet'}</div></div><div class="op-sub">${active} active · ${stale} stale · ${sessions.length} tracked sessions</div></div>
+  <div class="op-card ${toolClass}"><div><div class="op-k">Tool reliability</div><div class="op-v">${topTool?`${toolIcon(topTool.ToolName)} ${topTool.ToolName} · ${topTool.Count} calls`:'No tool calls'}</div></div><div class="op-sub">${failed?failed+' failed calls need review':'No failures in this period'}</div></div>
+  <div class="op-card"><div><div class="op-k">Model mix</div><div class="op-v">${topModel?escHtml(topModel.Model||'unknown'):'No model data'}</div></div><div class="op-sub">${topModel?`${fc(modelCost)} · ${ft(topModel.InputTokens+topModel.OutputTokens)} tokens`:'Start a session to compare models'}</div></div>`;
+}
+
 // Sessions
 function renderSessions(sessions){
   allS=sessions||[];const el=$('sList'),cnt=$('sCnt'),btn=$('sMore');
   let filtered=allS.slice();
   if(searchQ)filtered=filtered.filter(s=>{const q=searchQ.toLowerCase();return sname(s).toLowerCase().includes(q)||(s.tag||'').toLowerCase().includes(q)||(s.model||'').toLowerCase().includes(q)||s.platform.includes(q)});
+  if(sessionPlatform!=='all')filtered=filtered.filter(s=>s.platform===sessionPlatform);
   if(dayFilter)filtered=filtered.filter(s=>s.start_time.substring(0,10)===dayFilter);
   if(sessSort==='cost')filtered.sort((a,b)=>b.cost_usd-a.cost_usd);
   else filtered.sort((a,b)=>{if(a.status==='active'&&b.status!=='active')return -1;if(b.status==='active'&&a.status!=='active')return 1;return new Date(b.start_time)-new Date(a.start_time)});
   // Day filter UI
   const dfEl=$('dayFilter');
   if(dayFilter){const dt=new Date(dayFilter+'T12:00:00'),label=dt.toLocaleDateString('en',{weekday:'long',month:'short',day:'numeric'});dfEl.innerHTML=`<div class="day-filter" onclick="dayFilter=null;renderSessions(allS)">📅 ${label} <span class="x">×</span></div>`}else{dfEl.innerHTML=''}
-  if(!filtered.length){el.innerHTML='<div class="empty">'+(searchQ?'No matches':'No sessions')+'</div>';cnt.textContent=allS.length+' total';btn.style.display='none';return}
-  cnt.textContent=(searchQ?filtered.length+'/':'')+allS.length;btn.style.display=filtered.length>sLim?'block':'none';
+  if(!filtered.length){el.innerHTML='<div class="empty">'+(searchQ||sessionPlatform!=='all'||dayFilter?'No matching sessions':'No sessions yet')+'</div>';cnt.textContent=allS.length+' total';btn.style.display='none';return}
+  cnt.textContent=(filtered.length===allS.length?allS.length:filtered.length+'/'+allS.length)+' total';btn.style.display=filtered.length>sLim?'block':'none';
   const maxC=Math.max(...filtered.map(s=>s.cost_usd),.01);
   el.innerHTML=filtered.slice(0,sLim).map(s=>{
     const sc=s.status==='active'?'active':s.status==='stale'?'stale':'ended';
@@ -679,7 +748,7 @@ function renderSessions(sessions){
     const durS=dur>0?(dur>=60?Math.floor(dur/60)+'h '+dur%60+'m':dur+'m'):(s.status==='active'?'running':'');
     const tokS=ft(s.input_tokens+s.output_tokens);
     const barW=(s.cost_usd/maxC*100).toFixed(1);
-    return`<div class="sr" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><div class="sr-arr">›</div></div>`
+    return`<div class="sr" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><div class="sr-arr">›</div></div>`
   }).join('');
 }
 $('sMore').onclick=()=>{sLim+=30;renderSessions(allS)};
@@ -811,14 +880,40 @@ $('backBtn').onclick=goBack;
 let lastDetail=null;
 function copyReport(){
   if(!lastDetail)return;
-  const s=lastDetail.session,msgs=lastDetail.messages||[],tools=lastDetail.tools||[];
-  let md=`# Session Report: ${sname(s)}\n\n`;
-  md+=`- **Platform:** ${s.platform}\n- **Model:** ${s.model||'-'}\n- **Cost:** ${fc(s.cost_usd)}\n`;
-  md+=`- **Tokens:** ${ft(s.input_tokens)} in / ${ft(s.output_tokens)} out\n`;
-  if(s.cwd)md+=`- **Directory:** ${s.cwd}\n`;
-  md+='\n';
-  if(msgs.length){md+='## Conversation\n\n';msgs.forEach((m,i)=>{md+=`**#${i+1}** (${ftime(m.time)})\n${m.content}\n\n`})}
-  if(tools.length){md+=`## Tool Calls (${tools.length})\n\n`;tools.slice(0,20).forEach(t=>{md+=`- ${t.tool_name} — ${t.status} ${t.duration_ms?'('+fd(t.duration_ms)+')':''}\n`})}
+  const s=lastDetail.session,msgs=lastDetail.messages||[],tools=lastDetail.tools||[],files=lastDetail.files||[],toolStats=lastDetail.tool_stats||[];
+  const total=s.input_tokens+s.output_tokens;
+  let md=`# TokenMeter Session: ${sname(s)}\n\n`;
+  md+=`- Platform: ${s.platform||'-'}\n- Model: ${s.model||'-'}\n- Cost: ${fc(s.cost_usd)}\n`;
+  md+=`- Tokens: ${ft(s.input_tokens)} in / ${ft(s.output_tokens)} out / ${ft(total)} total\n`;
+  if(s.end_time){const dur=Math.max(0,new Date(s.end_time)-new Date(s.start_time));md+=`- Duration: ${fd(dur)}\n`}
+  if(s.cwd)md+=`- Project: ${s.cwd.split('/').pop()}\n`;
+  if(s.git_branch)md+=`- Branch: ${s.git_branch}\n`;
+  if(s.tag)md+=`- Tag: ${s.tag}\n`;
+  if(toolStats.length){
+    md+='\n## Top Tools\n\n';
+    toolStats.slice().sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name)).slice(0,5).forEach(t=>{
+      const avg=t.avg_ms?`, avg ${fd(t.avg_ms)}`:'';
+      const fail=t.fail_count?`, ${t.fail_count} failed`:'';
+      md+=`- ${t.name}: ${t.count} calls${avg}${fail}\n`;
+    });
+  }else if(tools.length){
+    md+=`\n## Tool Calls (${tools.length})\n\n`;
+    tools.slice(0,10).forEach(t=>{md+=`- ${t.tool_name} — ${t.status}${t.duration_ms?' ('+fd(t.duration_ms)+')':''}\n`});
+  }
+  if(files.length){
+    const counts={create:0,edit:0,delete:0};
+    files.forEach(f=>{counts[f.change_type]=(counts[f.change_type]||0)+1});
+    md+='\n## File Changes\n\n';
+    md+=`- ${files.length} files touched (${counts.create||0} created, ${counts.edit||0} edited, ${counts.delete||0} deleted)\n`;
+    files.slice(0,5).forEach(f=>{const icon=f.change_type==='create'?'+':f.change_type==='delete'?'-':'~';md+=`- ${icon} ${f.path}\n`});
+    if(files.length>5)md+=`- ... ${files.length-5} more\n`;
+  }
+  if(msgs.length){
+    md+='\n## Conversation Preview\n\n';
+    msgs.slice(0,3).forEach((m,i)=>{md+=`**#${i+1}** (${ftime(m.time)})\n${m.content}\n\n`});
+    if(msgs.length>3)md+=`_... ${msgs.length-3} more messages omitted._\n\n`;
+  }
+  md+=`---\nGenerated by TokenMeter at ${new Date().toISOString().slice(0,16).replace('T',' ')} UTC\n`;
   navigator.clipboard.writeText(md);toast('Report copied as Markdown!');
 }
 
@@ -842,6 +937,7 @@ document.querySelectorAll('.tab').forEach(t=>{t.onclick=()=>{document.querySelec
 // Refresh
 async function refresh(){try{
   const[stats,costs,sessions]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),api('/api/sessions')]);
+  $('webError').classList.remove('show');
 
   // Show overview (hide skeleton on first load)
   const skel=$('skeleton');if(skel){skel.remove();$('overview').style.display='';handleRoute()}
@@ -872,6 +968,7 @@ async function refresh(){try{
     const maxD=costs.daily_costs.reduce((m,d)=>d.Cost>m.Cost?d:m,costs.daily_costs[0]);
     if(maxD.Cost>0){const dn=new Date(maxD.Date+'T12:00:00').toLocaleDateString('en',{weekday:'long'});$('insight').innerHTML=`Peak day: <b>${dn}</b> at <b>${fc(maxD.Cost)}</b> · Click chart to filter sessions by day`}else{$('insight').innerHTML=''}
   }else{$('insight').innerHTML=''}
+  renderOpsStrip(stats,costs,sessions);
 
   // Platform comparison
   const claudeS=sessions.filter(s=>s.platform==='claude'),codexS=sessions.filter(s=>s.platform==='codex');
@@ -881,18 +978,21 @@ async function refresh(){try{
     const cPct=platTotal>0?(claudeC/platTotal*100).toFixed(0):'0';
     const xPct=platTotal>0?(codexC/platTotal*100).toFixed(0):'0';
     $('plats').innerHTML=`<div class="plat"><div class="plat-icon claude">C</div><div style="flex:1"><div class="plat-name">Claude</div><div class="plat-cost">${fc(claudeC)}</div><div class="plat-cnt">${claudeS.length} sessions</div></div><div class="plat-pct">${cPct}%</div></div><div class="plat"><div class="plat-icon codex">X</div><div style="flex:1"><div class="plat-name">Codex</div><div class="plat-cost">${fc(codexC)}</div><div class="plat-cnt">${codexS.length} sessions</div></div><div class="plat-pct">${xPct}%</div></div>`;
+  }else{
+    $('plats').innerHTML='';
   }
 
   renderSessions(sessions);renderChart(costs.daily_costs);renderModels(costs.models);renderTools(stats.top_tools);
   // Sparklines in metric cards
   if(costs.daily_costs&&costs.daily_costs.length>1){drawSparkline('sparkCost',costs.daily_costs.map(d=>d.Cost))}
-}catch(e){console.error('refresh error:',e);const s=$('skeleton');if(s){s.remove();$('overview').style.display=''}}}
+}catch(e){console.error('refresh error:',e);const s=$('skeleton');if(s){s.remove();$('overview').style.display=''}$('webErrorText').textContent='Dashboard refresh failed: '+(e.message||'unknown error');$('webError').classList.add('show')}}
 
 document.querySelectorAll('.rb').forEach(b=>{b.onclick=()=>{document.querySelectorAll('.rb').forEach(x=>x.classList.remove('on'));b.classList.add('on');range=b.dataset.r;localStorage.setItem('tokenmeter-range',range);
   const c=$('chartCanvas');if(c){c.style.opacity='0';setTimeout(()=>{refresh();setTimeout(()=>{c.style.opacity='1'},50)},150)}else{refresh()}
 }});
 // Sort
 document.querySelectorAll('.sort-btn').forEach(b=>{b.onclick=()=>{document.querySelectorAll('.sort-btn').forEach(x=>x.classList.remove('on'));b.classList.add('on');sessSort=b.dataset.sort;renderSessions(allS)}});
+document.querySelectorAll('#sessionPlatform button').forEach(b=>{b.onclick=()=>{document.querySelectorAll('#sessionPlatform button').forEach(x=>x.classList.remove('on'));b.classList.add('on');sessionPlatform=b.dataset.platform;sLim=20;kbIdx=-1;renderSessions(allS)}});
 
 // Keyboard
 document.addEventListener('keydown',e=>{

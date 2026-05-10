@@ -18,6 +18,7 @@ import (
 	"github.com/tt-a1i/tokenmeter/internal/collector"
 	"github.com/tt-a1i/tokenmeter/internal/daemon"
 	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/report"
 	"github.com/tt-a1i/tokenmeter/internal/storage"
 	"github.com/tt-a1i/tokenmeter/internal/tui"
 	"github.com/tt-a1i/tokenmeter/internal/web"
@@ -85,6 +86,8 @@ func main() {
 		runStatus()
 	case "report":
 		runReport()
+	case "share":
+		runShare()
 	case "cost":
 		runCost()
 	case "clean":
@@ -107,6 +110,28 @@ func main() {
 		printHelp()
 		os.Exit(1)
 	}
+}
+
+func latestOrRequestedSession(db *storage.DB, args []string) (storage.SessionRow, bool) {
+	if len(args) > 2 {
+		s, found, err := db.GetSessionByIDPrefix(args[2])
+		if err != nil {
+			log.Fatalf("lookup session: %v", err)
+		}
+		if !found {
+			log.Fatalf("session not found: %s", args[2])
+		}
+		return s, true
+	}
+
+	sessions, err := db.ListSessions()
+	if err != nil {
+		log.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) == 0 {
+		return storage.SessionRow{}, false
+	}
+	return sessions[0], true
 }
 
 func runTUI() {
@@ -485,31 +510,10 @@ func runReport() {
 		}
 	}
 
-	var target storage.SessionRow
-
-	if len(os.Args) > 2 {
-		// Direct lookup by ID prefix — searches all sessions, not just the
-		// filtered list, so ended or zero-token sessions are always reachable.
-		sid := os.Args[2]
-		s, found, err := db.GetSessionByIDPrefix(sid)
-		if err != nil {
-			log.Fatalf("lookup session: %v", err)
-		}
-		if !found {
-			log.Fatalf("session not found: %s", sid)
-		}
-		target = s
-	} else {
-		// No ID given: show the most recent session from the visible list.
-		sessions, err := db.ListSessions()
-		if err != nil {
-			log.Fatalf("list sessions: %v", err)
-		}
-		if len(sessions) == 0 {
-			fmt.Println("No sessions recorded.")
-			return
-		}
-		target = sessions[0]
+	target, ok := latestOrRequestedSession(db, os.Args)
+	if !ok {
+		fmt.Println("No sessions recorded.")
+		return
 	}
 
 	name := target.SessionID
@@ -591,6 +595,21 @@ func runReport() {
 			fmt.Printf("  %s %s\n", icon, fc.FilePath)
 		}
 	}
+}
+
+func runShare() {
+	db := mustOpenDB()
+	defer db.Close()
+
+	target, ok := latestOrRequestedSession(db, os.Args)
+	if !ok {
+		fmt.Println("No sessions recorded.")
+		return
+	}
+
+	toolStats, _ := db.ListToolStats(target.SessionID)
+	fileChanges, _ := db.ListFileChanges(target.SessionID)
+	fmt.Print(report.SessionShareMarkdown(target, toolStats, fileChanges, time.Now().UTC()))
 }
 
 func runPeriodReport(db *storage.DB, period string) {
@@ -956,6 +975,7 @@ Usage:
   tokenmeter report [session]   Detailed session report
   tokenmeter report --weekly    Weekly cost report (Markdown)
   tokenmeter report --monthly   Monthly cost report (Markdown)
+  tokenmeter share [session]    Shareable session recap (Markdown)
   tokenmeter cost [today|week]  Token usage statistics
   tokenmeter web [--port N]     Start web dashboard (default port: 8370)
   tokenmeter clean [days]       Remove sessions older than N days (default: 7)

@@ -209,6 +209,22 @@ func copyToClipboard(text string) error {
 	return cmd.Run()
 }
 
+func resumeCommandForSession(s storage.SessionRow) string {
+	switch s.Platform {
+	case "codex":
+		return fmt.Sprintf("codex resume %s", s.SessionID)
+	default:
+		return fmt.Sprintf("claude --resume %s", s.SessionID)
+	}
+}
+
+func shortSessionIDForDisplay(sessionID string) string {
+	if len(sessionID) <= 8 {
+		return sessionID
+	}
+	return sessionID[:8]
+}
+
 // renderTrend shows a trend arrow comparing current vs previous period cost.
 func renderTrend(current, prev float64) string {
 	if prev < 0.01 {

@@ -56,6 +56,7 @@
 - **会话标签** — `tokenmeter tag <id> "备注"` 给会话打标签，方便回忆
 - **时间范围统计** — 今日 / 本周 / 本月 / 全部 Token 与费用聚合
 - **费用报告** — `tokenmeter report --weekly/--monthly` 生成 Markdown 费用报告（按模型、按会话细分）
+- **分享战报** — `tokenmeter share [session]` 生成可复制的 Markdown 会话复盘，适合群内分享或交接
 - **Web Dashboard** — `tokenmeter web` 启动本地 Web 面板，支持深色/浅色模式、面积图、会话详情、对话回顾
 - **实时更新** — daemon 广播事件，TUI 实时刷新
 - **零配置** — `tokenmeter setup` + `tokenmeter`，单二进制文件，无依赖
@@ -120,6 +121,7 @@ tokenmeter
 | `tokenmeter report [session]` | 详细文本报告 |
 | `tokenmeter report --weekly` | 本周 Markdown 费用报告 |
 | `tokenmeter report --monthly` | 本月 Markdown 费用报告 |
+| `tokenmeter share [session]` | 生成可分享的 Markdown 会话战报 |
 | `tokenmeter cost [today\|week]` | Token 用量统计 |
 | `tokenmeter web [--port N]` | 启动 Web Dashboard（默认端口 8370） |
 | `tokenmeter clean [days]` | 清理 N 天前的历史数据（默认 7 天） |
@@ -153,6 +155,7 @@ tokenmeter
 | `p` | 切换平台过滤（全部 / Claude / Codex） |
 | `s` | 切换排序（最近 / 费用） |
 | `c` | 复制会话恢复命令 |
+| `r` | 复制当前会话分享战报 |
 | `Esc` | 清除过滤 |
 | `q` | 退出 |
 

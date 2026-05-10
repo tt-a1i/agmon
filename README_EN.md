@@ -51,6 +51,7 @@
 - **Conversation messages** — browse user prompts within each session, with `/` search
 - **Session tags** — `tokenmeter tag <id> "note"` to label sessions for easy recall
 - **Time range stats** — Today / Week / Month / All token & cost aggregation
+- **Share recaps** — `tokenmeter share [session]` creates a compact Markdown session recap for sharing or handoff
 - **Live updates** — daemon broadcasts events, TUI refreshes in real time
 - **Zero config** — `tokenmeter setup` + `tokenmeter`, single binary, no dependencies
 
@@ -112,6 +113,7 @@ That's it. Use Claude Code or Codex normally — TokenMeter captures everything 
 | `tokenmeter daemon` | Start daemon only |
 | `tokenmeter status` | Quick session summary |
 | `tokenmeter report [session]` | Detailed text report |
+| `tokenmeter share [session]` | Shareable Markdown session recap |
 | `tokenmeter cost [today\|week]` | Token usage statistics |
 | `tokenmeter clean [days]` | Remove sessions older than N days (default: 7) |
 | `tokenmeter tag <id> [text]` | Tag a session with a note (omit text to clear) |
@@ -144,6 +146,7 @@ Press **Tab** to switch between views:
 | `p` | Cycle platform filter (All / Claude / Codex) |
 | `s` | Cycle sort order (Recent / Cost) |
 | `c` | Copy session resume command |
+| `r` | Copy shareable session recap |
 | `Esc` | Clear filter |
 | `q` | Quit |
 

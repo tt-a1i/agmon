@@ -237,6 +237,55 @@ func TestRunReportFindsHiddenSessionByID(t *testing.T) {
 	}
 }
 
+func TestRunShareOutputsMarkdownRecap(t *testing.T) {
+	home := t.TempDir()
+	db := openHomeDB(t, home)
+	now := time.Now().UTC().Add(-30 * time.Minute)
+
+	if err := db.UpsertSession("share-session", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.UpdateSessionMeta("share-session", "/tmp/agmon", "main"); err != nil {
+		t.Fatalf("update meta: %v", err)
+	}
+	if err := db.UpsertAgent("agent-1", "share-session", "", "main", now); err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	if err := db.InsertToolCallStart("call-1", "agent-1", "share-session", "Edit", "{}", now.Add(time.Minute)); err != nil {
+		t.Fatalf("insert tool: %v", err)
+	}
+	if err := db.UpdateToolCallEnd("call-1", "ok", event.StatusSuccess, 1200, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("end tool: %v", err)
+	}
+	if err := db.InsertFileChange("share-session", "README.md", event.FileEdit, now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("insert file change: %v", err)
+	}
+	if err := db.InsertTokenUsage("agent-1", "share-session", 1200, 300, 0, 0, "gpt-5.5", 0.25, now.Add(4*time.Minute), "share-src"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+	if err := db.UpdateSessionTokens("share-session"); err != nil {
+		t.Fatalf("update tokens: %v", err)
+	}
+
+	withArgs(t, []string{"tokenmeter", "share", "share-session"})
+	out := captureStdout(t, runShare)
+
+	for _, want := range []string{
+		"# TokenMeter Session: agmon/main",
+		"- Platform: codex",
+		"- Cost: $0.2500",
+		"- Tokens: 1.2k in / 300 out / 1.5k total",
+		"## Top Tools",
+		"- Edit: 1 calls, avg 1s",
+		"## File Changes",
+		"- ~ README.md",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("share output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRunCostOutputsTotalsForRequestedPeriod(t *testing.T) {
 	home := t.TempDir()
 	db := openHomeDB(t, home)

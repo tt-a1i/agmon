@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tt-a1i/tokenmeter/internal/collector"
 	"github.com/tt-a1i/tokenmeter/internal/event"
+	"github.com/tt-a1i/tokenmeter/internal/report"
 	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
@@ -559,12 +560,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
 			if m.selectedSession < len(m.sessions) {
 				s := m.sessions[m.selectedSession]
-				cmd := fmt.Sprintf("claude --resume %s", s.SessionID)
+				cmd := resumeCommandForSession(s)
 				name := sessionDisplayName(s)
 				if err := copyToClipboard(cmd); err == nil {
 					m.flashMsg = fmt.Sprintf("Copied resume cmd for %s", name)
 				} else {
 					m.flashMsg = fmt.Sprintf("Run: %s", cmd)
+				}
+				m.flashExpire = time.Now().Add(3 * time.Second)
+			}
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
+			if m.selectedSession < len(m.sessions) {
+				s := m.sessions[m.selectedSession]
+				md := report.SessionShareMarkdown(s, m.toolStats, m.fileChanges, time.Now())
+				name := sessionDisplayName(s)
+				if err := copyToClipboard(md); err == nil {
+					m.flashMsg = fmt.Sprintf("Copied share report for %s", name)
+				} else {
+					m.flashMsg = "Share report ready in tokenmeter share " + shortSessionIDForDisplay(s.SessionID)
 				}
 				m.flashExpire = time.Now().Add(3 * time.Second)
 			}

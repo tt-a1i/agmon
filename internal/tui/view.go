@@ -73,14 +73,15 @@ func (m Model) footer() string {
 			fmtKey("Tab", "view"),
 			fmtKey("q", "quit"))
 	case m.activeTab == tabDashboard:
-		footer = fmt.Sprintf(" %s  %s  %s  %s  %s  %s  %s  %s  %s",
+		footer = fmt.Sprintf(" %s  %s  %s  %s  %s  %s  %s  %s  %s  %s",
 			fmtKey("t", "range"),
 			fmtKey("p", "plat:"+platformFilterNames[m.platformFilter]),
 			fmtKey("s", "sort:"+dashboardSortNames[m.dashboardSort]),
 			fmtKey("/", "filter"),
 			fmtKey("Tab", "view"),
 			fmtKey("j/k", "nav"),
-			fmtKey("c", "copy"),
+			fmtKey("c", "resume"),
+			fmtKey("r", "report"),
 			fmtKey("Enter", "msgs"),
 			fmtKey("q", "quit"))
 	default:
@@ -97,11 +98,12 @@ func (m Model) footer() string {
 		if m.activeTab != tabStats {
 			filterHint = fmt.Sprintf("  %s", fmtKey("/", "filter"))
 		}
-		footer = fmt.Sprintf(" %s  %s  %s  %s%s%s  %s%s",
+		footer = fmt.Sprintf(" %s  %s  %s  %s  %s%s%s  %s%s",
 			fmtKey("Tab", "view"),
 			fmtKey("[/]", "session"),
 			fmtKey("j/k", "nav"),
-			fmtKey("c", "copy"),
+			fmtKey("c", "resume"),
+			fmtKey("r", "report"),
 			enterHint,
 			filterHint,
 			fmtKey("q", "quit"),

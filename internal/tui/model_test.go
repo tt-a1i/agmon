@@ -258,6 +258,38 @@ func TestMessageExpansionDistinguishesDuplicateMessages(t *testing.T) {
 	}
 }
 
+func TestResumeCommandForSessionUsesPlatform(t *testing.T) {
+	tests := []struct {
+		name string
+		row  storage.SessionRow
+		want string
+	}{
+		{
+			name: "claude",
+			row:  storage.SessionRow{SessionID: "claude-session", Platform: "claude"},
+			want: "claude --resume claude-session",
+		},
+		{
+			name: "codex",
+			row:  storage.SessionRow{SessionID: "codex-session", Platform: "codex"},
+			want: "codex resume codex-session",
+		},
+		{
+			name: "unknown defaults to existing claude behavior",
+			row:  storage.SessionRow{SessionID: "unknown-session", Platform: ""},
+			want: "claude --resume unknown-session",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resumeCommandForSession(tt.row); got != tt.want {
+				t.Fatalf("resumeCommandForSession() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTabVisibleRowsNeverNegative(t *testing.T) {
 	for _, active := range []tab{tabDashboard, tabMessages, tabToolCalls, tabStats} {
 		m := Model{activeTab: active, height: 1}
