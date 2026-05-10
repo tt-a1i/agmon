@@ -524,7 +524,10 @@ const fnum=n=>n>=1000?n.toLocaleString():n.toString();
 const fd=ms=>!ms?'—':ms<1000?ms+'ms':(ms/1000).toFixed(1)+'s';
 function ftime(iso){const d=new Date(iso),n=new Date();return d.toDateString()===n.toDateString()?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString([],{month:'short',day:'numeric'})+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
 function sname(s){return escHtml(s.git_branch||(s.cwd?s.cwd.split('/').pop():s.session_id.substring(0,8)))}
-function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+function escAttr(s){return escHtml(s)}
+function safeModelLabel(model){return escHtml(String(model||'').replace('claude-','').replace('-4-6',''))}
+function jsString(s){return JSON.stringify(String(s??''))}
 const TOOL_ICONS={Read:'📖',Edit:'✏️',Write:'📝',Bash:'⚡',Grep:'🔍',Glob:'📁',Agent:'🤖',WebFetch:'🌐',WebSearch:'🔎',NotebookEdit:'📓',LSP:'🔗',TaskCreate:'✅',TaskUpdate:'☑️'};
 function toolIcon(name){return TOOL_ICONS[name]||'⚙️'}
 function renderMd(s){let h=escHtml(s);h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');h=h.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');return h}
@@ -553,7 +556,14 @@ function drawSparkline(canvasId,values,color){
   for(let i=1;i<pts.length;i++){const p=pts[i-1],c=pts[i];ctx.bezierCurveTo(p.x+(c.x-p.x)*.4,p.y,p.x+(c.x-p.x)*.6,c.y,c.x,c.y)}
   ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.lineCap='round';ctx.stroke();
 }
-const api=u=>fetch(u).then(r=>r.json());
+async function api(u){
+  const r=await fetch(u);
+  if(!r.ok){
+    const text=await r.text();
+    throw new Error(text||r.statusText||('HTTP '+r.status));
+  }
+  return r.json();
+}
 
 // Chart
 function renderChart(days){
@@ -638,7 +648,7 @@ function renderModels(models){
   if(!models||!models.length){bar.innerHTML='';tbody.innerHTML='<tr><td colspan="3" class="empty">No data</td></tr>';tot.textContent='';return}
   const total=models.reduce((a,m)=>a+m.CostUSD,0)||1;tot.textContent=fc(total);
   bar.innerHTML=models.map((m,i)=>`<div class="model-seg" style="flex:${(m.CostUSD/total*100).toFixed(1)};background:${COLORS[i%COLORS.length]}"></div>`).join('');
-  tbody.innerHTML=models.map((m,i)=>{const pct=(m.CostUSD/total*100).toFixed(0);return`<tr><td><span style="display:inline-block;width:6px;height:6px;border-radius:2px;background:${COLORS[i%COLORS.length]};margin-right:6px"></span>${m.Model}</td><td class="text-right text-muted">${ft(m.InputTokens+m.OutputTokens)}</td><td class="text-right"><span class="text-bold">${fc(m.CostUSD)}</span> <span style="font-size:10px;color:var(--text-muted)">${pct}%</span></td></tr>`}).join('');
+  tbody.innerHTML=models.map((m,i)=>{const pct=(m.CostUSD/total*100).toFixed(0);return`<tr><td><span style="display:inline-block;width:6px;height:6px;border-radius:2px;background:${COLORS[i%COLORS.length]};margin-right:6px"></span>${escHtml(m.Model||'unknown')}</td><td class="text-right text-muted">${ft(m.InputTokens+m.OutputTokens)}</td><td class="text-right"><span class="text-bold">${fc(m.CostUSD)}</span> <span style="font-size:10px;color:var(--text-muted)">${pct}%</span></td></tr>`}).join('');
 }
 
 // Tools
@@ -646,7 +656,7 @@ function renderTools(tools){
   const el=$('tList'),tot=$('tTot');
   if(!tools||!tools.length){el.innerHTML='<div class="empty"><span class="empty-icon">🔧</span>No tool calls yet</div>';tot.textContent='';return}
   const mx=tools[0].Count;tot.textContent=tools.reduce((a,t)=>a+t.Count,0)+' calls';
-  el.innerHTML=tools.slice(0,8).map(t=>`<div class="tool-row"><span class="tool-name">${toolIcon(t.ToolName)} ${t.ToolName}</span><div class="tool-track"><div class="tool-fill" style="width:${(t.Count/mx*100).toFixed(1)}%"></div></div><span class="tool-count">${t.Count}</span></div>`).join('');
+  el.innerHTML=tools.slice(0,8).map(t=>`<div class="tool-row"><span class="tool-name">${toolIcon(t.ToolName)} ${escHtml(t.ToolName)}</span><div class="tool-track"><div class="tool-fill" style="width:${(t.Count/mx*100).toFixed(1)}%"></div></div><span class="tool-count">${t.Count}</span></div>`).join('');
 }
 
 // Sessions
@@ -669,7 +679,7 @@ function renderSessions(sessions){
     const durS=dur>0?(dur>=60?Math.floor(dur/60)+'h '+dur%60+'m':dur+'m'):(s.status==='active'?'running':'');
     const tokS=ft(s.input_tokens+s.output_tokens);
     const barW=(s.cost_usd/maxC*100).toFixed(1);
-    return`<div class="sr" data-sid="${escHtml(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${s.platform}">${s.platform}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+durS+'</span>':''}${s.model?'<span>'+s.model.replace('claude-','').replace('-4-6','')+'</span>':''}<span>${tokS} tok</span>${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><div class="sr-arr">›</div></div>`
+    return`<div class="sr" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><div class="sr-arr">›</div></div>`
   }).join('');
 }
 $('sMore').onclick=()=>{sLim+=30;renderSessions(allS)};
@@ -682,14 +692,15 @@ document.addEventListener('click',e=>{const btn=e.target.closest('[data-copy]');
 async function openSession(id){
   const isReopen=detailSid===id;
   $('overview').classList.add('hide');$('detail').classList.add('show');detailSid=id;
-  if(location.hash!=='#session/'+id)history.pushState(null,null,'#session/'+id);
+  const encodedId=encodeURIComponent(id);
+  if(location.hash!=='#session/'+encodedId)history.pushState(null,null,'#session/'+encodedId);
   if(!isReopen){
     $('dHeader').innerHTML='<div class="loading-card"><div class="spinner"></div>Loading session...</div>';
     $('tokenSection').innerHTML='';$('dQStats').innerHTML='';$('dMsgs').innerHTML='';$('dTools').innerHTML='';$('dFiles').innerHTML='';$('dAgents').innerHTML='';
     window.scrollTo({top:0,behavior:'smooth'});
   }
   let d;
-  try{d=await api('/api/session/'+id.substring(0,12))}catch(e){$('dHeader').innerHTML='<div class="loading-card">Failed to load session</div>';console.error(e);return}
+  try{d=await api('/api/session/'+encodeURIComponent(id))}catch(e){$('dHeader').innerHTML='<div class="loading-card">Failed to load session</div>';console.error(e);return}
   if(!d||!d.session){$('dHeader').innerHTML='<div class="loading-card">Session not found</div>';return}
   lastDetail=d;const s=d.session;detailActive=s.status==='active';
   try{ // wrap rendering to catch errors
@@ -697,9 +708,9 @@ async function openSession(id){
   const dur=s.end_time?Math.round((new Date(s.end_time)-new Date(s.start_time))/1000):0;
   const durS=dur>0?(dur>=3600?Math.floor(dur/3600)+'h '+Math.floor(dur%3600/60)+'m':Math.floor(dur/60)+'m '+dur%60+'s'):(s.status==='active'?'running...':'');
   const liveTag=s.status==='active'?'<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--green);background:var(--badge-codex-bg);padding:2px 8px;border-radius:4px;margin-left:8px"><span style="width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite"></span>LIVE</span>':'';
-  $('dHeader').innerHTML=`<div class="dh-top"><div class="dh-name"><span class="sr-dot ${s.status==='active'?'active':'ended'}"></span>${sname(s)} <span class="badge ${s.platform}">${s.platform}</span>${liveTag}</div><div class="dh-cost">${fc(s.cost_usd)}</div></div>
-  <div class="dh-grid"><div class="dh-item"><div class="dt">Started</div><div class="dv">${ftime(s.start_time)}</div></div>${durS?'<div class="dh-item"><div class="dt">Duration</div><div class="dv">'+durS+'</div></div>':''}<div class="dh-item"><div class="dt">Model</div><div class="dv">${s.model||'-'}</div></div><div class="dh-item"><div class="dt">Input</div><div class="dv">${ft(s.input_tokens)}</div></div><div class="dh-item"><div class="dt">Output</div><div class="dv">${ft(s.output_tokens)}</div></div>${s.cwd?'<div class="dh-item"><div class="dt">Directory</div><div class="dv" style="font-family:monospace;font-size:11px">'+escHtml(s.cwd)+'</div></div>':''}</div>
-  <div class="dh-id">ID: ${escHtml(s.session_id.substring(0,8))} <button class="copy-btn" data-copy="${escHtml(s.session_id)}">Copy</button></div>`;
+  $('dHeader').innerHTML=`<div class="dh-top"><div class="dh-name"><span class="sr-dot ${s.status==='active'?'active':'ended'}"></span>${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span>${liveTag}</div><div class="dh-cost">${fc(s.cost_usd)}</div></div>
+  <div class="dh-grid"><div class="dh-item"><div class="dt">Started</div><div class="dv">${ftime(s.start_time)}</div></div>${durS?'<div class="dh-item"><div class="dt">Duration</div><div class="dv">'+escHtml(durS)+'</div></div>':''}<div class="dh-item"><div class="dt">Model</div><div class="dv">${escHtml(s.model||'-')}</div></div><div class="dh-item"><div class="dt">Input</div><div class="dv">${ft(s.input_tokens)}</div></div><div class="dh-item"><div class="dt">Output</div><div class="dv">${ft(s.output_tokens)}</div></div>${s.cwd?'<div class="dh-item"><div class="dt">Directory</div><div class="dv" style="font-family:monospace;font-size:11px">'+escHtml(s.cwd)+'</div></div>':''}</div>
+  <div class="dh-id">ID: ${escHtml(s.session_id.substring(0,8))} <button class="copy-btn" data-copy="${escAttr(s.session_id)}">Copy</button></div>`;
 
   // Tokens
   const total=s.input_tokens+s.output_tokens;
@@ -739,18 +750,18 @@ async function openSession(id){
     const toolTypes=[...new Set(tools.map(t=>t.tool_name))];
     const totalDur=tools.reduce((a,t)=>a+(t.duration_ms||0),0);
     const succRate=tools.filter(t=>t.status==='success').length;
-    $('toolToolbar').innerHTML=`<button class="tool-filter on" onclick="filterTools('')">All (${tools.length})</button>${toolTypes.slice(0,8).map(n=>{const c=tools.filter(t=>t.tool_name===n).length;return`<button class="tool-filter" onclick="filterTools('${n}')">${toolIcon(n)} ${n} (${c})</button>`}).join('')}<span class="tool-summary">${fd(totalDur)} total · ${succRate}/${tools.length} ok</span>`;
+    $('toolToolbar').innerHTML=`<button class="tool-filter on" onclick="filterTools('')">All (${tools.length})</button>${toolTypes.slice(0,8).map(n=>{const c=tools.filter(t=>t.tool_name===n).length;return`<button class="tool-filter" onclick='filterTools(${jsString(n)})'>${toolIcon(n)} ${escHtml(n)} (${c})</button>`}).join('')}<span class="tool-summary">${fd(totalDur)} total · ${succRate}/${tools.length} ok</span>`;
   }else{$('toolToolbar').innerHTML=''}
 
   renderToolTimeline(tools);
 
   // Files
   if(files.length){const dirs={};files.forEach(f=>{const p=f.path.split('/');const dir=p.length>1?p.slice(0,-1).join('/'):'./';if(!dirs[dir])dirs[dir]=[];dirs[dir].push({name:p[p.length-1],type:f.change_type})});
-  let fh='';Object.keys(dirs).sort().forEach(dir=>{fh+=`<div class="fl-dir">${dir}/</div>`;dirs[dir].forEach(f=>{fh+=`<div class="fl-row"><div class="fl-ic ${f.type}">${f.type==='create'?'+':f.type==='delete'?'−':'~'}</div><span class="fl-path">${f.name}</span></div>`})});
+  let fh='';Object.keys(dirs).sort().forEach(dir=>{fh+=`<div class="fl-dir">${escHtml(dir)}/</div>`;dirs[dir].forEach(f=>{fh+=`<div class="fl-row"><div class="fl-ic ${escAttr(f.type)}">${f.type==='create'?'+':f.type==='delete'?'−':'~'}</div><span class="fl-path">${escHtml(f.name)}</span></div>`})});
   $('dFiles').innerHTML=fh}else{$('dFiles').innerHTML='<div class="empty"><span class="empty-icon">📄</span>No files changed</div>'}
 
   // Agents
-  if(agentStats.length){$('dAgents').innerHTML=agentStats.map(a=>{const child=a.parent_id&&a.parent_id!=='';return`<div class="ag${child?' child':''}"><div class="ag-role">${a.role||'main'}${child?'<span class="sub">subagent</span>':''}</div><div class="ag-stat"><span>${a.tool_calls} tools</span><span>${ft(a.input_tokens)} in</span><span>${fc(a.cost_usd)}</span></div></div>`}).join('')}else{$('dAgents').innerHTML='<div class="empty"><span class="empty-icon">🤖</span>No agent data</div>'}
+  if(agentStats.length){$('dAgents').innerHTML=agentStats.map(a=>{const child=a.parent_id&&a.parent_id!=='';return`<div class="ag${child?' child':''}"><div class="ag-role">${escHtml(a.role||'main')}${child?'<span class="sub">subagent</span>':''}</div><div class="ag-stat"><span>${a.tool_calls} tools</span><span>${ft(a.input_tokens)} in</span><span>${fc(a.cost_usd)}</span></div></div>`}).join('')}else{$('dAgents').innerHTML='<div class="empty"><span class="empty-icon">🤖</span>No agent data</div>'}
   updateSessNav();
   }catch(renderErr){console.error('Detail render error:',renderErr);$('dHeader').innerHTML=`<div class="loading-card">Render error: ${escHtml(renderErr.message)}</div>`}
 }
@@ -776,7 +787,7 @@ function toggleAllMsgs(open){
 
 function renderToolTimeline(tools,filter){
   const filtered=filter?tools.filter(t=>t.tool_name===filter):tools;
-  if(!filtered.length){$('dTools').innerHTML='<div class="empty"><span class="empty-icon">🔧</span>'+(filter?'No "'+filter+'" calls':'No tool calls')+'</div>';return}
+  if(!filtered.length){$('dTools').innerHTML='<div class="empty"><span class="empty-icon">🔧</span>'+(filter?'No "'+escHtml(filter)+'" calls':'No tool calls')+'</div>';return}
   const maxDur=Math.max(...filtered.map(t=>t.duration_ms||0),1);
   let th='';
   filtered.slice(0,50).forEach((t,i)=>{
@@ -784,7 +795,7 @@ function renderToolTimeline(tools,filter){
     const ic=t.status==='success'?'ok':t.status==='fail'||t.status==='error'?'fail':'pend';
     const durW=t.duration_ms?Math.max(8,(t.duration_ms/maxDur)*80):0;
     const tIcon=toolIcon(t.tool_name);
-    th+=`<div class="tl"><div class="tl-ic ${ic}" title="${t.status}">${tIcon}</div><div class="tl-body"><div class="tl-top"><span class="tl-name">${t.tool_name}</span><span class="tl-time">${ftime(t.start_time)}</span></div>${t.params?'<div class="tl-params" onclick="this.classList.toggle(\'open\')">'+escHtml(t.params)+'</div>':''}<div class="tl-dur">${t.duration_ms?fd(t.duration_ms):'—'} · <span style="color:${ic==='ok'?'var(--green)':ic==='fail'?'var(--red)':'var(--text-muted)'}">${t.status}</span>${durW?'<span class="tl-dur-bar" style="width:'+durW+'px"></span>':''}</div></div></div>`;
+    th+=`<div class="tl"><div class="tl-ic ${ic}" title="${escAttr(t.status)}">${tIcon}</div><div class="tl-body"><div class="tl-top"><span class="tl-name">${escHtml(t.tool_name)}</span><span class="tl-time">${ftime(t.start_time)}</span></div>${t.params?'<div class="tl-params" onclick="this.classList.toggle(\'open\')">'+escHtml(t.params)+'</div>':''}<div class="tl-dur">${t.duration_ms?fd(t.duration_ms):'—'} · <span style="color:${ic==='ok'?'var(--green)':ic==='fail'?'var(--red)':'var(--text-muted)'}">${escHtml(t.status)}</span>${durW?'<span class="tl-dur-bar" style="width:'+durW+'px"></span>':''}</div></div></div>`;
   });
   $('dTools').innerHTML=th;
 }
@@ -912,7 +923,8 @@ window.addEventListener('scroll',()=>{$('scrollTop').classList.toggle('show',win
 function handleRoute(){
   const h=location.hash;
   if(h.startsWith('#session/')){
-    const sid=h.substring(9);
+    let sid='';
+    try{sid=decodeURIComponent(h.substring(9))}catch(e){history.replaceState(null,null,'#');return}
     if(sid&&sid!==detailSid)openSession(sid);
   }else if($('detail').classList.contains('show')){
     $('detail').classList.remove('show');$('overview').classList.remove('hide');detailSid=null;detailActive=false;

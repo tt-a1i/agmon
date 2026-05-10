@@ -130,11 +130,45 @@ func TestClaudeEndToEndCost(t *testing.T) {
 	}
 }
 
+func TestClaudeProcessFileCommitsValidJSONAtEOFWithoutTrailingNewline(t *testing.T) {
+	const sessionID = "sess-claude-eof"
+	jsonl := map[string]any{
+		"type":      "assistant",
+		"sessionId": sessionID,
+		"uuid":      "msg-eof",
+		"timestamp": "2026-04-16T08:00:00.000Z",
+		"message": map[string]any{
+			"model": "claude-sonnet-4-6",
+			"usage": map[string]any{
+				"input_tokens":  100,
+				"output_tokens": 50,
+			},
+		},
+	}
+	body, _ := json.Marshal(jsonl)
+	path := filepath.Join(t.TempDir(), sessionID+".jsonl")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+
+	result := processClaudeFileCollect(path, sessionID, 0, "", nil)
+	if result.offset != int64(len(body)) {
+		t.Fatalf("expected EOF JSON line to be committed, got offset %d want %d", result.offset, len(body))
+	}
+	if len(result.events) != 1 {
+		t.Fatalf("expected one token event, got %d", len(result.events))
+	}
+
+	result2 := processClaudeFileCollect(path, sessionID, result.offset, "", nil)
+	if len(result2.events) != 0 {
+		t.Fatalf("expected no events when resuming from committed EOF offset, got %d", len(result2.events))
+	}
+}
+
 // TestCodexEndToEndCost walks a Codex token_count event through
 // parseCodexEntryWithContext and InsertTokenUsage, asserts the cost, then
 // re-emits the same event (simulating restart) and verifies the total does
-// NOT double because the source_id — derived from the event's JSONL
-// timestamp — is stable across runs.
+// NOT double because the source_id is stable across runs.
 func TestCodexEndToEndCost(t *testing.T) {
 	const (
 		sessionID    = "sess-codex-e2e-1"
@@ -184,14 +218,44 @@ func TestCodexEndToEndCost(t *testing.T) {
 	}
 
 	// Second pass: same entry re-parsed (simulating daemon restart reading
-	// the same JSONL line again). Event.ID is derived from the entry
-	// timestamp, so the source_id is identical → unique index rejects it.
+	// the same JSONL line again). Event.ID is deterministic for the session,
+	// timestamp, and usage tuple, so the source_id is identical.
 	events2 := parseCodexEntryWithContext(entry, sessionID, model, "/test/cwd")
 	applyEventsToDB(t, db, event.PlatformCodex, events2)
 
 	got2 := sessionCost(t, db, sessionID)
 	if math.Abs(got2-expectedCost) > 1e-6 {
 		t.Fatalf("after restart cost = %f, want %f (source_id dedup failed)", got2, expectedCost)
+	}
+}
+
+func TestCodexEndToEndSameTimestampDifferentSessionsDoNotCollide(t *testing.T) {
+	payload, _ := json.Marshal(map[string]any{
+		"type": "token_count",
+		"info": map[string]any{
+			"last_token_usage": map[string]any{
+				"input_tokens":        500,
+				"output_tokens":       100,
+				"total_tokens":        600,
+				"cached_input_tokens": 200,
+			},
+		},
+	})
+	entry := codexLogEntry{
+		Timestamp: "2026-04-16T08:00:00.000000000Z",
+		Type:      "event_msg",
+		Payload:   payload,
+	}
+
+	db := newTestDB(t)
+	applyEventsToDB(t, db, event.PlatformCodex, parseCodexEntryWithContext(entry, "codex-session-a", "gpt-5.4", "/test/a"))
+	applyEventsToDB(t, db, event.PlatformCodex, parseCodexEntryWithContext(entry, "codex-session-b", "gpt-5.4", "/test/b"))
+
+	if got := sessionCost(t, db, "codex-session-a"); got <= 0 {
+		t.Fatalf("expected session a to keep its cost, got %f", got)
+	}
+	if got := sessionCost(t, db, "codex-session-b"); got <= 0 {
+		t.Fatalf("expected session b to keep its cost, got %f", got)
 	}
 }
 

@@ -258,16 +258,19 @@ func (m Model) currentTabRowCount() int {
 // rendered area, accounting for headers/summaries each tab reserves.
 func (m Model) tabVisibleRows() int {
 	base := m.visibleRows()
+	rows := base
 	switch m.activeTab {
 	case tabDashboard:
-		return base - 6 // summary + header + "more" hint + blank + preview bar
+		rows = base - 6 // summary + header + "more" hint + blank + preview bar
 	case tabMessages:
-		return base - 3
+		rows = base - 3
 	case tabToolCalls:
-		return base - 2
-	default: // tabStats
-		return base
+		rows = base - 2
 	}
+	if rows < 1 {
+		return 1
+	}
+	return rows
 }
 
 // adjustScroll keeps selectedRow visible within the viewport.
@@ -286,7 +289,7 @@ func (m *Model) adjustScroll() {
 	}
 }
 
-// clearMsgExpanded removes message expansion state (keyed by index, not content).
+// clearMsgExpanded removes message expansion state.
 func (m *Model) clearMsgExpanded() {
 	for k := range m.expandedCalls {
 		if strings.HasPrefix(k, "msg-") {
@@ -528,7 +531,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == tabMessages {
 				filtered := m.filteredMessages()
 				if m.selectedRow < len(filtered) {
-					key := fmt.Sprintf("msg-%d", m.selectedRow)
+					key := messageExpansionKeyForFiltered(m.messages, filtered, m.selectedRow)
 					wasOpen := m.expandedCalls[key]
 					// Accordion: close all, then toggle this one
 					m.clearMsgExpanded()

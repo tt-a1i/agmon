@@ -182,19 +182,20 @@ func TestRefreshFilteredViewsCachesCurrentFilterResults(t *testing.T) {
 }
 
 func TestPruneExpandedCallsDropsStaleEntries(t *testing.T) {
+	msgTime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	m := Model{
 		messages: []collector.UserMessage{
-			{Content: "first"},
-			{Content: "second"},
+			{Timestamp: msgTime, Content: "first"},
+			{Timestamp: msgTime.Add(time.Minute), Content: "second"},
 		},
 		toolCalls: []storage.ToolCallRow{
 			{CallID: "call-1"},
 		},
 		expandedCalls: map[string]bool{
-			"msg-0":  true,
-			"msg-9":  true,
-			"call-1": true,
-			"call-9": true,
+			messageExpansionKeyAt(0, collector.UserMessage{Timestamp: msgTime, Content: "first"}): true,
+			"msg-stale": true,
+			"call-1":    true,
+			"call-9":    true,
 		},
 	}
 
@@ -203,8 +204,66 @@ func TestPruneExpandedCallsDropsStaleEntries(t *testing.T) {
 	if len(m.expandedCalls) != 2 {
 		t.Fatalf("expected only current session expansions to remain, got %#v", m.expandedCalls)
 	}
-	if !m.expandedCalls["msg-0"] || !m.expandedCalls["call-1"] {
+	if !m.expandedCalls[messageExpansionKeyAt(0, m.messages[0])] || !m.expandedCalls["call-1"] {
 		t.Fatalf("expected current expansions to remain, got %#v", m.expandedCalls)
+	}
+}
+
+func TestMessageExpansionUsesStableKeyAfterFiltering(t *testing.T) {
+	msgs := []collector.UserMessage{
+		{Timestamp: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Content: "first message"},
+		{Timestamp: time.Date(2026, 1, 2, 3, 5, 5, 0, time.UTC), Content: "target message"},
+	}
+	m := Model{
+		activeTab:     tabMessages,
+		messages:      msgs,
+		expandedCalls: make(map[string]bool),
+	}
+	m.setFilterText("target")
+	m.selectedRow = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(Model)
+
+	if next.expandedCalls[messageExpansionKeyAt(0, msgs[0])] {
+		t.Fatalf("filtered row 0 should not expand the unfiltered first message: %#v", next.expandedCalls)
+	}
+	if !next.expandedCalls[messageExpansionKeyAt(1, msgs[1])] {
+		t.Fatalf("expected filtered target message to be expanded, got %#v", next.expandedCalls)
+	}
+}
+
+func TestMessageExpansionDistinguishesDuplicateMessages(t *testing.T) {
+	msgTime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	msgs := []collector.UserMessage{
+		{Timestamp: msgTime, Content: "duplicate"},
+		{Timestamp: msgTime, Content: "duplicate"},
+	}
+	m := Model{
+		activeTab:     tabMessages,
+		messages:      msgs,
+		expandedCalls: make(map[string]bool),
+	}
+	m.refreshFilteredViews()
+	m.selectedRow = 1
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(Model)
+
+	if next.expandedCalls[messageExpansionKeyAt(0, msgs[0])] {
+		t.Fatalf("first duplicate should not be expanded: %#v", next.expandedCalls)
+	}
+	if !next.expandedCalls[messageExpansionKeyAt(1, msgs[1])] {
+		t.Fatalf("second duplicate should be expanded: %#v", next.expandedCalls)
+	}
+}
+
+func TestTabVisibleRowsNeverNegative(t *testing.T) {
+	for _, active := range []tab{tabDashboard, tabMessages, tabToolCalls, tabStats} {
+		m := Model{activeTab: active, height: 1}
+		if got := m.tabVisibleRows(); got < 1 {
+			t.Fatalf("tab %v visible rows should be at least 1, got %d", active, got)
+		}
 	}
 }
 

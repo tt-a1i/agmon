@@ -5,9 +5,10 @@ package collector
 // TIER ASSUMPTION (Codex): tokenmeter only sees the model name and token counts
 // from JSONL logs. It cannot observe OpenAI's Standard / Batch (~50% off) /
 // Flex (~25% off) / Priority (premium) tiers, nor long-context (>128k)
-// pricing variants on some models. Rates here assume Standard tier
-// synchronous API. If you rely heavily on Batch/Flex/Priority, cross-check
-// against your OpenAI billing — dashboard cost is an estimate, not a bill.
+// pricing variants on some models. Rates here assume Standard tier short
+// context synchronous API. If you rely heavily on Batch/Flex/Priority/long
+// context/regional processing, cross-check against your provider billing —
+// dashboard cost is an estimate, not a bill.
 //
 // All rates are per 1,000,000 tokens (USD).
 
@@ -26,7 +27,8 @@ var claudePricingTable = []modelPricing{
 	// their generic "opus"/"sonnet"/"haiku" fallbacks because matchPricing
 	// short-circuits on first match. ---
 
-	// Opus 4.5 / 4.6 — cheaper generation (released Oct 2025+).
+	// Opus 4.5+ — current cheaper generation.
+	{match: []string{"opus-4-7"}, inputPerMillion: 5.0, outputPerMillion: 25.0, cacheCreatePerMill: 6.25, cacheReadPerMill: 0.50},
 	{match: []string{"opus-4-5"}, inputPerMillion: 5.0, outputPerMillion: 25.0, cacheCreatePerMill: 6.25, cacheReadPerMill: 0.50},
 	{match: []string{"opus-4-6"}, inputPerMillion: 5.0, outputPerMillion: 25.0, cacheCreatePerMill: 6.25, cacheReadPerMill: 0.50},
 
@@ -46,22 +48,22 @@ var claudePricingTable = []modelPricing{
 	{match: []string{"haiku"}, inputPerMillion: 0.25, outputPerMillion: 1.25, cacheCreatePerMill: 0.30, cacheReadPerMill: 0.025},
 }
 
-// Codex pricing (Standard tier, per 1M tokens).
-// Data source: OpenRouter /models (2026-04-16), which tracks OpenAI's
-// published Standard tier rates. Cache read follows the family pattern
-// observed in OpenRouter data:
-//   - GPT-5 family: cache = 10% of input
-//   - GPT-4.1: cache = 25% of input
-//   - GPT-4 (GPT-4o): cache = 50% of input
-//   - Pro variants: no cache discount listed; cache rate omitted (falls back
-//     to input rate — conservative)
+// Codex/OpenAI pricing (Standard short-context tier, per 1M tokens).
+// Data source: OpenAI API pricing page. Cache read follows the listed
+// "cached input" rate when available. Pro variants do not list cached input,
+// so their cache rate is omitted and falls back to input rate conservatively.
 //
 // Rules are ordered "most specific first" because matchPricing iterates in
 // declaration order and returns the first match.
 var codexPricingTable = []modelPricing{
 	// --- Pro variants (premium tier, 10-24x base pricing). ---
+	{match: []string{"gpt-5.5", "pro"}, inputPerMillion: 30.0, outputPerMillion: 180.0},
 	{match: []string{"gpt-5.4", "pro"}, inputPerMillion: 30.0, outputPerMillion: 180.0},
 	{match: []string{"gpt-5.2", "pro"}, inputPerMillion: 21.0, outputPerMillion: 168.0},
+	{match: []string{"gpt-5-pro"}, inputPerMillion: 15.0, outputPerMillion: 120.0},
+
+	// --- GPT-5.5 family ---
+	{match: []string{"gpt-5.5"}, inputPerMillion: 5.0, outputPerMillion: 30.0, cacheReadPerMill: 0.50},
 
 	// --- GPT-5.4 family ---
 	{match: []string{"gpt-5.4", "nano"}, inputPerMillion: 0.20, outputPerMillion: 1.25, cacheReadPerMill: 0.02},

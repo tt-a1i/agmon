@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -23,6 +25,50 @@ func testDaemon(t *testing.T) (*Daemon, *storage.DB) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return New(db, filepath.Join(dir, "tokenmeter.sock")), db
+}
+
+func TestStartDoesNotStealLiveUnixSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix socket test")
+	}
+	dir := t.TempDir()
+	sockPath := filepath.Join("/tmp", fmt.Sprintf("tokenmeter-test-%d.sock", time.Now().UnixNano()))
+	t.Cleanup(func() {
+		_ = os.Remove(sockPath)
+		_ = os.Remove(subscriberSocketPath(sockPath))
+	})
+
+	db1, err := storage.Open(filepath.Join(dir, "one.db"))
+	if err != nil {
+		t.Fatalf("open db1: %v", err)
+	}
+	t.Cleanup(func() { _ = db1.Close() })
+	d1 := New(db1, sockPath)
+	if err := d1.Start(); err != nil {
+		t.Fatalf("start first daemon: %v", err)
+	}
+	t.Cleanup(d1.Stop)
+
+	db2, err := storage.Open(filepath.Join(dir, "two.db"))
+	if err != nil {
+		t.Fatalf("open db2: %v", err)
+	}
+	t.Cleanup(func() { _ = db2.Close() })
+	d2 := New(db2, sockPath)
+	err = d2.Start()
+	if err == nil {
+		d2.Stop()
+		t.Fatal("expected second daemon start to fail while first socket is live")
+	}
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("expected os.ErrExist from live socket, got %v", err)
+	}
+
+	if conn, err := dialSocket(sockPath); err != nil {
+		t.Fatalf("first daemon socket should still be reachable: %v", err)
+	} else {
+		_ = conn.Close()
+	}
 }
 
 func TestRemoteSubscriberReceivesBroadcast(t *testing.T) {
@@ -69,6 +115,39 @@ func TestRemoteSubscriberReceivesBroadcast(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for broadcast")
+	}
+}
+
+func TestStopClosesIdleClientConnections(t *testing.T) {
+	dir := t.TempDir()
+	db, err := storage.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("tokenmeter-stop-%d.sock", time.Now().UnixNano()))
+	d := New(db, sockPath)
+	if err := d.Start(); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	conn, err := dialSocket(sockPath)
+	if err != nil {
+		t.Fatalf("dial daemon: %v", err)
+	}
+	defer conn.Close()
+
+	stopped := make(chan struct{})
+	go func() {
+		d.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop blocked with idle client connection")
 	}
 }
 
@@ -169,6 +248,51 @@ func TestProcessEventSessionEndInterruptsPendingToolCalls(t *testing.T) {
 	}
 	if calls[0].Status != "interrupted" {
 		t.Fatalf("expected interrupted tool call, got %q", calls[0].Status)
+	}
+}
+
+func TestProcessEventStaleSessionEndDoesNotInterruptNewerPendingToolCalls(t *testing.T) {
+	d, db := testDaemon(t)
+	now := time.Now().UTC()
+	newer := now.Add(time.Hour)
+	olderEnd := now.Add(10 * time.Minute)
+
+	if err := db.UpsertSession("s-stale-end", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.UpsertSession("s-stale-end", event.PlatformClaude, newer); err != nil {
+		t.Fatalf("record newer activity: %v", err)
+	}
+	if err := db.InsertToolCallStart("call-newer", "agent-1", "s-stale-end", "Edit", "{}", newer); err != nil {
+		t.Fatalf("insert tool call: %v", err)
+	}
+
+	if err := d.processEvent(event.Event{
+		ID:        "session-end-stale",
+		Type:      event.EventSessionEnd,
+		SessionID: "s-stale-end",
+		Platform:  event.PlatformClaude,
+		Timestamp: olderEnd,
+	}); err != nil {
+		t.Fatalf("process stale end: %v", err)
+	}
+
+	session, found, err := db.GetSessionByIDPrefix("s-stale-end")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if !found {
+		t.Fatal("expected session to exist")
+	}
+	if session.Status != "active" {
+		t.Fatalf("stale end should not end session, got %q", session.Status)
+	}
+	calls, err := db.ListToolCalls("s-stale-end", 10)
+	if err != nil {
+		t.Fatalf("list tool calls: %v", err)
+	}
+	if len(calls) != 1 || calls[0].Status != "pending" {
+		t.Fatalf("newer pending tool call should remain pending, got %#v", calls)
 	}
 }
 
@@ -419,5 +543,127 @@ func TestProcessEventCodexEmptyModelBackfill(t *testing.T) {
 	}
 	if sess.TotalOutputTokens != 150 {
 		t.Errorf("total_output_tokens = %d, want 150", sess.TotalOutputTokens)
+	}
+}
+
+func TestProcessEventCodexSessionUpdateBackfillsEarlierEmptyToken(t *testing.T) {
+	d, db := testDaemon(t)
+	now := time.Now().UTC()
+	const sessionID = "sess-daemon-codex-context-backfill"
+
+	if err := d.processEvent(event.Event{
+		ID:        "codex-tokens-empty",
+		Type:      event.EventTokenUsage,
+		SessionID: sessionID,
+		Platform:  event.PlatformCodex,
+		Timestamp: now,
+		Data: event.EventData{
+			InputTokens:     300,
+			OutputTokens:    50,
+			CacheReadTokens: 100,
+		},
+	}); err != nil {
+		t.Fatalf("process empty token: %v", err)
+	}
+
+	if err := d.processEvent(event.Event{
+		ID:        "codex-context-1",
+		Type:      event.EventSessionUpdate,
+		SessionID: sessionID,
+		Platform:  event.PlatformCodex,
+		Timestamp: now.Add(time.Second),
+		Data: event.EventData{
+			Model: "gpt-5.4",
+			CWD:   "/tmp/project",
+		},
+	}); err != nil {
+		t.Fatalf("process context update: %v", err)
+	}
+
+	sess, _, _ := db.GetSessionByIDPrefix(sessionID)
+	const wantCost = 0.001275
+	if math.Abs(sess.TotalCostUSD-wantCost) > 1e-6 {
+		t.Fatalf("session update backfill cost = %f, want %f", sess.TotalCostUSD, wantCost)
+	}
+	if sess.Model != "gpt-5.4" {
+		t.Fatalf("session model = %q, want gpt-5.4", sess.Model)
+	}
+}
+
+func TestProcessEventCodexSessionUpdateRepairsRecentUnpricedToken(t *testing.T) {
+	d, db := testDaemon(t)
+	now := time.Now().UTC()
+	const sessionID = "sess-daemon-codex-unpriced-model"
+
+	if err := d.processEvent(event.Event{
+		ID:        "codex-tokens-unpriced-model",
+		Type:      event.EventTokenUsage,
+		SessionID: sessionID,
+		Platform:  event.PlatformCodex,
+		Timestamp: now,
+		Data: event.EventData{
+			InputTokens:  1000,
+			OutputTokens: 100,
+		},
+	}); err != nil {
+		t.Fatalf("process unpriced token: %v", err)
+	}
+
+	if err := d.processEvent(event.Event{
+		ID:        "codex-context-new-model",
+		Type:      event.EventSessionUpdate,
+		SessionID: sessionID,
+		Platform:  event.PlatformCodex,
+		Timestamp: now.Add(2 * time.Second),
+		Data: event.EventData{
+			Model: "gpt-5.5",
+		},
+	}); err != nil {
+		t.Fatalf("process context update: %v", err)
+	}
+
+	sess, _, _ := db.GetSessionByIDPrefix(sessionID)
+	if sess.Model != "gpt-5.5" {
+		t.Fatalf("recent unpriced model token should be repaired, got session model %q", sess.Model)
+	}
+}
+
+func TestProcessEventCodexSessionUpdateSkipsHistoricalStaleModelRepair(t *testing.T) {
+	d, db := testDaemon(t)
+	old := time.Now().UTC().Add(-24 * time.Hour)
+	const sessionID = "sess-daemon-codex-historical-model"
+
+	if err := d.processEvent(event.Event{
+		ID:        "codex-tokens-historical-old-model",
+		Type:      event.EventTokenUsage,
+		SessionID: sessionID,
+		Platform:  event.PlatformCodex,
+		Timestamp: old,
+		Data: event.EventData{
+			InputTokens:  1000,
+			OutputTokens: 100,
+			Model:        "gpt-5",
+			CostUSD:      0.00225,
+		},
+	}); err != nil {
+		t.Fatalf("process old-model token: %v", err)
+	}
+
+	if err := d.processEvent(event.Event{
+		ID:        "codex-context-historical-new-model",
+		Type:      event.EventSessionUpdate,
+		SessionID: sessionID,
+		Platform:  event.PlatformCodex,
+		Timestamp: old.Add(2 * time.Second),
+		Data: event.EventData{
+			Model: "gpt-5.5",
+		},
+	}); err != nil {
+		t.Fatalf("process historical context update: %v", err)
+	}
+
+	sess, _, _ := db.GetSessionByIDPrefix(sessionID)
+	if sess.Model != "gpt-5" {
+		t.Fatalf("historical context replay should not rewrite stale token model, got %q", sess.Model)
 	}
 }

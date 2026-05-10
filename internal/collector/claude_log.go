@@ -259,10 +259,12 @@ func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGit
 
 		if len(lineBytes) > 0 {
 			line := bytes.TrimRight(lineBytes, "\r\n")
+			parsedLine := false
 
 			if len(line) > 0 {
 				var entry claudeLogEntry
 				if json.Unmarshal(line, &entry) == nil {
+					parsedLine = true
 					if result.gitBranch == "" && entry.GitBranch != "" {
 						result.gitBranch = entry.GitBranch
 					}
@@ -299,7 +301,7 @@ func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGit
 				}
 			}
 
-			if err == nil {
+			if err == nil || parsedLine {
 				committedOffset += int64(len(lineBytes))
 			}
 		}
@@ -375,10 +377,12 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 
 		if len(lineBytes) > 0 {
 			line := bytes.TrimRight(lineBytes, "\r\n")
+			parsedLine := false
 
 			if len(line) > 0 {
 				var entry claudeLogEntry
 				if json.Unmarshal(line, &entry) == nil {
+					parsedLine = true
 					// Collect git_branch from any line that has it.
 					if !hasGitBranch && entry.GitBranch != "" {
 						w.sessionGitBranch[sessionID] = entry.GitBranch
@@ -422,7 +426,9 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 				}
 			}
 
-			if err == nil {
+			// A valid JSON object at EOF is complete even without a trailing
+			// newline. Invalid EOF fragments stay uncommitted until completed.
+			if err == nil || parsedLine {
 				committedOffset += int64(len(lineBytes))
 			}
 		}

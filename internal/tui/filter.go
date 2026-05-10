@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 
@@ -31,6 +32,43 @@ func (m *Model) resetListPosition() {
 	m.viewOffset = 0
 }
 
+func messageExpansionKeyAt(index int, msg collector.UserMessage) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(msg.Content))
+	return fmt.Sprintf("msg-%d-%d-%08x", index, msg.Timestamp.UnixNano(), h.Sum32())
+}
+
+func messageExpansionKey(msg collector.UserMessage) string {
+	return messageExpansionKeyAt(0, msg)
+}
+
+func sameUserMessage(a, b collector.UserMessage) bool {
+	return a.Timestamp.Equal(b.Timestamp) && a.Content == b.Content
+}
+
+func messageExpansionKeyForFiltered(all, filtered []collector.UserMessage, filteredIndex int) string {
+	if filteredIndex < 0 || filteredIndex >= len(filtered) {
+		return ""
+	}
+	msg := filtered[filteredIndex]
+	occurrence := 0
+	for i := 0; i <= filteredIndex; i++ {
+		if sameUserMessage(filtered[i], msg) {
+			occurrence++
+		}
+	}
+	for i, candidate := range all {
+		if !sameUserMessage(candidate, msg) {
+			continue
+		}
+		occurrence--
+		if occurrence == 0 {
+			return messageExpansionKeyAt(i, msg)
+		}
+	}
+	return messageExpansionKeyAt(filteredIndex, msg)
+}
+
 func (m *Model) clearToolExpanded() {
 	for k := range m.expandedCalls {
 		if !strings.HasPrefix(k, "msg-") {
@@ -45,8 +83,8 @@ func (m *Model) pruneExpandedCalls() {
 	}
 
 	valid := make(map[string]struct{}, len(m.messages)+len(m.toolCalls))
-	for i := range m.messages {
-		valid[fmt.Sprintf("msg-%d", i)] = struct{}{}
+	for i, msg := range m.messages {
+		valid[messageExpansionKeyAt(i, msg)] = struct{}{}
 	}
 	for _, tc := range m.toolCalls {
 		valid[tc.CallID] = struct{}{}

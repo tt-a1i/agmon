@@ -38,7 +38,7 @@ func TestParseCodexEntry_FunctionCall(t *testing.T) {
 		Payload:   json.RawMessage(`{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"pnpm -v\"}","call_id":"call_OTjFN4sOjWalj9tGeMFkp5CU"}`),
 	}
 
-	events := parseCodexEntry(entry, "test-session")
+	events := parseCodexEntryWithContext(entry, "test-session", "gpt-5-codex", "/tmp/project")
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
@@ -65,7 +65,7 @@ func TestParseCodexEntry_FunctionCallOutput(t *testing.T) {
 		Payload:   json.RawMessage(`{"type":"function_call_output","call_id":"call_OTjFN4sOjWalj9tGeMFkp5CU","output":"Process exited with code 0\npnpm 9.0.1"}`),
 	}
 
-	events := parseCodexEntry(entry, "test-session")
+	events := parseCodexEntryWithContext(entry, "test-session", "gpt-5-codex", "/tmp/project")
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
@@ -126,7 +126,7 @@ func TestParseCodexEntry_TokenCount(t *testing.T) {
 		}`),
 	}
 
-	events := parseCodexEntry(entry, "test-session")
+	events := parseCodexEntryWithContext(entry, "test-session", "gpt-5-codex", "/tmp/project")
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
@@ -146,6 +146,30 @@ func TestParseCodexEntry_TokenCount(t *testing.T) {
 	}
 	if ev.Data.CostUSD <= 0 {
 		t.Errorf("cost should be > 0, got %f", ev.Data.CostUSD)
+	}
+}
+
+func TestParseCodexEntry_TokenCountWithoutModelHasNoEstimatedCost(t *testing.T) {
+	entry := codexLogEntry{
+		Timestamp: "2026-01-14T12:07:16.785Z",
+		Type:      "event_msg",
+		Payload: json.RawMessage(`{
+			"type":"token_count",
+			"info":{
+				"last_token_usage":{"input_tokens":12983,"output_tokens":20,"total_tokens":13003}
+			}
+		}`),
+	}
+
+	events := parseCodexEntry(entry, "test-session")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Data.Model != "" {
+		t.Fatalf("expected empty model, got %q", events[0].Data.Model)
+	}
+	if events[0].Data.CostUSD != 0 {
+		t.Fatalf("expected unpriced event until model is known, got %f", events[0].Data.CostUSD)
 	}
 }
 
@@ -176,86 +200,103 @@ func TestParseCodexEntry_UnknownType(t *testing.T) {
 	}
 }
 
-func TestCodexWatcher_DedupsRepeatedTokenCount(t *testing.T) {
-	var emitted []event.Event
-	w := &CodexWatcher{
-		lastTokenUsage: make(map[string]string),
-		emitFn:         func(ev event.Event) { emitted = append(emitted, ev) },
+func TestParseCodexEntry_TurnContextEmitsSessionUpdate(t *testing.T) {
+	entry := codexLogEntry{
+		Timestamp: "2026-01-14T12:07:10.150Z",
+		Type:      "turn_context",
+		Payload:   json.RawMessage(`{"cwd":"/tmp/project","model":"gpt-5.5"}`),
 	}
 
-	// Simulate 3 token_count entries: first two have same values, third is different
-	entries := []codexLogEntry{
-		{Timestamp: "2026-01-14T12:07:16.785Z", Type: "event_msg",
-			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":12879,"output_tokens":57,"total_tokens":12936}}}`)},
-		{Timestamp: "2026-01-14T12:07:19.661Z", Type: "event_msg",
-			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":12879,"output_tokens":57,"total_tokens":12936}}}`)},
-		{Timestamp: "2026-01-14T12:07:21.533Z", Type: "event_msg",
-			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":12983,"output_tokens":20,"total_tokens":13003}}}`)},
+	events := parseCodexEntry(entry, "test-session")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-
-	sessionID := "test-dedup"
-	for _, entry := range entries {
-		for _, ev := range parseCodexEntry(entry, sessionID) {
-			if ev.Type == event.EventTokenUsage {
-				key := fmt.Sprintf("%d:%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheReadTokens)
-				if w.lastTokenUsage[sessionID] == key {
-					continue
-				}
-				w.lastTokenUsage[sessionID] = key
-			}
-			w.emitFn(ev)
-		}
+	if events[0].Type != event.EventSessionUpdate {
+		t.Fatalf("event type = %q, want %q", events[0].Type, event.EventSessionUpdate)
 	}
-
-	// Should only emit 2 events (first unique + third unique), not 3
-	if len(emitted) != 2 {
-		t.Fatalf("expected 2 deduplicated token events, got %d", len(emitted))
-	}
-	if emitted[0].Data.InputTokens != 12879 {
-		t.Errorf("first event input: got %d, want 12879", emitted[0].Data.InputTokens)
-	}
-	if emitted[1].Data.InputTokens != 12983 {
-		t.Errorf("second event input: got %d, want 12983", emitted[1].Data.InputTokens)
+	if events[0].Data.Model != "gpt-5.5" || events[0].Data.CWD != "/tmp/project" {
+		t.Fatalf("unexpected context data: %#v", events[0].Data)
 	}
 }
 
-func TestCodexWatcher_DedupDistinguishesCachedTokens(t *testing.T) {
+func TestCodexTokenSourceIDIncludesSession(t *testing.T) {
+	entry := codexLogEntry{
+		Timestamp: "2026-01-14T12:07:16.785Z",
+		Type:      "event_msg",
+		Payload:   json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":10000,"output_tokens":500,"total_tokens":10500,"cached_input_tokens":8000}}}`),
+	}
+
+	a := parseCodexEntryWithContext(entry, "session-a", "gpt-5-codex", "/tmp/a")
+	b := parseCodexEntryWithContext(entry, "session-b", "gpt-5-codex", "/tmp/b")
+	if len(a) != 1 || len(b) != 1 {
+		t.Fatalf("expected one token event per session, got %d and %d", len(a), len(b))
+	}
+	if a[0].ID == b[0].ID {
+		t.Fatalf("token event IDs collide across sessions: %q", a[0].ID)
+	}
+}
+
+func TestCodexWatcher_EmitsIdenticalTokenUsageAtDifferentTimestamps(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "dedup111-1111-1111-1111-111111111111"
+	path := filepath.Join(dir, "rollout-2026-01-14T20-03-54-"+sessionID+".jsonl")
+	writeLinesToFile(t, path,
+		`{"timestamp":"2026-01-14T12:07:10.150Z","type":"turn_context","payload":{"cwd":"/tmp/project","model":"gpt-5-codex"}}`,
+		`{"timestamp":"2026-01-14T12:07:16.785Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":12879,"output_tokens":57,"total_tokens":12936}}}}`,
+		`{"timestamp":"2026-01-14T12:07:19.661Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":12879,"output_tokens":57,"total_tokens":12936}}}}`,
+	)
+
 	var emitted []event.Event
-	w := &CodexWatcher{
-		lastTokenUsage: make(map[string]string),
-		emitFn:         func(ev event.Event) { emitted = append(emitted, ev) },
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat test file: %v", err)
 	}
+	w.processFile(path, info.Size())
 
-	// Two entries: same input/output but different cached_input_tokens.
-	entries := []codexLogEntry{
-		{Timestamp: "2026-01-14T12:07:16.785Z", Type: "event_msg",
-			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":10000,"output_tokens":500,"total_tokens":10500,"cached_input_tokens":0}}}`)},
-		{Timestamp: "2026-01-14T12:07:19.661Z", Type: "event_msg",
-			Payload: json.RawMessage(`{"type":"token_count","info":{"last_token_usage":{"input_tokens":10000,"output_tokens":500,"total_tokens":10500,"cached_input_tokens":8000}}}`)},
-	}
-
-	sessionID := "test-cache-dedup"
-	for _, entry := range entries {
-		for _, ev := range parseCodexEntry(entry, sessionID) {
-			if ev.Type == event.EventTokenUsage {
-				key := fmt.Sprintf("%d:%d:%d", ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheReadTokens)
-				if w.lastTokenUsage[sessionID] == key {
-					continue
-				}
-				w.lastTokenUsage[sessionID] = key
-			}
-			w.emitFn(ev)
+	var tokenEvents []event.Event
+	for _, ev := range emitted {
+		if ev.Type == event.EventTokenUsage {
+			tokenEvents = append(tokenEvents, ev)
 		}
 	}
+	if len(tokenEvents) != 2 {
+		t.Fatalf("expected 2 token events with identical usage at different timestamps, got %d", len(tokenEvents))
+	}
+	if tokenEvents[0].ID == tokenEvents[1].ID {
+		t.Fatalf("token event IDs should differ by timestamp, got %q", tokenEvents[0].ID)
+	}
+}
 
-	if len(emitted) != 2 {
-		t.Fatalf("expected 2 events (different cache), got %d", len(emitted))
+func TestCodexWatcher_DedupesRepeatedTotalTokenUsageSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "dedup222-2222-2222-2222-222222222222"
+	path := filepath.Join(dir, "rollout-2026-01-14T20-03-54-"+sessionID+".jsonl")
+	writeLinesToFile(t, path,
+		`{"timestamp":"2026-01-14T12:07:10.150Z","type":"turn_context","payload":{"cwd":"/tmp/project","model":"gpt-5-codex"}}`,
+		`{"timestamp":"2026-01-14T12:07:16.785Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12879,"cached_input_tokens":8000,"output_tokens":57,"total_tokens":12936},"last_token_usage":{"input_tokens":12879,"cached_input_tokens":8000,"output_tokens":57,"total_tokens":12936}}}}`,
+		`{"timestamp":"2026-01-14T12:07:19.661Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12879,"cached_input_tokens":8000,"output_tokens":57,"total_tokens":12936},"last_token_usage":{"input_tokens":12879,"cached_input_tokens":8000,"output_tokens":57,"total_tokens":12936}}}}`,
+	)
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat test file: %v", err)
 	}
-	if emitted[0].Data.CacheReadTokens != 0 {
-		t.Errorf("first event cache: got %d, want 0", emitted[0].Data.CacheReadTokens)
+	w.processFile(path, info.Size())
+
+	var tokenEvents []event.Event
+	for _, ev := range emitted {
+		if ev.Type == event.EventTokenUsage {
+			tokenEvents = append(tokenEvents, ev)
+		}
 	}
-	if emitted[1].Data.CacheReadTokens != 8000 {
-		t.Errorf("second event cache: got %d, want 8000", emitted[1].Data.CacheReadTokens)
+	if len(tokenEvents) != 2 {
+		t.Fatalf("watcher should emit both snapshots; storage source_id handles replay dedupe, got %d", len(tokenEvents))
+	}
+	if tokenEvents[0].ID != tokenEvents[1].ID {
+		t.Fatalf("repeated total token snapshots should share source id, got %q and %q", tokenEvents[0].ID, tokenEvents[1].ID)
 	}
 }
 
@@ -305,9 +346,8 @@ func TestCodexWatcher_TurnContextAnnotatesTokensAndApplyPatchProducesFileChanges
 
 	var emitted []event.Event
 	w := &CodexWatcher{
-		seen:           make(map[string]int64),
-		lastTokenUsage: make(map[string]string),
-		emitFn:         func(ev event.Event) { emitted = append(emitted, ev) },
+		seen:   make(map[string]int64),
+		emitFn: func(ev event.Event) { emitted = append(emitted, ev) },
 	}
 
 	info, err := os.Stat(path)
@@ -339,6 +379,167 @@ func TestCodexWatcher_TurnContextAnnotatesTokensAndApplyPatchProducesFileChanges
 	}
 	if len(fileChanges) != 3 {
 		t.Fatalf("expected 3 file change events from apply_patch, got %d", len(fileChanges))
+	}
+}
+
+func TestCodexWatcher_TurnContextBackfillsEarlierTokenUsage(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "backfill-1111-1111-1111-111111111111"
+	path := filepath.Join(dir, "rollout-2026-01-14T20-03-54-"+sessionID+".jsonl")
+	writeLinesToFile(t, path,
+		`{"timestamp":"2026-01-14T12:07:09.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"output_tokens":100,"total_tokens":1100,"cached_input_tokens":200}}}}`,
+		`{"timestamp":"2026-01-14T12:07:10.150Z","type":"turn_context","payload":{"cwd":"/tmp/project","model":"gpt-5-codex"}}`,
+	)
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat test file: %v", err)
+	}
+	w.processFile(path, info.Size())
+
+	var tokenEvent *event.Event
+	for i := range emitted {
+		if emitted[i].Type == event.EventTokenUsage {
+			tokenEvent = &emitted[i]
+			break
+		}
+	}
+	if tokenEvent == nil {
+		t.Fatalf("expected token usage event, got %#v", emitted)
+	}
+	if tokenEvent.Data.Model != "gpt-5-codex" {
+		t.Fatalf("token event should be backfilled with model, got %q", tokenEvent.Data.Model)
+	}
+	if tokenEvent.Data.CWD != "/tmp/project" {
+		t.Fatalf("token event should be backfilled with cwd, got %q", tokenEvent.Data.CWD)
+	}
+	if tokenEvent.Data.CostUSD <= 0 {
+		t.Fatalf("token event should be priced after backfill, got %f", tokenEvent.Data.CostUSD)
+	}
+}
+
+func TestCodexWatcher_CustomToolApplyPatchEmitsFileChanges(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "custom11-1111-1111-1111-111111111111"
+	path := filepath.Join(dir, "rollout-2026-01-14T20-03-54-"+sessionID+".jsonl")
+	patch := "*** Begin Patch\n*** Update File: custom.txt\n-old\n+new\n*** End Patch\n"
+	writeLinesToFile(t, path,
+		`{"timestamp":"2026-01-14T12:07:10.150Z","type":"turn_context","payload":{"cwd":"/tmp/project","model":"gpt-5-codex"}}`,
+		fmt.Sprintf(`{"timestamp":"2026-01-14T12:07:16.415Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_custom_patch","name":"apply_patch","input":%q}}`, patch),
+	)
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat test file: %v", err)
+	}
+	w.processFile(path, info.Size())
+
+	var sawToolStart, sawToolEnd bool
+	var fileChanges []event.Event
+	for _, ev := range emitted {
+		switch ev.Type {
+		case event.EventToolCallStart:
+			if ev.ID == "call_custom_patch" && ev.Data.ToolName == "apply_patch" {
+				sawToolStart = true
+			}
+		case event.EventToolCallEnd:
+			if ev.ID == "call_custom_patch" && ev.Data.ToolStatus == event.StatusSuccess {
+				sawToolEnd = true
+			}
+		case event.EventFileChange:
+			fileChanges = append(fileChanges, ev)
+		}
+	}
+	if !sawToolStart || !sawToolEnd {
+		t.Fatalf("custom apply_patch should emit tool start/end, start=%v end=%v events=%#v", sawToolStart, sawToolEnd, emitted)
+	}
+	if len(fileChanges) != 1 {
+		t.Fatalf("expected 1 file change from custom apply_patch, got %d", len(fileChanges))
+	}
+	if fileChanges[0].Data.FilePath != "custom.txt" || fileChanges[0].Data.ChangeType != event.FileEdit {
+		t.Fatalf("unexpected file change: %#v", fileChanges[0].Data)
+	}
+}
+
+func TestCodexWatcher_CustomToolNonApplyPatchDoesNotEmitFileChanges(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "custom22-2222-2222-2222-222222222222"
+	path := filepath.Join(dir, "rollout-2026-01-14T20-03-54-"+sessionID+".jsonl")
+	input := "*** Begin Patch\n*** Update File: not-a-patch.txt\n-old\n+new\n*** End Patch\n"
+	writeLinesToFile(t, path,
+		`{"timestamp":"2026-01-14T12:07:10.150Z","type":"turn_context","payload":{"cwd":"/tmp/project","model":"gpt-5-codex"}}`,
+		fmt.Sprintf(`{"timestamp":"2026-01-14T12:07:16.415Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_custom_other","name":"shell","input":%q}}`, input),
+	)
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat test file: %v", err)
+	}
+	w.processFile(path, info.Size())
+
+	for _, ev := range emitted {
+		if ev.Type == event.EventFileChange {
+			t.Fatalf("non-apply_patch custom tool should not emit file change: %#v", ev)
+		}
+	}
+}
+
+func TestCodexWatcher_FullDiscoverKeepsPendingApplyPatchAcrossScans(t *testing.T) {
+	baseDir := filepath.Join(t.TempDir(), "sessions")
+	now := time.Now().UTC()
+	dir := filepath.Join(baseDir, now.Format("2006"), now.Format("01"), now.Format("02"))
+	sessionID := "pending1-1111-1111-1111-111111111111"
+	path := filepath.Join(dir, "rollout-"+now.Format("2006-01-02T15-04-05")+"-"+sessionID+".jsonl")
+
+	patch := "*** Begin Patch\n*** Add File: pending.txt\n+hello\n*** End Patch"
+	argsJSON, err := json.Marshal(map[string]string{"input": patch})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	writeLinesToFile(t, path,
+		`{"timestamp":"2026-01-14T12:07:10.150Z","type":"turn_context","payload":{"cwd":"/tmp/project","model":"gpt-5-codex"}}`,
+		fmt.Sprintf(`{"timestamp":"2026-01-14T12:07:16.415Z","type":"response_item","payload":{"type":"function_call","name":"apply_patch","arguments":%q,"call_id":"call_pending"}}`, string(argsJSON)),
+	)
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+	w.baseDirs = []string{baseDir}
+	w.scanLogs()
+
+	if !w.initialDiscovery {
+		t.Fatal("expected initial discovery to complete")
+	}
+	if _, ok := w.pendingFileChanges["call_pending"]; !ok {
+		t.Fatal("expected pending apply_patch changes to survive initial discovery")
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open append: %v", err)
+	}
+	fmt.Fprintln(f, `{"timestamp":"2026-01-14T12:07:16.805Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_pending","output":"ok"}}`)
+	if err := f.Close(); err != nil {
+		t.Fatalf("close append: %v", err)
+	}
+
+	w.scanLogs()
+	fileChanges := 0
+	for _, ev := range emitted {
+		if ev.Type == event.EventFileChange {
+			fileChanges++
+		}
+	}
+	if fileChanges != 1 {
+		t.Fatalf("expected pending apply_patch output to emit 1 file change, got %d events: %#v", fileChanges, emitted)
+	}
+	if _, ok := w.pendingFileChanges["call_pending"]; ok {
+		t.Fatal("pending apply_patch changes should be cleared after output")
 	}
 }
 
@@ -427,6 +628,20 @@ func TestCodexWatcher_EmptySessionsFiltered(t *testing.T) {
 		t.Fatal("expected deferred SessionStart in pendingStarts")
 	}
 
+	// A turn_context alone is metadata, not durable activity.
+	f, err := os.OpenFile(path1, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open append: %v", err)
+	}
+	fmt.Fprintf(f, `{"timestamp":"%s","type":"turn_context","payload":{"cwd":"/","model":"gpt-5-codex"}}`+"\n", now.Add(500*time.Millisecond).Format(time.RFC3339))
+	if err := f.Close(); err != nil {
+		t.Fatalf("close append: %v", err)
+	}
+	w.scanLogs()
+	if got := len(emitted); got != 0 {
+		t.Fatalf("expected 0 emitted events for session_meta+turn_context-only file, got %d", got)
+	}
+
 	// Second scan (incremental via scanRecentDirs) — add a new empty file.
 	session2 := "bbbb2222-2222-2222-2222-222222222222"
 	path2 := filepath.Join(dir, "rollout-"+now.Add(time.Second).Format("2006-01-02T15-04-05")+"-"+session2+".jsonl")
@@ -504,6 +719,62 @@ func TestCodexWatcher_DeferredStartEmittedWhenDataArrives(t *testing.T) {
 	// Pending should be cleared.
 	if _, ok := w.pendingStarts[sessionID]; ok {
 		t.Error("pendingStart should be cleared after emission")
+	}
+}
+
+func TestCodexWatcher_CommitsValidJSONAtEOFWithoutTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	sessionID := "dddd4444-4444-4444-4444-444444444444"
+	path := filepath.Join(dir, "rollout-2026-01-14T20-03-54-"+sessionID+".jsonl")
+
+	patch := "*** Begin Patch\n*** Add File: eof.txt\n+hello\n*** End Patch"
+	argsJSON, err := json.Marshal(map[string]string{"input": patch})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+
+	lines := []string{
+		`{"timestamp":"2026-01-14T12:07:10.150Z","type":"turn_context","payload":{"cwd":"/tmp/project","model":"gpt-5-codex"}}`,
+		fmt.Sprintf(`{"timestamp":"2026-01-14T12:07:16.415Z","type":"response_item","payload":{"type":"function_call","name":"apply_patch","arguments":%q,"call_id":"call_eof"}}`, string(argsJSON)),
+		`{"timestamp":"2026-01-14T12:07:16.805Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_eof","output":"ok"}}`,
+	}
+	data := []byte(joinLines(lines)) // Intentionally no trailing newline.
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+
+	var emitted []event.Event
+	w := NewCodexWatcher(func(ev event.Event) { emitted = append(emitted, ev) })
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat test file: %v", err)
+	}
+	w.processFile(path, info.Size())
+
+	if got := w.seen[path]; got != int64(len(data)) {
+		t.Fatalf("expected EOF JSON line to be committed, got offset %d want %d", got, len(data))
+	}
+
+	fileChanges := 0
+	for _, ev := range emitted {
+		if ev.Type == event.EventFileChange {
+			fileChanges++
+		}
+	}
+	if fileChanges != 1 {
+		t.Fatalf("expected 1 file change, got %d events: %#v", fileChanges, emitted)
+	}
+
+	w.processFile(path, info.Size())
+	afterSecondScan := 0
+	for _, ev := range emitted {
+		if ev.Type == event.EventFileChange {
+			afterSecondScan++
+		}
+	}
+	if afterSecondScan != fileChanges {
+		t.Fatalf("expected second scan to emit no additional file changes, got before=%d after=%d", fileChanges, afterSecondScan)
 	}
 }
 

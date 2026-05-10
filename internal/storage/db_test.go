@@ -27,6 +27,40 @@ func TestOpenAndMigrate(t *testing.T) {
 	}
 }
 
+func TestOpenNormalizesLegacySecondPrecisionTimes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	legacy := "2026-01-02T12:00:00Z"
+	if _, err := db.db.Exec(`
+		INSERT INTO sessions (session_id, platform, start_time, last_event_time, status)
+		VALUES ('legacy', 'claude', ?, ?, 'active')
+	`, legacy, legacy); err != nil {
+		t.Fatalf("insert legacy session: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+	defer db.Close()
+
+	var startTime, lastEvent string
+	if err := db.db.QueryRow(`SELECT start_time, last_event_time FROM sessions WHERE session_id = 'legacy'`).Scan(&startTime, &lastEvent); err != nil {
+		t.Fatalf("query legacy session: %v", err)
+	}
+	want := "2026-01-02T12:00:00.000000000Z"
+	if startTime != want || lastEvent != want {
+		t.Fatalf("legacy times not normalized: start=%q last=%q want=%q", startTime, lastEvent, want)
+	}
+}
+
 func TestSessionCRUD(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()
@@ -73,6 +107,46 @@ func TestSessionCRUD(t *testing.T) {
 	count, _ := db.GetActiveSessionCount()
 	if count != 0 {
 		t.Errorf("active count: got %d, want 0", count)
+	}
+}
+
+func TestGetSessionByIDPrefixPrefersExactMatch(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert s1: %v", err)
+	}
+	if err := db.UpsertSession("s10", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert s10: %v", err)
+	}
+
+	sess, found, err := db.GetSessionByIDPrefix("s1")
+	if err != nil {
+		t.Fatalf("exact match should not be ambiguous: %v", err)
+	}
+	if !found || sess.SessionID != "s1" {
+		t.Fatalf("expected exact s1, found=%v session=%q", found, sess.SessionID)
+	}
+}
+
+func TestGetSessionByIDPrefixEscapesLikeWildcards(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("abc%literal", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert literal percent: %v", err)
+	}
+	if err := db.UpsertSession("abcdef", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert abcdef: %v", err)
+	}
+
+	sess, found, err := db.GetSessionByIDPrefix("abc%")
+	if err != nil {
+		t.Fatalf("literal percent prefix should not act as wildcard: %v", err)
+	}
+	if !found || sess.SessionID != "abc%literal" {
+		t.Fatalf("expected literal percent session, found=%v session=%q", found, sess.SessionID)
 	}
 }
 
@@ -275,6 +349,117 @@ func TestUpdateSessionTokensReconcilesSessionTotals(t *testing.T) {
 	}
 }
 
+func TestTokenAggregatesDoNotDoubleCountCacheTokens(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s-cache-agg", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.UpsertAgent("agent-1", "s-cache-agg", "", "main", now); err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	// input_tokens is already the total input context, with cache token counts
+	// stored separately for pricing/cache-rate displays.
+	if err := db.InsertTokenUsage("agent-1", "s-cache-agg", 1500, 500, 200, 300, "sonnet", 0.01134, now, "src-cache-agg"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	from := now.Add(-time.Minute)
+	to := now.Add(time.Minute)
+
+	models, err := db.GetModelCostBreakdown(from, to)
+	if err != nil {
+		t.Fatalf("model breakdown: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model row, got %d", len(models))
+	}
+	if models[0].InputTokens != 1500 {
+		t.Fatalf("model input tokens double-counted cache: got %d, want 1500", models[0].InputTokens)
+	}
+
+	topSessions, err := db.GetTopSessionsByCost(from, to, 10)
+	if err != nil {
+		t.Fatalf("top sessions: %v", err)
+	}
+	if len(topSessions) != 1 {
+		t.Fatalf("expected 1 top session row, got %d", len(topSessions))
+	}
+	if topSessions[0].InputTokens != 1500 {
+		t.Fatalf("top session input tokens double-counted cache: got %d, want 1500", topSessions[0].InputTokens)
+	}
+
+	agents, err := db.ListAgentStats("s-cache-agg")
+	if err != nil {
+		t.Fatalf("agent stats: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent row, got %d", len(agents))
+	}
+	if agents[0].InputTokens != 1500 {
+		t.Fatalf("agent input tokens double-counted cache: got %d, want 1500", agents[0].InputTokens)
+	}
+}
+
+func TestListAgentStatsMapsEmptyTokenAgentToMainAgent(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s-empty-agent", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.UpsertAgent("main-agent", "s-empty-agent", "", "main", now); err != nil {
+		t.Fatalf("upsert main agent: %v", err)
+	}
+	if err := db.InsertTokenUsage("", "s-empty-agent", 1200, 300, 0, 0, "gpt-5-codex", 0.02, now, "src-empty-agent"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	agents, err := db.ListAgentStats("s-empty-agent")
+	if err != nil {
+		t.Fatalf("list agent stats: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent row, got %d", len(agents))
+	}
+	if agents[0].AgentID != "main-agent" {
+		t.Fatalf("expected main-agent row, got %q", agents[0].AgentID)
+	}
+	if agents[0].InputTokens != 1200 || agents[0].OutputTokens != 300 {
+		t.Fatalf("empty agent token totals were not mapped to main agent: in=%d out=%d", agents[0].InputTokens, agents[0].OutputTokens)
+	}
+}
+
+func TestListAgentStatsSynthesizesMainAgentForCodexSession(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s-codex-no-agent", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertToolCallStart("call-empty", "", "s-codex-no-agent", "apply_patch", "{}", now); err != nil {
+		t.Fatalf("insert tool call: %v", err)
+	}
+	if err := db.InsertTokenUsage("", "s-codex-no-agent", 1200, 300, 0, 0, "gpt-5-codex", 0.02, now, "src-codex-no-agent"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	agents, err := db.ListAgentStats("s-codex-no-agent")
+	if err != nil {
+		t.Fatalf("list agent stats: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected synthetic main row, got %d rows", len(agents))
+	}
+	if agents[0].AgentID != "main" || agents[0].Role != "main" {
+		t.Fatalf("unexpected synthetic row identity: %#v", agents[0])
+	}
+	if agents[0].ToolCallCount != 1 || agents[0].InputTokens != 1200 || agents[0].OutputTokens != 300 {
+		t.Fatalf("synthetic row did not aggregate empty-agent activity: %#v", agents[0])
+	}
+}
+
 func TestBackfillEmptyTokenModelReconcilesSessionTotals(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()
@@ -351,6 +536,122 @@ func TestBackfillEmptyTokenModelFullCacheHit(t *testing.T) {
 	}
 }
 
+func TestListEmptyModelSessionsSkipsAmbiguousKnownModels(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s-ambiguous-empty", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("", "s-ambiguous-empty", 100, 10, 0, 0, "", 0, now, "amb-empty"); err != nil {
+		t.Fatalf("insert empty model row: %v", err)
+	}
+	if err := db.InsertTokenUsage("", "s-ambiguous-empty", 100, 10, 0, 0, "gpt-5", 0.01, now.Add(time.Second), "amb-gpt5"); err != nil {
+		t.Fatalf("insert gpt-5 row: %v", err)
+	}
+	if err := db.InsertTokenUsage("", "s-ambiguous-empty", 100, 10, 0, 0, "gpt-5.5", 0.02, now.Add(2*time.Second), "amb-gpt55"); err != nil {
+		t.Fatalf("insert gpt-5.5 row: %v", err)
+	}
+
+	sessions, err := db.ListEmptyModelSessions()
+	if err != nil {
+		t.Fatalf("list empty model sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected one session candidate, got %d", len(sessions))
+	}
+	if sessions[0].Model != "" {
+		t.Fatalf("ambiguous known models should not select one model, got %q", sessions[0].Model)
+	}
+}
+
+func TestBackfillRecentCodexTokenModelRepairsLastTokenBeforeContext(t *testing.T) {
+	db := testDB(t)
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	contextTime := now.Add(2 * time.Second)
+
+	if err := db.UpsertSession("s-recent-model", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("", "s-recent-model", 1000, 100, 0, 200, "", 0, now, "codex-tokens-s-recent-model-1"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	updated, err := db.BackfillRecentCodexTokenModel("s-recent-model", "gpt-5.5", contextTime, 5*time.Second, 5.0, 30.0, 0.50)
+	if err != nil {
+		t.Fatalf("backfill recent codex model: %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("expected 1 recent token row update, got %d", updated)
+	}
+	if err := db.UpdateSessionTokens("s-recent-model"); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	var model string
+	var cost float64
+	if err := db.db.QueryRow(`SELECT model, cost_usd FROM token_usage WHERE session_id = ?`, "s-recent-model").Scan(&model, &cost); err != nil {
+		t.Fatalf("query token row: %v", err)
+	}
+	if model != "gpt-5.5" {
+		t.Fatalf("expected recent row model to be repaired, got %q", model)
+	}
+	wantCost := (float64(800)*5.0 + float64(200)*0.50 + float64(100)*30.0) / 1_000_000
+	if diff := cost - wantCost; diff < -0.0000001 || diff > 0.0000001 {
+		t.Fatalf("cost = %f, want %f", cost, wantCost)
+	}
+}
+
+func TestBackfillRecentCodexTokenModelSkipsOldRows(t *testing.T) {
+	db := testDB(t)
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	contextTime := now.Add(time.Minute)
+
+	if err := db.UpsertSession("s-old-model", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("", "s-old-model", 1000, 100, 0, 0, "gpt-5", 0.99, now, "codex-tokens-s-old-model-1"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	updated, err := db.BackfillRecentCodexTokenModel("s-old-model", "gpt-5.5", contextTime, 5*time.Second, 5.0, 30.0, 0.50)
+	if err != nil {
+		t.Fatalf("backfill recent codex model: %v", err)
+	}
+	if updated != 0 {
+		t.Fatalf("expected old row outside skew window to be skipped, got %d updates", updated)
+	}
+}
+
+func TestBackfillRecentCodexTokenModelDoesNotRewritePricedOldModel(t *testing.T) {
+	db := testDB(t)
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	contextTime := now.Add(2 * time.Second)
+
+	if err := db.UpsertSession("s-priced-old-model", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("", "s-priced-old-model", 1000, 100, 0, 0, "gpt-5", 0.00225, now, "codex-tokens-s-priced-old-model-1"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	updated, err := db.BackfillRecentCodexTokenModel("s-priced-old-model", "gpt-5.5", contextTime, 5*time.Second, 5.0, 30.0, 0.50)
+	if err != nil {
+		t.Fatalf("backfill recent codex model: %v", err)
+	}
+	if updated != 0 {
+		t.Fatalf("expected priced old-model row to be preserved, got %d updates", updated)
+	}
+
+	var model string
+	if err := db.db.QueryRow(`SELECT model FROM token_usage WHERE session_id = ?`, "s-priced-old-model").Scan(&model); err != nil {
+		t.Fatalf("query token row: %v", err)
+	}
+	if model != "gpt-5" {
+		t.Fatalf("priced old-model row was rewritten to %q", model)
+	}
+}
+
 func TestAgentHierarchy(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()
@@ -392,6 +693,82 @@ func TestFileChanges(t *testing.T) {
 	}
 }
 
+func TestInsertFileChangeDeduplicatesReplay(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertFileChangeWithSource("s1", "src/main.go", event.FileEdit, now, "event-1"); err != nil {
+		t.Fatalf("insert file change: %v", err)
+	}
+	if err := db.InsertFileChangeWithSource("s1", "src/main.go", event.FileEdit, now, "event-1"); err != nil {
+		t.Fatalf("replay file change: %v", err)
+	}
+
+	changes, err := db.ListFileChanges("s1")
+	if err != nil {
+		t.Fatalf("list file changes: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected replayed file change to be ignored, got %d rows", len(changes))
+	}
+}
+
+func TestInsertFileChangeSourceScopedBySession(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert s1: %v", err)
+	}
+	if err := db.UpsertSession("s2", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert s2: %v", err)
+	}
+	if err := db.InsertFileChangeWithSource("s1", "src/main.go", event.FileEdit, now, "call-1:src/main.go"); err != nil {
+		t.Fatalf("insert s1 change: %v", err)
+	}
+	if err := db.InsertFileChangeWithSource("s2", "src/main.go", event.FileEdit, now, "call-1:src/main.go"); err != nil {
+		t.Fatalf("insert s2 change: %v", err)
+	}
+
+	changes1, err := db.ListFileChanges("s1")
+	if err != nil {
+		t.Fatalf("list s1 changes: %v", err)
+	}
+	changes2, err := db.ListFileChanges("s2")
+	if err != nil {
+		t.Fatalf("list s2 changes: %v", err)
+	}
+	if len(changes1) != 1 || len(changes2) != 1 {
+		t.Fatalf("same source_id in different sessions should be preserved, got s1=%d s2=%d", len(changes1), len(changes2))
+	}
+}
+
+func TestInsertFileChangeWithoutSourceKeepsSameSecondChanges(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertFileChange("s1", "src/main.go", event.FileEdit, now); err != nil {
+		t.Fatalf("insert file change: %v", err)
+	}
+	if err := db.InsertFileChange("s1", "src/main.go", event.FileEdit, now.Add(100*time.Millisecond)); err != nil {
+		t.Fatalf("insert second file change: %v", err)
+	}
+
+	changes, err := db.ListFileChanges("s1")
+	if err != nil {
+		t.Fatalf("list file changes: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("expected source-less same-second changes to be preserved, got %d rows", len(changes))
+	}
+}
+
 func TestMarkStaleSessionsEndedUsesRecentActivity(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()
@@ -419,6 +796,46 @@ func TestMarkStaleSessionsEndedUsesRecentActivity(t *testing.T) {
 	}
 }
 
+func TestMarkStaleSessionsEndedUsesLastEventTimeForRetention(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	start := now.AddDate(0, 0, -10)
+	lastEvent := now.AddDate(0, 0, -9)
+
+	if err := db.UpsertSession("stale-old", event.PlatformClaude, start); err != nil {
+		t.Fatalf("insert old session: %v", err)
+	}
+	if err := db.UpsertSession("stale-old", event.PlatformClaude, lastEvent); err != nil {
+		t.Fatalf("record last event: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "stale-old", 100, 50, 0, 0, "sonnet", 0.1, lastEvent, "src-stale-old"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+	if err := db.MarkStaleSessionsEnded(2 * time.Hour); err != nil {
+		t.Fatalf("mark stale: %v", err)
+	}
+
+	var status string
+	var endTime string
+	if err := db.db.QueryRow(`SELECT status, end_time FROM sessions WHERE session_id = ?`, "stale-old").Scan(&status, &endTime); err != nil {
+		t.Fatalf("query session: %v", err)
+	}
+	if status != "stale" {
+		t.Fatalf("expected stale status, got %q", status)
+	}
+	if endTime != formatStorageTime(lastEvent) {
+		t.Fatalf("stale end_time should be last_event_time, got %q want %q", endTime, formatStorageTime(lastEvent))
+	}
+
+	deleted, err := db.CleanOldSessions(7)
+	if err != nil {
+		t.Fatalf("clean old sessions: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected stale old session to be retention-cleaned, got %d deletions", deleted)
+	}
+}
+
 func TestUpsertSessionReactivatesStaleSession(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()
@@ -443,6 +860,96 @@ func TestUpsertSessionReactivatesStaleSession(t *testing.T) {
 	}
 	if endTime.Valid {
 		t.Fatalf("reactivated session should clear end_time, got %q", endTime.String)
+	}
+}
+
+func TestEndSessionDoesNotMoveEndTimeBackwards(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	later := now.Add(time.Hour)
+	earlier := now.Add(10 * time.Minute)
+
+	if err := db.UpsertSession("s1", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.EndSession("s1", later); err != nil {
+		t.Fatalf("end session later: %v", err)
+	}
+	if err := db.EndSession("s1", earlier); err != nil {
+		t.Fatalf("end session earlier: %v", err)
+	}
+
+	var endTime string
+	if err := db.db.QueryRow(`SELECT end_time FROM sessions WHERE session_id = ?`, "s1").Scan(&endTime); err != nil {
+		t.Fatalf("query end_time: %v", err)
+	}
+	if endTime != formatStorageTime(later) {
+		t.Fatalf("end_time moved backwards: got %q want %q", endTime, formatStorageTime(later))
+	}
+}
+
+func TestEndSessionIgnoresEndBeforeLastEvent(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	laterEvent := now.Add(time.Hour)
+	olderEnd := now.Add(10 * time.Minute)
+
+	if err := db.UpsertSession("s1", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.UpsertSession("s1", event.PlatformClaude, laterEvent); err != nil {
+		t.Fatalf("record later event: %v", err)
+	}
+	if err := db.EndSession("s1", olderEnd); err != nil {
+		t.Fatalf("older end session: %v", err)
+	}
+
+	var status string
+	var endTime sql.NullString
+	if err := db.db.QueryRow(`SELECT status, end_time FROM sessions WHERE session_id = ?`, "s1").Scan(&status, &endTime); err != nil {
+		t.Fatalf("query session: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("stale older end should not end a session with newer activity, got status %q", status)
+	}
+	if endTime.Valid {
+		t.Fatalf("stale older end should not set end_time, got %q", endTime.String)
+	}
+}
+
+func TestEndSessionIgnoresSameSecondEndBeforeLastEvent(t *testing.T) {
+	db := testDB(t)
+	base := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	laterEvent := base.Add(900 * time.Millisecond)
+	olderEnd := base.Add(100 * time.Millisecond)
+
+	if err := db.UpsertSession("s-subsecond-end", event.PlatformClaude, base); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.UpsertSession("s-subsecond-end", event.PlatformClaude, laterEvent); err != nil {
+		t.Fatalf("record later same-second event: %v", err)
+	}
+	canEnd, err := db.CanEndSession("s-subsecond-end", olderEnd)
+	if err != nil {
+		t.Fatalf("can end session: %v", err)
+	}
+	if canEnd {
+		t.Fatal("same-second but older end should not be allowed")
+	}
+	if err := db.EndSession("s-subsecond-end", olderEnd); err != nil {
+		t.Fatalf("end session: %v", err)
+	}
+
+	var status string
+	var endTime sql.NullString
+	if err := db.db.QueryRow(`SELECT status, end_time FROM sessions WHERE session_id = ?`, "s-subsecond-end").Scan(&status, &endTime); err != nil {
+		t.Fatalf("query session: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("same-second older end should not end session, got %q", status)
+	}
+	if endTime.Valid {
+		t.Fatalf("same-second older end should not set end_time, got %q", endTime.String)
 	}
 }
 
@@ -724,6 +1231,37 @@ func TestGetDailyCostsBetween(t *testing.T) {
 	// Today should be ~2.50
 	if costs[2].Cost < 2.49 || costs[2].Cost > 2.51 {
 		t.Errorf("day 2 cost: got %f, want ~2.50", costs[2].Cost)
+	}
+}
+
+func TestTimeRangeQueriesNormalizeToUTC(t *testing.T) {
+	db := testDB(t)
+	loc := time.FixedZone("UTC+1", 3600)
+	ts := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+
+	if err := db.UpsertSession("s-tz", event.PlatformClaude, ts); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "s-tz", 1000, 500, 0, 0, "sonnet", 1.25, ts, "src-tz"); err != nil {
+		t.Fatalf("insert token usage: %v", err)
+	}
+
+	from := time.Date(2026, 1, 2, 13, 0, 0, 0, loc) // same instant as ts
+	to := time.Date(2026, 1, 2, 14, 0, 0, 0, loc)
+	cost, err := db.GetCostBetween(from, to)
+	if err != nil {
+		t.Fatalf("get cost between: %v", err)
+	}
+	if cost != 1.25 {
+		t.Fatalf("non-UTC range should include matching UTC row, got cost %f", cost)
+	}
+
+	input, output, err := db.GetTokensSince(&from)
+	if err != nil {
+		t.Fatalf("get tokens since: %v", err)
+	}
+	if input != 1000 || output != 500 {
+		t.Fatalf("non-UTC since should include row, got input=%d output=%d", input, output)
 	}
 }
 

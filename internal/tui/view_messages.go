@@ -42,7 +42,7 @@ func (m Model) viewMessages(width int) string {
 	for i := start; i < end; i++ {
 		msg := filtered[i]
 		timeStr := msg.Timestamp.Format("15:04")
-		expanded := m.expandedCalls[fmt.Sprintf("msg-%d", i)]
+		expanded := m.expandedCalls[messageExpansionKeyForFiltered(m.messages, filtered, i)]
 
 		if expanded {
 			line := fmt.Sprintf("  %s  %s %s",

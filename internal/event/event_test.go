@@ -53,6 +53,7 @@ func TestEventTypes(t *testing.T) {
 		EventTokenUsage,
 		EventFileChange,
 		EventSessionStart,
+		EventSessionUpdate,
 		EventSessionEnd,
 	}
 

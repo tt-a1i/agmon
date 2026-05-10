@@ -270,10 +270,21 @@ func shouldSkipMessageContent(content string) bool {
 	if content == "" {
 		return true
 	}
-	if strings.HasPrefix(content, "<") {
-		return true
+	for _, prefix := range []string{
+		"<environment_context",
+		"<system-reminder",
+		"<command-message",
+		"<local-command-stdout",
+		"<local-command-stderr",
+	} {
+		if strings.HasPrefix(content, prefix) {
+			return true
+		}
 	}
 	if strings.HasPrefix(content, "# AGENTS.md instructions") {
+		return true
+	}
+	if strings.HasPrefix(content, "# CLAUDE.md instructions") {
 		return true
 	}
 	return false

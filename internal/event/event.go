@@ -19,6 +19,7 @@ const (
 	EventTokenUsage    EventType = "token_usage"
 	EventFileChange    EventType = "file_change"
 	EventSessionStart  EventType = "session_start"
+	EventSessionUpdate EventType = "session_update"
 	EventSessionEnd    EventType = "session_end"
 )
 

@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -74,7 +75,10 @@ type AgentStatRow struct {
 }
 
 func parseTime(s string) time.Time {
-	t, _ := time.Parse(time.RFC3339, s)
+	t, ok := parseStorageTime(s)
+	if !ok {
+		return time.Time{}
+	}
 	return t.Local()
 }
 
@@ -84,6 +88,10 @@ func parseTimePtr(s *string) *time.Time {
 	}
 	t := parseTime(*s)
 	return &t
+}
+
+func formatQueryTime(t time.Time) string {
+	return formatStorageTime(t)
 }
 
 func (s *DB) ListSessions() ([]SessionRow, error) {
@@ -125,10 +133,16 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 // all sessions (not just the filtered list returned by ListSessions).
 // Returns an error if the prefix matches more than one session.
 func (s *DB) GetSessionByIDPrefix(prefix string) (SessionRow, bool, error) {
+	exact, found, err := s.getSessionByExactID(prefix)
+	if err != nil || found {
+		return exact, found, err
+	}
+
+	likePattern := escapeLikePattern(prefix) + "%"
 	// Check for ambiguity before returning a result.
 	var count int
 	if err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM sessions WHERE session_id LIKE ? || '%'`, prefix,
+		`SELECT COUNT(*) FROM sessions WHERE session_id LIKE ? ESCAPE '\'`, likePattern,
 	).Scan(&count); err != nil {
 		return SessionRow{}, false, err
 	}
@@ -141,8 +155,30 @@ func (s *DB) GetSessionByIDPrefix(prefix string) (SessionRow, bool, error) {
 		       total_input_tokens, total_output_tokens, total_cost_usd,
 		       cwd, git_branch, latest_context_tokens, model,
 		       total_cache_read_tokens, total_cache_creation_tokens, tag
-		FROM sessions WHERE session_id LIKE ? || '%' LIMIT 1
-	`, prefix)
+		FROM sessions WHERE session_id LIKE ? ESCAPE '\' LIMIT 1
+	`, likePattern)
+	return scanSessionRow(row)
+}
+
+func (s *DB) getSessionByExactID(sessionID string) (SessionRow, bool, error) {
+	row := s.db.QueryRow(`
+		SELECT session_id, platform, start_time, end_time, status,
+		       total_input_tokens, total_output_tokens, total_cost_usd,
+		       cwd, git_branch, latest_context_tokens, model,
+		       total_cache_read_tokens, total_cache_creation_tokens, tag
+		FROM sessions WHERE session_id = ?
+	`, sessionID)
+	return scanSessionRow(row)
+}
+
+func escapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
+func scanSessionRow(row *sql.Row) (SessionRow, bool, error) {
 	var r SessionRow
 	var startStr string
 	var endStr *string
@@ -281,6 +317,14 @@ func (s *DB) ListAgentStats(sessionID string) ([]AgentStatRow, error) {
 			       COUNT(*) as cnt
 			FROM tool_calls tc WHERE tc.session_id = ?
 			GROUP BY 1
+		),
+		token_totals AS (
+			SELECT CASE WHEN tu.agent_id = '' THEN COALESCE((SELECT agent_id FROM main_agent), '') ELSE tu.agent_id END as agent_id,
+			       SUM(input_tokens) as in_tok,
+			       SUM(output_tokens) as out_tok,
+			       SUM(cost_usd) as cost
+			FROM token_usage tu WHERE tu.session_id = ?
+			GROUP BY 1
 		)
 		SELECT a.agent_id, COALESCE(a.parent_agent_id, ''), COALESCE(a.role, ''),
 		       a.status,
@@ -288,13 +332,7 @@ func (s *DB) ListAgentStats(sessionID string) ([]AgentStatRow, error) {
 		       COALESCE(t.in_tok, 0), COALESCE(t.out_tok, 0), COALESCE(t.cost, 0)
 		FROM agents a
 		LEFT JOIN tool_counts tc ON a.agent_id = tc.agent_id
-		LEFT JOIN (
-			SELECT agent_id,
-			       SUM(input_tokens + cache_creation_tokens + cache_read_tokens) as in_tok,
-			       SUM(output_tokens) as out_tok,
-			       SUM(cost_usd) as cost
-			FROM token_usage WHERE session_id = ? AND agent_id != '' GROUP BY agent_id
-		) t ON a.agent_id = t.agent_id
+		LEFT JOIN token_totals t ON a.agent_id = t.agent_id
 		WHERE a.session_id = ?
 		ORDER BY a.start_time ASC
 	`, sessionID, sessionID, sessionID, sessionID)
@@ -312,7 +350,34 @@ func (s *DB) ListAgentStats(sessionID string) ([]AgentStatRow, error) {
 		}
 		result = append(result, r)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(result) == 0 {
+		return s.syntheticMainAgentStats(sessionID)
+	}
+	return result, nil
+}
+
+func (s *DB) syntheticMainAgentStats(sessionID string) ([]AgentStatRow, error) {
+	var r AgentStatRow
+	err := s.db.QueryRow(`
+		SELECT
+			COALESCE((SELECT COUNT(*) FROM tool_calls WHERE session_id = ? AND agent_id = ''), 0),
+			COALESCE((SELECT SUM(input_tokens) FROM token_usage WHERE session_id = ? AND agent_id = ''), 0),
+			COALESCE((SELECT SUM(output_tokens) FROM token_usage WHERE session_id = ? AND agent_id = ''), 0),
+			COALESCE((SELECT SUM(cost_usd) FROM token_usage WHERE session_id = ? AND agent_id = ''), 0)
+	`, sessionID, sessionID, sessionID, sessionID).Scan(&r.ToolCallCount, &r.InputTokens, &r.OutputTokens, &r.CostUSD)
+	if err != nil {
+		return nil, err
+	}
+	if r.ToolCallCount == 0 && r.InputTokens == 0 && r.OutputTokens == 0 && r.CostUSD == 0 {
+		return nil, nil
+	}
+	r.AgentID = "main"
+	r.Role = "main"
+	r.Status = "active"
+	return []AgentStatRow{r}, nil
 }
 
 // SetSessionTag sets or clears the tag on a session.
@@ -333,7 +398,7 @@ func (s *DB) GetTokensSince(since *time.Time) (input, output int, err error) {
 		err = s.db.QueryRow(`
 			SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
 			FROM token_usage WHERE timestamp >= ?
-		`, since.Format(time.RFC3339)).Scan(&input, &output)
+		`, formatQueryTime(*since)).Scan(&input, &output)
 	}
 	return
 }
@@ -370,7 +435,7 @@ func (s *DB) GetCostSince(since *time.Time) (float64, error) {
 		err = s.db.QueryRow(`
 			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM token_usage WHERE timestamp >= ?
-		`, since.Format(time.RFC3339)).Scan(&cost)
+		`, formatQueryTime(*since)).Scan(&cost)
 	}
 	return cost, err
 }
@@ -381,7 +446,7 @@ func (s *DB) GetCostBetween(from, to time.Time) (float64, error) {
 	err := s.db.QueryRow(`
 		SELECT COALESCE(SUM(cost_usd), 0)
 		FROM token_usage WHERE timestamp >= ? AND timestamp < ?
-	`, from.Format(time.RFC3339), to.Format(time.RFC3339)).Scan(&cost)
+	`, formatQueryTime(from), formatQueryTime(to)).Scan(&cost)
 	return cost, err
 }
 
@@ -407,13 +472,13 @@ type ModelCostRow struct {
 func (s *DB) GetModelCostBreakdown(from, to time.Time) ([]ModelCostRow, error) {
 	rows, err := s.db.Query(`
 		SELECT COALESCE(NULLIF(model, ''), 'unknown') as m,
-		       SUM(input_tokens + cache_creation_tokens + cache_read_tokens),
+		       SUM(input_tokens),
 		       SUM(output_tokens),
 		       SUM(cost_usd)
 		FROM token_usage
 		WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY m ORDER BY SUM(cost_usd) DESC
-	`, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	`, formatQueryTime(from), formatQueryTime(to))
 	if err != nil {
 		return nil, err
 	}
@@ -445,14 +510,14 @@ type TopSessionRow struct {
 func (s *DB) GetTopSessionsByCost(from, to time.Time, limit int) ([]TopSessionRow, error) {
 	rows, err := s.db.Query(`
 		SELECT t.session_id, s.platform, s.git_branch, s.cwd,
-		       SUM(t.cost_usd), SUM(t.input_tokens + t.cache_creation_tokens + t.cache_read_tokens), SUM(t.output_tokens)
+		       SUM(t.cost_usd), SUM(t.input_tokens), SUM(t.output_tokens)
 		FROM token_usage t
 		JOIN sessions s ON t.session_id = s.session_id
 		WHERE t.timestamp >= ? AND t.timestamp < ?
 		GROUP BY t.session_id
 		ORDER BY SUM(t.cost_usd) DESC
 		LIMIT ?
-	`, from.Format(time.RFC3339), to.Format(time.RFC3339), limit)
+	`, formatQueryTime(from), formatQueryTime(to), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -473,12 +538,14 @@ func (s *DB) GetTopSessionsByCost(from, to time.Time, limit int) ([]TopSessionRo
 // GetDailyCostsBetween returns per-day cost totals between from and to.
 // Results are ordered oldest-first, with zero-filled gaps.
 func (s *DB) GetDailyCostsBetween(from, to time.Time) ([]DailyCost, error) {
+	from = from.UTC()
+	to = to.UTC()
 	rows, err := s.db.Query(`
 		SELECT DATE(timestamp) as day, SUM(cost_usd) as cost
 		FROM token_usage
 		WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY day ORDER BY day ASC
-	`, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	`, formatQueryTime(from), formatQueryTime(to))
 	if err != nil {
 		return nil, err
 	}
@@ -515,7 +582,7 @@ func (s *DB) AllToolStats(from, to time.Time) ([]ToolStatRow, error) {
 		FROM tool_calls
 		WHERE start_time >= ? AND start_time < ?
 		GROUP BY tool_name ORDER BY cnt DESC
-	`, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	`, formatQueryTime(from), formatQueryTime(to))
 	if err != nil {
 		return nil, err
 	}
@@ -561,7 +628,7 @@ func (s *DB) GetDailyCosts(days int) ([]DailyCost, error) {
 		FROM token_usage
 		WHERE timestamp >= ?
 		GROUP BY day ORDER BY day ASC
-	`, since.Format(time.RFC3339))
+	`, formatQueryTime(since))
 	if err != nil {
 		return nil, err
 	}

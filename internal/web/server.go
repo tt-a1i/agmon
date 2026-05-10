@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"log"
 	"net/http"
 	"time"
 
@@ -46,6 +47,17 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+func writeAPIError(w http.ResponseWriter, status int, publicMessage string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": publicMessage})
+}
+
+func writeInternalError(w http.ResponseWriter, err error) {
+	log.Printf("web api error: %v", err)
+	writeAPIError(w, http.StatusInternalServerError, "internal server error")
+}
+
 type sessionJSON struct {
 	SessionID    string  `json:"session_id"`
 	Platform     string  `json:"platform"`
@@ -64,7 +76,7 @@ type sessionJSON struct {
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	sessions, err := s.db.ListSessions()
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, err)
 		return
 	}
 
@@ -121,7 +133,11 @@ func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
 		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	case "all":
 		firstDate, err := s.db.GetFirstTokenDate()
-		if err != nil || firstDate.IsZero() {
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		if firstDate.IsZero() {
 			from = time.Now().UTC().AddDate(0, 0, -29)
 		} else {
 			from = firstDate
@@ -130,14 +146,30 @@ func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
 		from = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -6)
 	}
 
-	totalCost, _ := s.db.GetCostBetween(from, now)
-	dailyCosts, _ := s.db.GetDailyCostsBetween(from, now)
-	models, _ := s.db.GetModelCostBreakdown(from, now)
+	totalCost, err := s.db.GetCostBetween(from, now)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	dailyCosts, err := s.db.GetDailyCostsBetween(from, now)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	models, err := s.db.GetModelCostBreakdown(from, now)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
 
 	// Previous period for comparison
 	duration := now.Sub(from)
 	prevFrom := from.Add(-duration)
-	prevCost, _ := s.db.GetCostBetween(prevFrom, from)
+	prevCost, err := s.db.GetCostBetween(prevFrom, from)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
 
 	writeJSON(w, costResponse{
 		Range:      rangeParam,
@@ -166,7 +198,11 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	startOfWeek := time.Date(now.Year(), now.Month(), now.Day()-int(wd-1), 0, 0, 0, 0, time.UTC)
 
-	sessions, _ := s.db.ListSessions()
+	sessions, err := s.db.ListSessions()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
 	activeCount := 0
 	for _, sess := range sessions {
 		if sess.Status == "active" {
@@ -174,11 +210,31 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	todayCost, _ := s.db.GetTodayCost()
-	weekCost, _ := s.db.GetCostBetween(startOfWeek, now)
-	dailyCosts, _ := s.db.GetDailyCosts(7)
-	topTools, _ := s.db.AllToolStats(startOfWeek, now)
-	topSessions, _ := s.db.GetTopSessionsByCost(startOfWeek, now, 5)
+	todayCost, err := s.db.GetTodayCost()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	weekCost, err := s.db.GetCostBetween(startOfWeek, now)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	dailyCosts, err := s.db.GetDailyCosts(7)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	topTools, err := s.db.AllToolStats(startOfWeek, now)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	topSessions, err := s.db.GetTopSessionsByCost(startOfWeek, now, 5)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
 
 	// Limit tools to top 10
 	if len(topTools) > 10 {
@@ -202,26 +258,46 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	prefix := "/api/session/"
 	if len(path) <= len(prefix) {
-		http.Error(w, "missing session id", 400)
+		writeAPIError(w, http.StatusBadRequest, "missing session id")
 		return
 	}
 	idPrefix := path[len(prefix):]
 
 	sess, found, err := s.db.GetSessionByIDPrefix(idPrefix)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !found {
-		http.Error(w, "session not found", 404)
+		writeAPIError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
-	tools, _ := s.db.ListToolCalls(sess.SessionID, 200)
-	agents, _ := s.db.ListAgents(sess.SessionID)
-	files, _ := s.db.ListFileChanges(sess.SessionID)
-	toolStats, _ := s.db.ListToolStats(sess.SessionID)
-	agentStats, _ := s.db.ListAgentStats(sess.SessionID)
+	tools, err := s.db.ListToolCalls(sess.SessionID, 200)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	agents, err := s.db.ListAgents(sess.SessionID)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	files, err := s.db.ListFileChanges(sess.SessionID)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	toolStats, err := s.db.ListToolStats(sess.SessionID)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	agentStats, err := s.db.ListAgentStats(sess.SessionID)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
 	messages := collector.ReadUserMessages(event.Platform(sess.Platform), sess.SessionID, sess.CWD, 100)
 
 	type msgJSON struct {

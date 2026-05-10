@@ -18,6 +18,34 @@ type DB struct {
 	db *sql.DB
 }
 
+const storageTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
+func formatStorageTime(t time.Time) string {
+	return t.UTC().Format(storageTimeLayout)
+}
+
+func parseStorageTime(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339, s)
+		if err != nil {
+			return time.Time{}, false
+		}
+	}
+	return t.UTC(), true
+}
+
+func normalizeStorageTime(s string) string {
+	t, ok := parseStorageTime(s)
+	if !ok {
+		return s
+	}
+	return formatStorageTime(t)
+}
+
 func DefaultDBPath() string {
 	return appdir.PathFor("tokenmeter.db", "agmon.db", "data")
 }
@@ -115,13 +143,14 @@ func (s *DB) migrate() error {
 			timestamp     TEXT NOT NULL
 		);
 
-		CREATE TABLE IF NOT EXISTS file_changes (
-			id          INTEGER PRIMARY KEY AUTOINCREMENT,
-			session_id  TEXT NOT NULL REFERENCES sessions(session_id),
-			file_path   TEXT NOT NULL,
-			change_type TEXT NOT NULL,
-			timestamp   TEXT NOT NULL
-		);
+			CREATE TABLE IF NOT EXISTS file_changes (
+				id          INTEGER PRIMARY KEY AUTOINCREMENT,
+				session_id  TEXT NOT NULL REFERENCES sessions(session_id),
+				file_path   TEXT NOT NULL,
+				change_type TEXT NOT NULL,
+				timestamp   TEXT NOT NULL,
+				source_id   TEXT NOT NULL DEFAULT ''
+			);
 
 		CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id);
 		CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
@@ -145,11 +174,104 @@ func (s *DB) migrate() error {
 	s.addColumnIfMissing("token_usage", "source_id", "TEXT NOT NULL DEFAULT ''")
 	s.addColumnIfMissing("token_usage", "cache_creation_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("token_usage", "cache_read_tokens", "INT NOT NULL DEFAULT 0")
+	s.addColumnIfMissing("file_changes", "source_id", "TEXT NOT NULL DEFAULT ''")
+	if err := s.normalizeTimeColumns(); err != nil {
+		return err
+	}
+	if _, err = s.db.Exec(`
+		UPDATE sessions
+		SET end_time = COALESCE(NULLIF(last_event_time, ''), start_time)
+		WHERE status = 'stale'
+		  AND COALESCE(NULLIF(last_event_time, ''), start_time) != ''
+		  AND (end_time IS NULL OR end_time = '' OR end_time > COALESCE(NULLIF(last_event_time, ''), start_time))
+	`); err != nil {
+		return err
+	}
 	_, err = s.db.Exec(`
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_token_usage_source
 		ON token_usage(source_id) WHERE source_id != ''
 	`)
+	if err != nil {
+		return err
+	}
+	if _, err = s.db.Exec(`DROP INDEX IF EXISTS idx_file_changes_source`); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_file_changes_source
+		ON file_changes(session_id, source_id) WHERE source_id != ''
+	`)
 	return err
+}
+
+func (s *DB) normalizeTimeColumns() error {
+	specs := []struct {
+		table   string
+		columns []string
+	}{
+		{table: "sessions", columns: []string{"start_time", "last_event_time", "end_time"}},
+		{table: "agents", columns: []string{"start_time", "end_time"}},
+		{table: "tool_calls", columns: []string{"start_time", "end_time"}},
+		{table: "token_usage", columns: []string{"timestamp"}},
+		{table: "file_changes", columns: []string{"timestamp"}},
+	}
+
+	for _, spec := range specs {
+		query := fmt.Sprintf("SELECT rowid, %s FROM %s", strings.Join(spec.columns, ", "), spec.table)
+		rows, err := s.db.Query(query)
+		if err != nil {
+			return err
+		}
+		type pendingUpdate struct {
+			query string
+			args  []any
+		}
+		var updates []pendingUpdate
+
+		for rows.Next() {
+			var rowID int64
+			values := make([]sql.NullString, len(spec.columns))
+			dest := make([]any, 0, len(spec.columns)+1)
+			dest = append(dest, &rowID)
+			for i := range values {
+				dest = append(dest, &values[i])
+			}
+			if err := rows.Scan(dest...); err != nil {
+				rows.Close()
+				return err
+			}
+
+			var sets []string
+			var args []any
+			for i, value := range values {
+				if !value.Valid || value.String == "" {
+					continue
+				}
+				normalized := normalizeStorageTime(value.String)
+				if normalized != value.String {
+					sets = append(sets, fmt.Sprintf("%s = ?", spec.columns[i]))
+					args = append(args, normalized)
+				}
+			}
+			if len(sets) == 0 {
+				continue
+			}
+			args = append(args, rowID)
+			update := fmt.Sprintf("UPDATE %s SET %s WHERE rowid = ?", spec.table, strings.Join(sets, ", "))
+			updates = append(updates, pendingUpdate{query: update, args: args})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, update := range updates {
+			if _, err := s.db.Exec(update.query, update.args...); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // UpdateSessionMeta sets cwd and git_branch on a session.
@@ -185,8 +307,23 @@ func (s *DB) MarkPendingToolCallsInterrupted(sessionID string) error {
 	return err
 }
 
+func (s *DB) CanEndSession(sessionID string, endTime time.Time) (bool, error) {
+	var lastComparable string
+	err := s.db.QueryRow(`
+		SELECT COALESCE(NULLIF(last_event_time, ''), start_time)
+		FROM sessions WHERE session_id = ?
+	`, sessionID).Scan(&lastComparable)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return lastComparable <= formatStorageTime(endTime), nil
+}
+
 func (s *DB) UpsertSession(sessionID string, platform event.Platform, startTime time.Time) error {
-	ts := startTime.UTC().Format(time.RFC3339)
+	ts := formatStorageTime(startTime)
 	_, err := s.db.Exec(`
 		INSERT INTO sessions (session_id, platform, start_time, last_event_time, status)
 		VALUES (?, ?, ?, ?, 'active')
@@ -213,17 +350,24 @@ func (s *DB) UpsertSession(sessionID string, platform event.Platform, startTime 
 }
 
 func (s *DB) EndSession(sessionID string, endTime time.Time) error {
-	endStr := endTime.UTC().Format(time.RFC3339)
+	endStr := formatStorageTime(endTime)
 	_, err := s.db.Exec(`
 		UPDATE sessions
-		SET status = 'ended',
-			end_time = ?,
-			last_event_time = CASE
-				WHEN last_event_time = '' OR last_event_time < ? THEN ?
-				ELSE last_event_time
-			END
-		WHERE session_id = ?
-	`, endStr, endStr, endStr, sessionID)
+		SET status = CASE
+				WHEN COALESCE(NULLIF(last_event_time, ''), start_time) <= ? THEN 'ended'
+				ELSE status
+			END,
+			end_time = CASE
+					WHEN COALESCE(NULLIF(last_event_time, ''), start_time) > ? THEN end_time
+					WHEN end_time IS NULL OR end_time = '' OR end_time < ? THEN ?
+					ELSE end_time
+				END,
+				last_event_time = CASE
+					WHEN last_event_time = '' OR last_event_time < ? THEN ?
+					ELSE last_event_time
+				END
+			WHERE session_id = ?
+		`, endStr, endStr, endStr, endStr, endStr, endStr, sessionID)
 	return err
 }
 
@@ -232,14 +376,14 @@ func (s *DB) UpsertAgent(agentID, sessionID, parentAgentID, role string, startTi
 		INSERT INTO agents (agent_id, session_id, parent_agent_id, role, start_time)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(agent_id) DO NOTHING
-	`, agentID, sessionID, parentAgentID, role, startTime.UTC().Format(time.RFC3339))
+	`, agentID, sessionID, parentAgentID, role, formatStorageTime(startTime))
 	return err
 }
 
 func (s *DB) EndAgent(agentID string, endTime time.Time) error {
 	_, err := s.db.Exec(`
 		UPDATE agents SET status = 'ended', end_time = ? WHERE agent_id = ?
-	`, endTime.UTC().Format(time.RFC3339), agentID)
+	`, formatStorageTime(endTime), agentID)
 	return err
 }
 
@@ -247,12 +391,12 @@ func (s *DB) InsertToolCallStart(callID, agentID, sessionID, toolName, params st
 	_, err := s.db.Exec(`
 		INSERT OR IGNORE INTO tool_calls (call_id, agent_id, session_id, tool_name, params_summary, start_time)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, callID, agentID, sessionID, toolName, params, startTime.UTC().Format(time.RFC3339))
+	`, callID, agentID, sessionID, toolName, params, formatStorageTime(startTime))
 	return err
 }
 
 func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatus, durationMs int64, endTime time.Time) error {
-	endStr := endTime.UTC().Format(time.RFC3339)
+	endStr := formatStorageTime(endTime)
 	_, err := s.db.Exec(`
 		UPDATE tool_calls SET result_summary = ?, status = ?,
 			duration_ms = CASE WHEN ? > 0 THEN ?
@@ -275,7 +419,7 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 	}
 	defer tx.Rollback()
 
-	tsStr := ts.UTC().Format(time.RFC3339)
+	tsStr := formatStorageTime(ts)
 	result, err := tx.Exec(`
 		INSERT OR IGNORE INTO token_usage
 			(agent_id, session_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model, cost_usd, timestamp, source_id)
@@ -325,7 +469,7 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 // along with their associated agents, tool_calls, token_usage, and file_changes records.
 // Returns the number of sessions deleted.
 func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
-	cutoff := time.Now().UTC().AddDate(0, 0, -olderThanDays).Format(time.RFC3339)
+	cutoff := formatStorageTime(time.Now().UTC().AddDate(0, 0, -olderThanDays))
 	whereClause := `status != 'active' AND COALESCE(end_time, NULLIF(last_event_time, ''), start_time) < ?`
 
 	tx, err := s.db.Begin()
@@ -361,14 +505,14 @@ func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
 // MarkStaleSessionsEnded marks sessions that have been active longer than maxAge as stale.
 // Called at daemon startup to clean up sessions that never received a SessionEnd event.
 func (s *DB) MarkStaleSessionsEnded(maxAge time.Duration) error {
-	cutoff := time.Now().UTC().Add(-maxAge).Format(time.RFC3339)
-	now := time.Now().UTC().Format(time.RFC3339)
+	cutoff := formatStorageTime(time.Now().UTC().Add(-maxAge))
 	_, err := s.db.Exec(`
 		UPDATE sessions
-		SET status = 'stale', end_time = ?
+		SET status = 'stale',
+			end_time = COALESCE(NULLIF(last_event_time, ''), start_time)
 		WHERE status = 'active'
 		  AND COALESCE(NULLIF(last_event_time, ''), start_time) < ?
-	`, now, cutoff)
+	`, cutoff)
 	return err
 }
 
@@ -423,12 +567,52 @@ func (s *DB) BackfillEmptyTokenModel(sessionID, model string, inputPricePerM, ou
 	return result.RowsAffected()
 }
 
+// BackfillRecentCodexTokenModel updates the latest Codex token row at or just
+// before a turn_context timestamp. It handles the edge case where a token_count
+// line is observed before the turn_context line that carries the new model.
+func (s *DB) BackfillRecentCodexTokenModel(sessionID, model string, contextTime time.Time, maxSkew time.Duration, inputPricePerM, outputPricePerM, cacheReadPricePerM float64) (int64, error) {
+	if model == "" || maxSkew <= 0 {
+		return 0, nil
+	}
+	contextStr := formatStorageTime(contextTime)
+	minStr := formatStorageTime(contextTime.UTC().Add(-maxSkew))
+	result, err := s.db.Exec(`
+		UPDATE token_usage SET
+			model = ?,
+			cost_usd = (
+				CAST(MAX(input_tokens - cache_read_tokens, 0) AS REAL) * ? +
+				CAST(cache_read_tokens AS REAL) * ? +
+				CAST(output_tokens AS REAL) * ?
+			) / 1000000.0
+		WHERE id = (
+			SELECT id FROM token_usage
+			WHERE session_id = ?
+			  AND source_id LIKE 'codex-tokens-%'
+			  AND timestamp >= ?
+			  AND timestamp <= ?
+			  AND model != ?
+			  AND (model = '' OR cost_usd = 0)
+			ORDER BY timestamp DESC, id DESC
+			LIMIT 1
+		)
+	`, model, inputPricePerM, cacheReadPricePerM, outputPricePerM, sessionID, minStr, contextStr, model)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // ListEmptyModelSessions returns sessions that have token_usage rows with empty model,
 // along with a known model from other rows in the same session (if any).
 func (s *DB) ListEmptyModelSessions() ([]struct{ SessionID, Model, Platform string }, error) {
 	rows, err := s.db.Query(`
 		SELECT sub.session_id,
-		       COALESCE((SELECT t2.model FROM token_usage t2 WHERE t2.session_id = sub.session_id AND t2.model != '' AND t2.model != '<synthetic>' LIMIT 1), ''),
+		       COALESCE((
+		           SELECT CASE WHEN COUNT(DISTINCT t2.model) = 1 THEN MIN(t2.model) ELSE '' END
+		           FROM token_usage t2
+		           WHERE t2.session_id = sub.session_id
+		             AND t2.model != '' AND t2.model != '<synthetic>'
+		       ), ''),
 		       s.platform
 		FROM (SELECT DISTINCT session_id FROM token_usage WHERE model = '') sub
 		JOIN sessions s ON sub.session_id = s.session_id
@@ -466,9 +650,13 @@ func (s *DB) UpdateSessionTokens(sessionID string) error {
 }
 
 func (s *DB) InsertFileChange(sessionID, filePath string, changeType event.FileChangeType, ts time.Time) error {
+	return s.InsertFileChangeWithSource(sessionID, filePath, changeType, ts, "")
+}
+
+func (s *DB) InsertFileChangeWithSource(sessionID, filePath string, changeType event.FileChangeType, ts time.Time, sourceID string) error {
 	_, err := s.db.Exec(`
-		INSERT INTO file_changes (session_id, file_path, change_type, timestamp)
-		VALUES (?, ?, ?, ?)
-	`, sessionID, filePath, string(changeType), ts.UTC().Format(time.RFC3339))
+		INSERT OR IGNORE INTO file_changes (session_id, file_path, change_type, timestamp, source_id)
+		VALUES (?, ?, ?, ?, ?)
+	`, sessionID, filePath, string(changeType), formatStorageTime(ts), sourceID)
 	return err
 }

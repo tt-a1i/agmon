@@ -34,6 +34,11 @@ func TestEstimateClaudeCost(t *testing.T) {
 			model: "claude-haiku-4-5", wantMinUSD: 0.034, wantMaxUSD: 0.036,
 		},
 		{
+			// Opus 4.7 current standard tier: (100000*5 + 10000*25)/1e6 = 0.75
+			name: "opus-4-7", input: 100000, output: 10000,
+			model: "claude-opus-4-7", wantMinUSD: 0.70, wantMaxUSD: 0.80,
+		},
+		{
 			name: "zero tokens", input: 0, output: 0,
 			model: "claude-sonnet-4-6", wantMinUSD: 0, wantMaxUSD: 0,
 		},
@@ -84,6 +89,7 @@ func TestClaudeOpusSplitPricing(t *testing.T) {
 		{"claude-opus-4-1-20250805", 15.0, 75.0},
 		{"claude-opus-4-5-20251120", 5.0, 25.0},
 		{"claude-opus-4-6-20260210", 5.0, 25.0},
+		{"claude-opus-4-7", 5.0, 25.0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
@@ -104,6 +110,8 @@ func TestCodexPricing(t *testing.T) {
 		wantCache  float64
 	}{
 		// GPT-5 base family
+		{model: "gpt-5.5", wantInput: 5.00, wantOutput: 30.0, wantCache: 0.50},
+		{model: "gpt-5.5-pro", wantInput: 30.0, wantOutput: 180.0, wantCache: 30.0},
 		{model: "gpt-5", wantInput: 1.25, wantOutput: 10.0, wantCache: 0.125},
 		{model: "gpt-5-mini", wantInput: 0.25, wantOutput: 2.0, wantCache: 0.025},
 		{model: "gpt-5-nano", wantInput: 0.05, wantOutput: 0.40, wantCache: 0.005},
@@ -126,6 +134,7 @@ func TestCodexPricing(t *testing.T) {
 		{model: "gpt-5.4-nano", wantInput: 0.20, wantOutput: 1.25, wantCache: 0.02},
 
 		// Pro variants (no cache rate → fallback to input rate)
+		{model: "gpt-5-pro", wantInput: 15.0, wantOutput: 120.0, wantCache: 15.0},
 		{model: "gpt-5.2-pro", wantInput: 21.0, wantOutput: 168.0, wantCache: 21.0},
 		{model: "gpt-5.4-pro", wantInput: 30.0, wantOutput: 180.0, wantCache: 30.0},
 
@@ -164,6 +173,8 @@ func TestCodexPricingMatchOrder(t *testing.T) {
 		wantInput float64
 	}{
 		{"gpt-5.4-mini must not leak to gpt-5-mini", "gpt-5.4-mini-20260210", 0.75},
+		{"gpt-5.5-pro must not leak to gpt-5.5", "gpt-5.5-pro-20260501", 30.0},
+		{"gpt-5-pro must not leak to gpt-5 base", "gpt-5-pro", 15.0},
 		{"gpt-5.4-nano must not leak to gpt-5-nano", "gpt-5.4-nano-20260210", 0.20},
 		{"gpt-5.4-pro must not leak to gpt-5.4", "gpt-5.4-pro-20260210", 30.0},
 		{"gpt-5.2-pro must not leak to gpt-5.2", "gpt-5.2-pro-20260210", 21.0},

@@ -299,6 +299,22 @@ func TestRunCleanRemovesOldSessions(t *testing.T) {
 	}
 }
 
+func TestRunTagHandlesShortSessionID(t *testing.T) {
+	home := t.TempDir()
+	db := openHomeDB(t, home)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("s1", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	withArgs(t, []string{"tokenmeter", "tag", "s1", "short id"})
+	out := captureStdout(t, runTag)
+	if !strings.Contains(out, "Tagged session s1: short id") {
+		t.Fatalf("unexpected stdout: %q", out)
+	}
+}
+
 func TestRunSetupPreservesExistingSettingsShape(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)

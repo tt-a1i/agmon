@@ -21,6 +21,14 @@ func DefaultSocketPath() string {
 	return appdir.PathFor("tokenmeter.port", "agmon.port")
 }
 
+type socketLock struct{}
+
+func acquireSocketLock(path string) (*socketLock, error) {
+	return &socketLock{}, nil
+}
+
+func (l *socketLock) Close() {}
+
 func listenSocket(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err

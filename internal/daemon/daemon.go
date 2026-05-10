@@ -16,11 +16,15 @@ import (
 type Daemon struct {
 	db          *storage.DB
 	sockPath    string
+	socketLock  *socketLock
 	listener    net.Listener
 	subListener net.Listener
 	mu          sync.RWMutex
 	subs        []chan event.Event
 	remoteSubs  map[net.Conn]struct{}
+	clientConns map[net.Conn]struct{}
+	connWG      sync.WaitGroup
+	stopping    bool
 	done        chan struct{}
 	stopOnce    sync.Once
 	batchCh     chan event.Event // buffered channel for async event processing
@@ -29,12 +33,13 @@ type Daemon struct {
 
 func New(db *storage.DB, sockPath string) *Daemon {
 	return &Daemon{
-		db:         db,
-		sockPath:   sockPath,
-		remoteSubs: make(map[net.Conn]struct{}),
-		done:       make(chan struct{}),
-		batchCh:    make(chan event.Event, 10000),
-		batchDone:  make(chan struct{}),
+		db:          db,
+		sockPath:    sockPath,
+		remoteSubs:  make(map[net.Conn]struct{}),
+		clientConns: make(map[net.Conn]struct{}),
+		done:        make(chan struct{}),
+		batchCh:     make(chan event.Event, 10000),
+		batchDone:   make(chan struct{}),
 	}
 }
 
@@ -84,16 +89,24 @@ func (d *Daemon) broadcast(ev event.Event) {
 }
 
 func (d *Daemon) Start() error {
+	lock, err := acquireSocketLock(d.sockPath)
+	if err != nil {
+		return fmt.Errorf("socket lock: %w", err)
+	}
+
 	ln, err := listenSocket(d.sockPath)
 	if err != nil {
+		lock.Close()
 		return fmt.Errorf("listen: %w", err)
 	}
 	d.listener = ln
+	d.socketLock = lock
 
 	subLn, err := listenSocket(subscriberSocketPath(d.sockPath))
 	if err != nil {
 		ln.Close()
 		cleanupSocket(d.sockPath)
+		lock.Close()
 		return fmt.Errorf("listen subscriber: %w", err)
 	}
 	d.subListener = subLn
@@ -150,10 +163,45 @@ func (d *Daemon) repairEmptyTokenModels() {
 	}
 }
 
+func (d *Daemon) reconcileCodexTokenModel(sessionID, model string, contextTime time.Time, includeRecent bool) error {
+	if model == "" {
+		return nil
+	}
+	inP, outP, cacheP := collector.CodexPricing(model)
+	var total int64
+	n, err := d.db.BackfillEmptyTokenModel(sessionID, model, inP, outP, cacheP)
+	if err != nil {
+		return err
+	}
+	total += n
+	if includeRecent && shouldRepairRecentCodexTokenModel(contextTime) {
+		n, err = d.db.BackfillRecentCodexTokenModel(sessionID, model, contextTime, 5*time.Second, inP, outP, cacheP)
+		if err != nil {
+			return err
+		}
+		total += n
+	}
+	if total > 0 {
+		log.Printf("backfilled %d token rows for session %s with model %s", total, sessionID, model)
+		return d.db.UpdateSessionTokens(sessionID)
+	}
+	return nil
+}
+
+func shouldRepairRecentCodexTokenModel(contextTime time.Time) bool {
+	if contextTime.IsZero() {
+		return false
+	}
+	return time.Since(contextTime) <= 2*time.Hour
+}
+
 func (d *Daemon) Stop() {
 	d.stopOnce.Do(func() {
+		d.mu.Lock()
+		d.stopping = true
+		d.mu.Unlock()
+
 		close(d.done)
-		<-d.batchDone // wait for batch consumer to drain
 		if d.listener != nil {
 			d.listener.Close()
 		}
@@ -161,13 +209,23 @@ func (d *Daemon) Stop() {
 			d.subListener.Close()
 		}
 		d.mu.Lock()
+		for conn := range d.clientConns {
+			conn.Close()
+			delete(d.clientConns, conn)
+		}
 		for conn := range d.remoteSubs {
 			conn.Close()
 			delete(d.remoteSubs, conn)
 		}
 		d.mu.Unlock()
+		d.connWG.Wait()
+		<-d.batchDone // wait for batch consumer to drain
 		cleanupSocket(d.sockPath)
 		cleanupSocket(subscriberSocketPath(d.sockPath))
+		if d.socketLock != nil {
+			d.socketLock.Close()
+			d.socketLock = nil
+		}
 	})
 }
 
@@ -183,7 +241,13 @@ func (d *Daemon) acceptLoop() {
 				continue
 			}
 		}
-		go d.handleConn(conn)
+		if !d.registerClientConn(conn) {
+			continue
+		}
+		go func() {
+			defer d.connWG.Done()
+			d.handleConn(conn)
+		}()
 	}
 }
 
@@ -204,7 +268,7 @@ func (d *Daemon) acceptSubscriberLoop() {
 }
 
 func (d *Daemon) handleConn(conn net.Conn) {
-	defer conn.Close()
+	defer d.removeClientConn(conn)
 	dec := json.NewDecoder(conn)
 	for {
 		var ev event.Event
@@ -215,6 +279,27 @@ func (d *Daemon) handleConn(conn net.Conn) {
 			log.Printf("process event error: %v", err)
 		}
 		d.broadcast(ev)
+	}
+}
+
+func (d *Daemon) registerClientConn(conn net.Conn) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stopping {
+		_ = conn.Close()
+		return false
+	}
+	d.clientConns[conn] = struct{}{}
+	d.connWG.Add(1)
+	return true
+}
+
+func (d *Daemon) removeClientConn(conn net.Conn) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.clientConns[conn]; ok {
+		delete(d.clientConns, conn)
+		_ = conn.Close()
 	}
 }
 
@@ -239,8 +324,26 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		}
 		return nil
 
+	case event.EventSessionUpdate:
+		if ev.Data.CWD != "" || ev.Data.GitBranch != "" {
+			d.db.FillSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch)
+		}
+		if ev.Platform == event.PlatformCodex && ev.Data.Model != "" {
+			return d.reconcileCodexTokenModel(ev.SessionID, ev.Data.Model, ev.Timestamp, true)
+		}
+		return nil
+
 	case event.EventSessionEnd:
-		d.db.MarkPendingToolCallsInterrupted(ev.SessionID)
+		canEnd, err := d.db.CanEndSession(ev.SessionID, ev.Timestamp)
+		if err != nil {
+			return err
+		}
+		if !canEnd {
+			return nil
+		}
+		if err := d.db.MarkPendingToolCallsInterrupted(ev.SessionID); err != nil {
+			return err
+		}
 		return d.db.EndSession(ev.SessionID, ev.Timestamp)
 
 	case event.EventAgentStart:
@@ -257,7 +360,7 @@ func (d *Daemon) processEvent(ev event.Event) error {
 			return err
 		}
 		if ev.Data.FilePath != "" {
-			return d.db.InsertFileChange(ev.SessionID, ev.Data.FilePath, ev.Data.ChangeType, ev.Timestamp)
+			return d.db.InsertFileChangeWithSource(ev.SessionID, ev.Data.FilePath, ev.Data.ChangeType, ev.Timestamp, ev.ID)
 		}
 		return nil
 
@@ -271,16 +374,12 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		// Backfill earlier rows in this session that had no model (Codex token_count
 		// can arrive before turn_context which carries the model name).
 		if ev.Platform == event.PlatformCodex && ev.Data.Model != "" {
-			inP, outP, cacheP := collector.CodexPricing(ev.Data.Model)
-			if n, _ := d.db.BackfillEmptyTokenModel(ev.SessionID, ev.Data.Model, inP, outP, cacheP); n > 0 {
-				log.Printf("backfilled %d token rows for session %s with model %s", n, ev.SessionID, ev.Data.Model)
-				return d.db.UpdateSessionTokens(ev.SessionID)
-			}
+			return d.reconcileCodexTokenModel(ev.SessionID, ev.Data.Model, ev.Timestamp, false)
 		}
 		return nil
 
 	case event.EventFileChange:
-		return d.db.InsertFileChange(ev.SessionID, ev.Data.FilePath, ev.Data.ChangeType, ev.Timestamp)
+		return d.db.InsertFileChangeWithSource(ev.SessionID, ev.Data.FilePath, ev.Data.ChangeType, ev.Timestamp, ev.ID)
 	}
 	return nil
 }

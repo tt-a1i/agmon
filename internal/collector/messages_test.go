@@ -76,6 +76,18 @@ func TestReadUserMessagesCodexExtractsUserInputText(t *testing.T) {
 	}
 }
 
+func TestShouldSkipMessageContentPreservesUserHTMLPrompts(t *testing.T) {
+	if shouldSkipMessageContent("<div>please inspect this HTML</div>") {
+		t.Fatal("user-authored HTML prompt should not be filtered")
+	}
+	if !shouldSkipMessageContent("<environment_context>\n  <cwd>/tmp/project</cwd>\n</environment_context>") {
+		t.Fatal("synthetic environment context should still be filtered")
+	}
+	if !shouldSkipMessageContent("# AGENTS.md instructions for /tmp/project") {
+		t.Fatal("AGENTS instruction injection should still be filtered")
+	}
+}
+
 func TestFindCodexLogPathPrefersIndexedResolver(t *testing.T) {
 	sessionID := "d4430cef-110d-42e0-924a-bfceeba0c4e1"
 	want := "/tmp/codex-indexed.jsonl"
