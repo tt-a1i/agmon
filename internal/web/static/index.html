@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#4f46e5">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.svg">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%234f46e5'/><path d='M55 15L25 55h25l-5 30 30-40H50l5-30z' fill='white'/></svg>">
 <title>TokenMeter</title>
 <style>
@@ -1211,6 +1213,15 @@ function handleRoute(){
 window.addEventListener('hashchange',handleRoute);
 
 refresh();connectEvents();
+
+// PWA: register the service worker so the dashboard works offline and can be
+// installed to the home screen. Failures are non-fatal — page still works.
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(err=>console.warn('SW register failed:',err))});
+}
+// Surface network transitions so users know when they're seeing cached data.
+window.addEventListener('offline',()=>toast('Offline — showing cached data'));
+window.addEventListener('online',()=>toast('Back online'));
 </script>
 </body>
 </html>
