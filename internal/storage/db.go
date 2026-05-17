@@ -683,7 +683,7 @@ func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit: %w", err)
 	}
-	if err := s.Analyze(); err != nil {
+	if err := s.Optimize(); err != nil {
 		return int(n), fmt.Errorf("analyze: %w", err)
 	}
 	return int(n), nil

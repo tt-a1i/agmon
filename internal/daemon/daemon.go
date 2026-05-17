@@ -234,7 +234,7 @@ func (d *Daemon) maintenanceLoop() {
 		case <-d.done:
 			return
 		case <-ticker.C:
-			if err := d.db.Analyze(); err != nil {
+			if err := d.db.Optimize(); err != nil {
 				log.Printf("maintenanceLoop analyze: %v", err)
 			}
 		}

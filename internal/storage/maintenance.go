@@ -15,7 +15,7 @@ func (s *DB) Vacuum() error {
 	return nil
 }
 
-func (s *DB) Analyze() error {
+func (s *DB) Optimize() error {
 	_, err := s.db.Exec(`PRAGMA optimize`)
 	return err
 }

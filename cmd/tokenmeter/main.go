@@ -154,6 +154,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "analyze":
+		if err := runAnalyze(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "doctor":
 		if err := runDoctor(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1134,6 +1139,7 @@ Usage:
   tokenmeter compare <a> <b>    Compare two sessions
   tokenmeter search <query>     Search tools, results, and files
   tokenmeter budget <command>   Manage monthly budgets
+  tokenmeter analyze [--json]   Usage insights summary
   tokenmeter doctor [--json]    Run installation diagnostics
   tokenmeter compact [--full]   Analyze or VACUUM the local database
   tokenmeter web [--port N]     Start web dashboard (default port: 8370)

@@ -56,10 +56,10 @@ func TestVacuumReclaimsDisk(t *testing.T) {
 	}
 }
 
-func TestAnalyzeUpdatesStats(t *testing.T) {
+func TestOptimizeUpdatesStats(t *testing.T) {
 	db := testDB(t)
-	if err := db.Analyze(); err != nil {
-		t.Fatalf("analyze: %v", err)
+	if err := db.Optimize(); err != nil {
+		t.Fatalf("optimize: %v", err)
 	}
 	stats, err := db.MaintenanceStats()
 	if err != nil {

@@ -49,7 +49,7 @@ func runCompact() error {
 		}
 	} else {
 		fmt.Println("  Running ANALYZE...")
-		if err := db.Analyze(); err != nil {
+		if err := db.Optimize(); err != nil {
 			return fmt.Errorf("analyze: %w", err)
 		}
 	}
