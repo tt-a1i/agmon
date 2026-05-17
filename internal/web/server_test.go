@@ -120,6 +120,55 @@ func TestHandleSessionsPlatformFilter(t *testing.T) {
 	}
 }
 
+func TestHandleSessionsWorkspaceFilter(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	sessions := []struct {
+		id  string
+		cwd string
+	}{
+		{"root-session", "/foo"},
+		{"child-session", "/foo/service"},
+		{"prefix-session", "/foobar"},
+		{"other-session", "/bar"},
+	}
+	for i, sess := range sessions {
+		start := now.Add(time.Duration(i) * time.Minute)
+		if err := db.UpsertSession(sess.id, event.PlatformClaude, start); err != nil {
+			t.Fatalf("upsert %s: %v", sess.id, err)
+		}
+		if err := db.UpdateSessionMeta(sess.id, sess.cwd, "main"); err != nil {
+			t.Fatalf("update meta %s: %v", sess.id, err)
+		}
+		if err := db.InsertTokenUsage("agent-"+sess.id, sess.id, 100, 50, 0, 0, "sonnet", 0.1, start, "src-"+sess.id); err != nil {
+			t.Fatalf("insert tokens %s: %v", sess.id, err)
+		}
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions?workspace=/foo", nil)
+	w := httptest.NewRecorder()
+	srv.handleSessions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	var got []sessionJSON
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal sessions: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("sessions len: got %d, want 2: %#v", len(got), got)
+	}
+	ids := map[string]bool{}
+	for _, sess := range got {
+		ids[sess.SessionID] = true
+	}
+	if !ids["root-session"] || !ids["child-session"] || ids["prefix-session"] || ids["other-session"] {
+		t.Fatalf("workspace filter returned wrong sessions: %#v", got)
+	}
+}
+
 func TestHandleCosts(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()

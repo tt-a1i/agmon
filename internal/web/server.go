@@ -251,13 +251,25 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	platform := r.URL.Query().Get("platform")
+	workspace := strings.TrimSpace(r.URL.Query().Get("workspace"))
 	var sessions []storage.SessionRow
 	var err error
-	if platform != "" {
-		if platform != string(event.PlatformClaude) && platform != string(event.PlatformCodex) {
-			writeAPIError(w, http.StatusBadRequest, "invalid platform")
-			return
+	if platform != "" && platform != string(event.PlatformClaude) && platform != string(event.PlatformCodex) {
+		writeAPIError(w, http.StatusBadRequest, "invalid platform")
+		return
+	}
+	if workspace != "" {
+		sessions, err = s.db.ListSessionsByWorkspace(workspace, limit)
+		if platform != "" {
+			filtered := sessions[:0]
+			for _, sess := range sessions {
+				if sess.Platform == platform {
+					filtered = append(filtered, sess)
+				}
+			}
+			sessions = filtered
 		}
+	} else if platform != "" {
 		sessions, err = s.db.ListSessionsByPlatform(platform, limit)
 	} else {
 		sessions, err = s.db.ListSessionsLimit(limit)

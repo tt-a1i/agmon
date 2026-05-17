@@ -228,6 +228,54 @@ func (s *DB) ListSessionsByPlatform(platform string, limit int) ([]SessionRow, e
 	return result, rows.Err()
 }
 
+// ListSessionsByWorkspace returns visible sessions whose cwd is exactly the
+// workspace path or a child directory of it.
+func (s *DB) ListSessionsByWorkspace(workspace string, limit int) ([]SessionRow, error) {
+	workspace = filepath.Clean(strings.TrimSpace(workspace))
+	if workspace == "" || workspace == "." {
+		return s.ListSessionsLimit(limit)
+	}
+	if limit <= 0 {
+		limit = DefaultSessionListLimit
+	}
+	workspaceLike := escapeLikePattern(workspace) + "/%"
+	rows, err := s.db.Query(`
+		SELECT session_id, platform, start_time, end_time, status,
+		       total_input_tokens, total_output_tokens, total_cost_usd,
+		       cwd, git_branch, latest_context_tokens, model,
+		       total_cache_read_tokens, total_cache_creation_tokens, tag
+		FROM sessions
+		WHERE (cwd = ? OR cwd LIKE ? ESCAPE '\')
+		  AND (
+		       status = 'active'
+		    OR total_input_tokens > 0 OR total_output_tokens > 0
+		    OR total_cache_read_tokens > 0 OR total_cache_creation_tokens > 0
+		  )
+		ORDER BY start_time DESC LIMIT ?
+	`, workspace, workspaceLike, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []SessionRow
+	for rows.Next() {
+		var r SessionRow
+		var startStr string
+		var endStr *string
+		if err := rows.Scan(&r.SessionID, &r.Platform, &startStr, &endStr,
+			&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD,
+			&r.CWD, &r.GitBranch, &r.LatestContextTokens, &r.Model,
+			&r.TotalCacheReadTokens, &r.TotalCacheCreationTokens, &r.Tag); err != nil {
+			return nil, err
+		}
+		r.StartTime = parseTime(startStr)
+		r.EndTime = parseTimePtr(endStr)
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 func (s *DB) ForEachSessionExportRow(from, to time.Time, fn func(SessionExportRow) error) error {
 	rows, err := s.db.Query(`
 		SELECT t.timestamp,

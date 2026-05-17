@@ -185,6 +185,13 @@ tr:hover td{background:var(--bg-hover)}
 .tag-chip:hover{color:var(--text);border-color:var(--text-faint)}
 .tag-chip.on{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
 .tag-chip.muted{color:var(--text-faint);font-style:italic}
+.workspace-bar{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;overflow-x:auto}
+.workspace-bar:empty{display:none}
+.workspace-chip{background:0;border:1px solid var(--border);border-radius:999px;padding:3px 10px;font:inherit;font-size:11px;font-weight:500;color:var(--text-muted);cursor:pointer;white-space:nowrap;transition:all .1s}
+.workspace-chip:hover{color:var(--text);border-color:var(--text-faint)}
+.workspace-chip.on{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
+.workspace-chip span{color:var(--text-faint);margin-left:4px}
+body.hide-workspace .workspace-bar{display:none}
 
 /* Insight */
 .insight{font-size:11px;color:var(--text-muted);margin-bottom:8px;display:flex;align-items:center;gap:4px}
@@ -420,6 +427,8 @@ tr:hover td{background:var(--bg-hover)}
   .sr-meta span:not(:first-child){display:none}
   /* Tag chips: single-row horizontal scroll on phones so a long tag list
      doesn't stack vertically and push the session list off-screen. */
+  .workspace-bar{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .workspace-chip{flex-shrink:0}
   .tag-chips{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
   .tag-chip{flex-shrink:0}
   /* Budget chips: same horizontal-scroll treatment. */
@@ -714,6 +723,7 @@ tr:hover td{background:var(--bg-hover)}
       <input class="sess-search" id="sessSearch" placeholder="Filter sessions or search all tool calls..." autocomplete="off">
       <div class="search-dropdown" id="searchDropdown" hidden></div>
     </div>
+    <div class="workspace-bar" id="workspaceChips"></div>
     <div class="tag-chips" id="tagChips"></div>
     <div class="session-controls">
       <div class="seg" id="sessionPlatform">
@@ -823,6 +833,7 @@ tr:hover td{background:var(--bg-hover)}
       <div class="settings-row"><label for="prefShowCwd">Show project path (cwd) in session list</label><input type="checkbox" class="settings-check" id="prefShowCwd" data-pref="showCwd"></div>
       <div class="settings-row"><label for="prefShowSpark">Show cost-trend sparkline on session rows</label><input type="checkbox" class="settings-check" id="prefShowSpark" data-pref="showSpark"></div>
       <div class="settings-row"><label for="prefShowProjection">Show projection card</label><input type="checkbox" class="settings-check" id="prefShowProjection" data-pref="showProjection"></div>
+      <div class="settings-row"><label for="prefShowWorkspace">Show workspace chips bar</label><input type="checkbox" class="settings-check" id="prefShowWorkspace" data-pref="showWorkspace"></div>
       <div class="settings-row"><label for="prefHighlightAnomalies">Highlight unusual cost sessions</label><input type="checkbox" class="settings-check" id="prefHighlightAnomalies" data-pref="highlightAnomalies"></div>
     </div>
     <div class="settings-section">
@@ -857,7 +868,7 @@ const COLORS=['#4f46e5','#06b6d4','#22c55e','#eab308','#ef4444','#f97316','#ec48
 const $=id=>document.getElementById(id);
 
 // Preferences — all persist to localStorage under 'tokenmeter-<key>'.
-const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1',showSpark:'1',showProjection:'1',highlightAnomalies:'1'};
+const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1',showSpark:'1',showProjection:'1',showWorkspace:'1',highlightAnomalies:'1'};
 function getPref(k){const v=localStorage.getItem('tokenmeter-'+k);return v==null?PREFS_DEFAULTS[k]:v}
 function setPref(k,v){localStorage.setItem('tokenmeter-'+k,v);applyPreferences()}
 
@@ -881,6 +892,7 @@ function applyPreferences(){
   document.body.classList.toggle('hide-cwd',getPref('showCwd')!=='1');
   document.body.classList.toggle('hide-spark',getPref('showSpark')!=='1');
   document.body.classList.toggle('hide-projection',getPref('showProjection')!=='1');
+  document.body.classList.toggle('hide-workspace',getPref('showWorkspace')!=='1');
   // Restart slow-poll backstop with current interval. 0 = disabled.
   if(slowPoll){clearInterval(slowPoll);slowPoll=null}
   const sec=parseInt(getPref('poll'),10);
@@ -911,10 +923,10 @@ document.addEventListener('click',e=>{
 document.addEventListener('change',e=>{
   const c=e.target.closest('.settings-check');
   if(!c)return;setPref(c.dataset.pref,c.checked?'1':'0');
-  if(c.dataset.pref==='highlightAnomalies'&&typeof renderSessions==='function')renderSessions(allS);
+  if((c.dataset.pref==='highlightAnomalies'||c.dataset.pref==='showWorkspace')&&typeof renderSessions==='function')renderSessions(allS);
 });
 let lastCostDays=null;
-let range=getPref('range'),sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null,lastProjection=null,tagFilter=null;
+let range=getPref('range'),sLim=20,allS=[],workspaceCatalog=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null,lastProjection=null,tagFilter=null,workspaceFilter=loadWorkspaceFilter();
 document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r===range));
 
 const fc=v=>v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4);
@@ -947,6 +959,40 @@ const TOOL_ICONS={Read:'📖',Edit:'✏️',Write:'📝',Bash:'⚡',Grep:'🔍',
 function toolIcon(name){return TOOL_ICONS[name]||'⚙️'}
 const SEARCH_KIND_ICONS={tool_param:'🔧',tool_result:'📤',file:'📁'};
 function searchKindIcon(kind){return SEARCH_KIND_ICONS[kind]||'🔎'}
+function normalizeWorkspacePath(path){const s=String(path||'').trim();const trimmed=s.replace(/\/+$/,'');return trimmed||(s.startsWith('/')?'/':'')}
+function workspaceFromHash(){
+  const h=location.hash;
+  if(!h.startsWith('#workspace='))return null;
+  try{return normalizeWorkspacePath(decodeURIComponent(h.substring(11)))}catch(e){return null}
+}
+function loadWorkspaceFilter(){
+  const fromHash=workspaceFromHash();
+  if(fromHash!==null){
+    if(fromHash)localStorage.setItem('tokenmeter-workspace',fromHash);else localStorage.removeItem('tokenmeter-workspace');
+    return fromHash||null;
+  }
+  const saved=normalizeWorkspacePath(localStorage.getItem('tokenmeter-workspace'));
+  return saved||null;
+}
+function workspaceFromCwd(cwd){
+  const c=normalizeWorkspacePath(cwd);
+  if(!c)return '';
+  const codeRoot=c.match(/^(\/Users\/[^/]+\/code\/[^/]+)/)||c.match(/^(\/home\/[^/]+\/code\/[^/]+)/);
+  if(codeRoot)return codeRoot[1];
+  const parts=c.split('/').filter(Boolean);
+  if(!parts.length)return '';
+  return '/'+parts.slice(0,Math.min(parts.length,3)).join('/');
+}
+function workspaceLabel(path){return normalizeWorkspacePath(path).replace(/^\/Users\/[^/]+\//,'~/').replace(/^\/home\/[^/]+\//,'~/')}
+function workspaceChoices(sessions){
+  const counts={};
+  (sessions||[]).forEach(s=>{const ws=workspaceFromCwd(s.cwd);if(ws)counts[ws]=(counts[ws]||0)+1});
+  return Object.keys(counts).sort((a,b)=>workspaceLabel(a).localeCompare(workspaceLabel(b))).map(path=>({path,count:counts[path],label:workspaceLabel(path)}));
+}
+function sessionsPath(workspace){
+  workspace=normalizeWorkspacePath(workspace==null?workspaceFilter:workspace);
+  return '/api/sessions'+(workspace?'?workspace='+encodeURIComponent(workspace):'');
+}
 function renderMd(s){let h=escHtml(s);h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');h=h.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');return h}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
 function renderDetailTagDisplay(s){
@@ -1137,6 +1183,35 @@ function renderOpsStrip(stats,costs,sessions){
 }
 
 // Sessions
+function renderWorkspaceChips(sessions){
+  const el=$('workspaceChips');if(!el)return;
+  if(getPref('showWorkspace')!=='1'){el.innerHTML='';return}
+  const choices=workspaceChoices(sessions);
+  if(!choices.length&&!workspaceFilter){el.innerHTML='';return}
+  const active=normalizeWorkspacePath(workspaceFilter);
+  let h=`<button class="workspace-chip${!active?' on':''}" onclick="setWorkspaceFilter(null)">All workspaces</button>`;
+  let hasActive=false;
+  for(const ws of choices){
+    const on=normalizeWorkspacePath(ws.path)===active;
+    if(on)hasActive=true;
+    h+=`<button class="workspace-chip${on?' on':''}" onclick='setWorkspaceFilter(${on?'null':jsString(ws.path)})' title="${escAttr(ws.path)}">📁 ${escHtml(ws.label)} <span>${ws.count} sessions</span></button>`;
+  }
+  if(active&&!hasActive)h+=`<button class="workspace-chip on" onclick='setWorkspaceFilter(null)' title="${escAttr(active)}">📁 ${escHtml(workspaceLabel(active))}</button>`;
+  el.innerHTML=h;
+}
+function setWorkspaceFilter(workspace,opts){
+  opts=opts||{};
+  const next=normalizeWorkspacePath(workspace)||null;
+  if(next===workspaceFilter&&!opts.force)return;
+  workspaceFilter=next;
+  if(workspaceFilter)localStorage.setItem('tokenmeter-workspace',workspaceFilter);else localStorage.removeItem('tokenmeter-workspace');
+  sLim=20;kbIdx=-1;
+  if(!opts.fromHash){
+    const target=workspaceFilter?'#workspace='+encodeURIComponent(workspaceFilter):'#';
+    if(location.hash!==target)history.pushState(null,null,target);
+  }
+  refreshSessions();
+}
 // Render the tag chip row above the session list. Chips are derived from
 // the current session set so they grow with what the user actually has
 // tagged. "All" is always present; "Untagged" only appears if some
@@ -1167,6 +1242,7 @@ function anomalySessionIDs(sessions){
 
 function renderSessions(sessions){
   allS=sessions||[];const el=$('sList'),cnt=$('sCnt'),btn=$('sMore');
+  renderWorkspaceChips(workspaceCatalog.length?workspaceCatalog:allS);
   renderTagChips(allS);
   let filtered=allS.slice();
   if(searchQ)filtered=filtered.filter(s=>{const q=searchQ.toLowerCase();return sname(s).toLowerCase().includes(q)||(s.tag||'').toLowerCase().includes(q)||(s.model||'').toLowerCase().includes(q)||s.platform.includes(q)});
@@ -1178,7 +1254,7 @@ function renderSessions(sessions){
   // Day filter UI
   const dfEl=$('dayFilter');
   if(dayFilter){const dt=new Date(dayFilter+'T12:00:00'),label=dt.toLocaleDateString('en',{weekday:'long',month:'short',day:'numeric'});dfEl.innerHTML=`<div class="day-filter" onclick="dayFilter=null;renderSessions(allS)">📅 ${label} <span class="x">×</span></div>`}else{dfEl.innerHTML=''}
-  if(!filtered.length){el.innerHTML='<div class="empty">'+(searchQ||sessionPlatform!=='all'||dayFilter?'No matching sessions':'No sessions yet')+'</div>';cnt.textContent=allS.length+' total';btn.style.display='none';return}
+  if(!filtered.length){el.innerHTML='<div class="empty">'+(searchQ||sessionPlatform!=='all'||dayFilter||workspaceFilter?'No matching sessions':'No sessions yet')+'</div>';cnt.textContent=allS.length+' total';btn.style.display='none';return}
   cnt.textContent=(filtered.length===allS.length?allS.length:filtered.length+'/'+allS.length)+' total';btn.style.display=filtered.length>sLim?'block':'none';
   const maxC=Math.max(...filtered.map(s=>s.cost_usd),.01);
   // Global 7-day trend sparkline reused per row. Computed once: SVG string
@@ -1504,8 +1580,9 @@ function renderProjection(projection){
   sub.innerHTML=`${fc(p.used_so_far||0)} this month · ${p.days_elapsed||0}/${p.days_in_month||0} days · <span class="projection-conf ${escAttr(conf)}">${icon}${escHtml(conf)} conf.</span>`;
 }
 
-function applyDashboardData(stats,costs,sessions,projection){
+function applyDashboardData(stats,costs,sessions,projection,catalog){
   lastStats=stats;lastCosts=costs;lastProjection=projection||lastProjection;
+  workspaceCatalog=Array.isArray(catalog)?catalog:(sessions||[]);
   $('webError').classList.remove('show');
 
   // Show overview (hide skeleton on first load)
@@ -1557,14 +1634,22 @@ function applyDashboardData(stats,costs,sessions,projection){
   if(costs.daily_costs&&costs.daily_costs.length>1){drawSparkline('sparkCost',costs.daily_costs.map(d=>d.Cost))}
 }
 
+async function fetchSessionsWithWorkspace(){
+  const scoped=api(sessionsPath());
+  if(!workspaceFilter)return {sessions:await scoped,catalog:null};
+  const[sessions,catalog]=await Promise.all([scoped,api('/api/sessions')]);
+  return {sessions,catalog};
+}
+
 async function refresh(){try{
-  const[stats,costs,sessions,projection]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),api('/api/sessions'),api('/api/projection')]);
-  applyDashboardData(stats,costs,sessions,projection);
+  const sessionsReq=fetchSessionsWithWorkspace();
+  const[stats,costs,sessionData,projection]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),sessionsReq,api('/api/projection')]);
+  applyDashboardData(stats,costs,sessionData.sessions,projection,sessionData.catalog);
 }catch(e){showRefreshError(e)}}
 
 async function refreshSessions(){try{
-  const sessions=await api('/api/sessions');
-  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,sessions,lastProjection);else renderSessions(sessions);
+  const sessionData=await fetchSessionsWithWorkspace();
+  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,sessionData.sessions,lastProjection,sessionData.catalog);else{workspaceCatalog=Array.isArray(sessionData.catalog)?sessionData.catalog:(sessionData.sessions||[]);renderSessions(sessionData.sessions)}
 }catch(e){showRefreshError(e)}}
 
 async function refreshCosts(){try{
@@ -1575,6 +1660,7 @@ async function refreshCosts(){try{
 async function refreshDetail(sid){if(sid)return openSession(sid)}
 
 async function refreshSessionSummary(id){if(!id)return;try{
+  if(workspaceFilter){await refreshSessions();return}
   const d=await api('/api/session/'+encodeURIComponent(id));
   if(!d||!d.session)return;
   const idx=allS.findIndex(s=>s.session_id===d.session.session_id);
@@ -1695,7 +1781,13 @@ window.addEventListener('scroll',()=>{$('scrollTop').classList.toggle('show',win
 // URL routing: #session/abc123
 function handleRoute(){
   const h=location.hash;
-  if(h.startsWith('#session/')){
+  if(h.startsWith('#workspace=')){
+    let ws='';
+    try{ws=normalizeWorkspacePath(decodeURIComponent(h.substring(11)))}catch(e){history.replaceState(null,null,'#');return}
+    if($('cmpView').classList.contains('show')){$('cmpView').classList.remove('show');$('overview').classList.remove('hide')}
+    if($('detail').classList.contains('show')){$('detail').classList.remove('show');$('overview').classList.remove('hide');detailSid=null;detailActive=false}
+    if(ws!==normalizeWorkspacePath(workspaceFilter))setWorkspaceFilter(ws,{fromHash:true});
+  }else if(h.startsWith('#session/')){
     let sid='';
     try{sid=decodeURIComponent(h.substring(9))}catch(e){history.replaceState(null,null,'#');return}
     if(sid&&sid!==detailSid)openSession(sid);
