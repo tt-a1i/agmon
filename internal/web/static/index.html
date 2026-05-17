@@ -515,6 +515,71 @@ tr:hover td{background:var(--bg-hover)}
 .budget-add{width:100%;background:0;border:1px dashed var(--border);border-radius:6px;padding:7px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
 .budget-add:hover{color:var(--text);border-color:var(--text-faint)}
 
+/* Export popover — small floating panel under the 📥 nav button. Same
+   visual language as settings (rounded box, accent for primary action)
+   but anchored, not modal. On mobile we promote to a full-screen modal
+   so radios have room. */
+.export-btn{background:0;border:0;width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:15px;line-height:1;color:var(--text-muted);transition:background .1s,color .1s}
+.export-btn:hover{background:var(--bg3);color:var(--text-strong)}
+.export-pop{position:fixed;top:48px;right:18px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:0 12px 36px rgba(0,0,0,.18);z-index:90;width:280px;display:none;animation:fadeUp .15s ease}
+.export-pop.show{display:block}
+.export-pop h4{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px}
+.export-pop-section{margin-bottom:12px}
+.export-pop-row{display:flex;gap:4px;flex-wrap:wrap}
+.export-pop-row button{flex:1;min-width:60px;background:0;border:1px solid var(--border);border-radius:5px;padding:5px 8px;font:inherit;font-size:11px;font-weight:500;color:var(--text-muted);cursor:pointer;transition:all .1s}
+.export-pop-row button.on{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
+.export-pop-download{width:100%;background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:6px;padding:8px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;margin-top:4px;transition:filter .1s}
+.export-pop-download:hover{filter:brightness(1.08)}
+@media(max-width:640px){
+  .export-pop{position:fixed;top:0;left:0;right:0;bottom:0;width:auto;border-radius:0;border:0;padding:24px}
+}
+
+/* Compare mode — sticky top bar appears when ≥1 session is shift-selected,
+   shows the count and the Compare action button when exactly 2 are chosen.
+   Selected rows get an accent left-border + light tint background. */
+.sr.selected{background:var(--accent-bg);border-left:3px solid var(--accent);padding-left:9px}
+.compare-bar{position:sticky;top:0;z-index:60;background:var(--bg2);border:1px solid var(--accent);border-radius:8px;padding:8px 14px;margin-bottom:12px;display:none;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--text-strong);box-shadow:0 4px 16px rgba(0,0,0,.06);animation:fadeUp .15s ease}
+.compare-bar.show{display:flex}
+.compare-bar-msg{flex:1}
+.compare-bar-btn{background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:5px;padding:5px 12px;font:inherit;font-size:11px;font-weight:600;cursor:pointer}
+.compare-bar-btn:disabled{background:var(--bg3);border-color:var(--border);color:var(--text-faint);cursor:not-allowed}
+.compare-bar-cancel{background:0;border:1px solid var(--border);border-radius:5px;padding:5px 10px;font:inherit;font-size:11px;font-weight:500;color:var(--text-muted);cursor:pointer}
+.compare-bar-cancel:hover{color:var(--text);border-color:var(--text-faint)}
+
+/* Compare full-screen overlay reuses the .detail container ergonomics
+   (.cmp-view ≈ .detail). Separate class keeps styles independent so
+   future detail tweaks don't accidentally break compare. */
+.cmp-view{display:none}
+.cmp-view.show{display:block}
+.cmp-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+.cmp-col{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px}
+.cmp-col-name{font-size:14px;font-weight:700;color:var(--text-strong);margin-bottom:4px;display:flex;align-items:center;gap:8px}
+.cmp-col-meta{font-size:11px;color:var(--text-muted);margin-bottom:12px}
+.cmp-col-cost{font-size:22px;font-weight:750;letter-spacing:-.3px}
+.cmp-delta{text-align:center;font-size:12px;color:var(--text-muted);margin-bottom:18px;padding:8px;background:var(--bg2);border-radius:6px}
+.cmp-delta b{color:var(--text-strong);font-weight:700;font-size:13px}
+.cmp-delta.up{color:var(--red)}
+.cmp-delta.dn{color:var(--green)}
+.cmp-section{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.cmp-section h4{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px}
+.cmp-tool-row{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--border-light);font-size:12px}
+.cmp-tool-row:last-child{border-bottom:0}
+.cmp-tool-name{flex:1;font-weight:500;color:var(--text-strong)}
+.cmp-tool-num{font-variant-numeric:tabular-nums;color:var(--text-muted);min-width:42px;text-align:right}
+.cmp-tool-delta{font-variant-numeric:tabular-nums;font-weight:600;min-width:48px;text-align:right}
+.cmp-tool-delta.up{color:var(--green)}
+.cmp-tool-delta.dn{color:var(--red)}
+.cmp-files{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+.cmp-files-cell{text-align:center;background:var(--bg3);padding:10px;border-radius:6px}
+.cmp-files-num{font-size:20px;font-weight:700;color:var(--text-strong);font-variant-numeric:tabular-nums}
+.cmp-files-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+.cmp-files-list{font-size:11px;color:var(--text);margin-top:8px;max-height:140px;overflow-y:auto;font-family:monospace;line-height:1.6}
+.cmp-files-list-head{font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-top:8px;margin-bottom:4px}
+@media(max-width:640px){
+  .cmp-cols{grid-template-columns:1fr}
+  .cmp-files{grid-template-columns:1fr 1fr 1fr;gap:8px}
+}
+
 /* Detail "By model" card — appears in session detail above the tabs when
    the session spans multiple models. Mimics the main dashboard model-bar
    visual but condensed for the narrower detail context. */
@@ -578,6 +643,7 @@ tr:hover td{background:var(--bg-hover)}
       <button class="rb" data-r="all">All</button>
     </div>
     <span class="updated" id="updated"></span>
+    <button class="export-btn" id="exportBtn" onclick="toggleExportPop()" title="Export data" aria-label="Export">📥</button>
     <button class="settings-btn" id="settingsBtn" onclick="document.getElementById('settingsModal').classList.add('show')" title="Settings" aria-label="Settings">⚙</button>
     <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
   </div>
@@ -621,6 +687,7 @@ tr:hover td{background:var(--bg-hover)}
   <div class="plats" id="plats"></div>
 
   <div class="sess-wrap">
+    <div class="compare-bar" id="compareBar"></div>
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-title">📋 Sessions</span><span class="section-sub" id="sCnt"></span></div>
     <div id="dayFilter"></div>
     <div class="search-shell">
@@ -670,6 +737,34 @@ tr:hover td{background:var(--bg-hover)}
   <div class="panel" id="panel-tools"><div class="panel-card"><div class="tool-toolbar" id="toolToolbar"></div><div id="dTools"></div></div></div>
   <div class="panel" id="panel-files"><div class="panel-card" id="dFiles"></div></div>
   <div class="panel" id="panel-agents"><div class="panel-card" id="dAgents"></div></div>
+</div>
+
+<div class="cmp-view" id="cmpView">
+  <div class="detail-nav">
+    <div class="back" id="cmpBackBtn" onclick="closeCompare()">← Back</div>
+    <div style="font-size:11px;color:var(--text-muted)">Comparing sessions</div>
+  </div>
+  <div id="cmpBody"></div>
+</div>
+
+<div class="export-pop" id="exportPop">
+  <div class="export-pop-section">
+    <h4>Range</h4>
+    <div class="export-pop-row" id="exportRange">
+      <button data-v="today">Today</button>
+      <button data-v="week">Week</button>
+      <button data-v="month">Month</button>
+      <button data-v="all">All</button>
+    </div>
+  </div>
+  <div class="export-pop-section">
+    <h4>Format</h4>
+    <div class="export-pop-row" id="exportFormat">
+      <button data-v="csv">CSV</button>
+      <button data-v="json">JSON</button>
+    </div>
+  </div>
+  <button class="export-pop-download" onclick="doExport()">Download</button>
 </div>
 
 <div class="footer">TokenMeter · Press <kbd>?</kbd> for keyboard shortcuts</div>
@@ -1056,7 +1151,8 @@ function renderSessions(sessions){
     const tokS=ft(s.input_tokens+s.output_tokens);
     const barW=(s.cost_usd/maxC*100).toFixed(1);
     const cwdShort=s.cwd?s.cwd.split('/').slice(-2).join('/'):'';
-    return`<div class="sr" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><span class="sr-spark" style="color:var(--text-faint)">${trendSpark}</span><div class="sr-arr">›</div></div>`
+    const selCls=(typeof compareSet!=='undefined'&&compareSet.has(s.session_id))?' selected':'';
+    return`<div class="sr${selCls}" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><span class="sr-spark" style="color:var(--text-faint)">${trendSpark}</span><div class="sr-arr">›</div></div>`
   }).join('');
 }
 $('sMore').onclick=()=>{sLim+=30;renderSessions(allS)};
@@ -1468,7 +1564,7 @@ document.querySelectorAll('#sessionPlatform button').forEach(b=>{b.onclick=()=>{
 let gPressed=false,gTimer=null;
 document.addEventListener('keydown',e=>{
   const inInput=document.activeElement.matches('input');
-  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if($('navR')&&$('navR').classList.contains('open')){$('navR').classList.remove('open');$('hamburgerBtn').classList.remove('open')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if(tagFilter!==null){tagFilter=null;renderSessions(allS)}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
+  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if($('exportPop')&&$('exportPop').classList.contains('show')){$('exportPop').classList.remove('show')}else if($('cmpView')&&$('cmpView').classList.contains('show')){closeCompare()}else if(compareSet.size>0){clearCompareSelect()}else if($('navR')&&$('navR').classList.contains('open')){$('navR').classList.remove('open');$('hamburgerBtn').classList.remove('open')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if(tagFilter!==null){tagFilter=null;renderSessions(allS)}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
   // g-prefix sequence: g d → dashboard / g s → stats / g m → messages.
   // First `g` arms for 1s; second key dispatches and consumes the prefix.
   if(!inInput&&!$('kbdModal').classList.contains('show')){
@@ -1510,8 +1606,14 @@ function handleRoute(){
     let sid='';
     try{sid=decodeURIComponent(h.substring(9))}catch(e){history.replaceState(null,null,'#');return}
     if(sid&&sid!==detailSid)openSession(sid);
-  }else if($('detail').classList.contains('show')){
-    $('detail').classList.remove('show');$('overview').classList.remove('hide');detailSid=null;detailActive=false;
+  }else if(h.startsWith('#compare/')){
+    let pair='';
+    try{pair=decodeURIComponent(h.substring(9))}catch(e){history.replaceState(null,null,'#');return}
+    const parts=pair.split(',');
+    if(parts.length===2&&parts[0]&&parts[1]&&!$('cmpView').classList.contains('show'))openCompare(parts[0],parts[1]);
+  }else{
+    if($('cmpView').classList.contains('show')){$('cmpView').classList.remove('show');$('overview').classList.remove('hide')}
+    if($('detail').classList.contains('show')){$('detail').classList.remove('show');$('overview').classList.remove('hide');detailSid=null;detailActive=false}
   }
 }
 window.addEventListener('hashchange',handleRoute);
@@ -1633,6 +1735,142 @@ async function deleteBudget(id){
 // work in the daemon.
 function startBudgetPolling(){if(budgetPollTimer)return;budgetPollTimer=setInterval(fetchBudgets,30000)}
 fetchBudgets();startBudgetPolling();
+
+// === Export popover ===
+// Defaults track the current dashboard range/CSV. The popover anchors below
+// the 📥 button; an outside-click or Esc closes it (the global keydown
+// handler picks up Esc through the closeAllOverlays chain).
+let exportRangeSel='week',exportFormatSel='csv';
+function setExportRange(v){exportRangeSel=v;document.querySelectorAll('#exportRange button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
+function setExportFormat(v){exportFormatSel=v;document.querySelectorAll('#exportFormat button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
+function toggleExportPop(){
+  const pop=$('exportPop');const opening=!pop.classList.contains('show');
+  if(opening){
+    // Sync defaults from current dashboard state on open so the user's
+    // mental model (current range) carries through.
+    setExportRange(range==='today'||range==='week'||range==='month'||range==='all'?range:'week');
+    setExportFormat(exportFormatSel||'csv');
+  }
+  pop.classList.toggle('show');
+}
+function doExport(){
+  // Browser handles the download because handleExport sets
+  // Content-Disposition: attachment. Closing the popover after dispatch
+  // is purely cosmetic — the download starts regardless.
+  window.location.href='/api/export?range='+encodeURIComponent(exportRangeSel)+'&format='+encodeURIComponent(exportFormatSel);
+  $('exportPop').classList.remove('show');
+}
+// Wire radio rows + outside-click close (delegated; doesn't compete with
+// the existing settings/budget click handlers because dataset is namespaced).
+document.addEventListener('click',e=>{
+  const r=e.target.closest('#exportRange button');if(r){setExportRange(r.dataset.v);return}
+  const f=e.target.closest('#exportFormat button');if(f){setExportFormat(f.dataset.v);return}
+  const pop=$('exportPop');const btn=$('exportBtn');
+  if(pop&&pop.classList.contains('show')&&!pop.contains(e.target)&&e.target!==btn&&!btn.contains(e.target)){
+    pop.classList.remove('show');
+  }
+});
+
+// === Compare mode ===
+// Shift+click toggles a session into compareSet. When exactly 2 are
+// selected the sticky bar exposes the Compare action. Comparing fetches
+// /api/compare and routes to hash #compare/A,B so the URL is shareable +
+// browser-back works.
+let compareSet=new Set();
+function toggleCompareSelect(id){
+  if(compareSet.has(id))compareSet.delete(id);else compareSet.add(id);
+  renderCompareBar();
+  // Re-render session list to repaint .selected highlights.
+  if(typeof renderSessions==='function'&&allS)renderSessions(allS);
+}
+function clearCompareSelect(){compareSet.clear();renderCompareBar();if(typeof renderSessions==='function'&&allS)renderSessions(allS)}
+function renderCompareBar(){
+  const bar=$('compareBar');if(!bar)return;
+  const n=compareSet.size;
+  if(n===0){bar.classList.remove('show');bar.innerHTML='';return}
+  bar.classList.add('show');
+  if(n===2){
+    const [a,b]=[...compareSet];
+    const aName=findSessionName(a),bName=findSessionName(b);
+    bar.innerHTML=`<span class="compare-bar-msg">Compare <b>${escHtml(aName)}</b> vs <b>${escHtml(bName)}</b></span><button class="compare-bar-btn" onclick="openCompare(${jsString(a)},${jsString(b)})">Compare</button><button class="compare-bar-cancel" onclick="clearCompareSelect()">Cancel</button>`;
+  }else if(n===1){
+    bar.innerHTML=`<span class="compare-bar-msg">1 session selected — shift-click another to compare</span><button class="compare-bar-cancel" onclick="clearCompareSelect()">Cancel</button>`;
+  }else{
+    bar.innerHTML=`<span class="compare-bar-msg">${n} selected — pick exactly 2 to compare</span><button class="compare-bar-cancel" onclick="clearCompareSelect()">Clear</button>`;
+  }
+}
+function findSessionName(id){const s=(allS||[]).find(x=>x.session_id===id);return s?sname(s):id.substring(0,8)}
+
+// Intercept shift+click in capture phase so we don't navigate to detail
+// before checking the modifier. Bound on #sList directly to keep scope tight.
+$('sList').addEventListener('click',e=>{
+  if(!e.shiftKey)return;
+  const row=e.target.closest('.sr');if(!row||!row.dataset.sid)return;
+  e.stopPropagation();e.preventDefault();
+  toggleCompareSelect(row.dataset.sid);
+},true);
+
+async function openCompare(aID,bID){
+  if(!aID||!bID)return;
+  $('overview').classList.add('hide');$('detail').classList.remove('show');
+  const view=$('cmpView');view.classList.add('show');
+  $('cmpBody').innerHTML='<div class="loading-card"><div class="spinner"></div>Loading comparison...</div>';
+  history.pushState(null,null,'#compare/'+encodeURIComponent(aID)+','+encodeURIComponent(bID));
+  try{
+    const d=await api('/api/compare?a='+encodeURIComponent(aID)+'&b='+encodeURIComponent(bID));
+    renderCompare(aID,bID,d);
+  }catch(e){
+    $('cmpBody').innerHTML=`<div class="loading-card">Failed to load: ${escHtml(e.message||'error')}</div>`;
+  }
+}
+function renderCompare(aID,bID,d){
+  const a=(allS||[]).find(x=>x.session_id===aID)||{session_id:aID,platform:'?'};
+  const b=(allS||[]).find(x=>x.session_id===bID)||{session_id:bID,platform:'?'};
+  const cost=d.cost_diff||{a:0,b:0,delta:0};
+  const tok=d.token_diff||{};
+  const tools=d.tool_diff||[],files=d.file_diff||{a_only:[],b_only:[],common:[]};
+  const deltaCls=cost.delta>0?'up':cost.delta<0?'dn':'';
+  const deltaPct=cost.a>0.005?` (${((cost.delta/cost.a)*100).toFixed(0)}%)`:'';
+  const toolRows=tools.map(t=>{
+    const delta=t.b_count-t.a_count;const cls=delta>0?'up':delta<0?'dn':'';
+    const sign=delta>0?'+':'';
+    return `<div class="cmp-tool-row"><span class="cmp-tool-name">${escHtml(t.name)}</span><span class="cmp-tool-num">A=${t.a_count}</span><span class="cmp-tool-num">B=${t.b_count}</span><span class="cmp-tool-delta ${cls}">${sign}${delta}</span></div>`;
+  }).join('')||'<div class="empty" style="padding:14px">No tool overlap</div>';
+  // File diffs: render counts as headline + collapsible details.
+  const aOnly=files.a_only||[],bOnly=files.b_only||[],common=files.common||[];
+  const fileList=(label,arr)=>arr.length?`<div class="cmp-files-list-head">${label} (${arr.length})</div><div class="cmp-files-list">${arr.slice(0,40).map(p=>escHtml(p)).join('<br>')}${arr.length>40?`<div style="color:var(--text-faint);margin-top:4px">… +${arr.length-40} more</div>`:''}</div>`:'';
+  $('cmpBody').innerHTML=`
+    <div class="cmp-cols">
+      <div class="cmp-col">
+        <div class="cmp-col-name">${escHtml(sname(a))} <span class="badge ${escAttr(a.platform)}">${escHtml(a.platform)}</span></div>
+        <div class="cmp-col-meta">A · ${escHtml(a.session_id.substring(0,8))}</div>
+        <div class="cmp-col-cost">${fc(cost.a||0)}</div>
+      </div>
+      <div class="cmp-col">
+        <div class="cmp-col-name">${escHtml(sname(b))} <span class="badge ${escAttr(b.platform)}">${escHtml(b.platform)}</span></div>
+        <div class="cmp-col-meta">B · ${escHtml(b.session_id.substring(0,8))}</div>
+        <div class="cmp-col-cost">${fc(cost.b||0)}</div>
+      </div>
+    </div>
+    <div class="cmp-delta ${deltaCls}">Δ <b>${cost.delta>=0?'+':''}${fc(Math.abs(cost.delta||0))}</b>${deltaPct} · Tokens Δ ${(tok.delta_input||0)>=0?'+':''}${ft(tok.delta_input||0)} in / ${(tok.delta_output||0)>=0?'+':''}${ft(tok.delta_output||0)} out</div>
+    <div class="cmp-section">
+      <h4>Tools (B − A)</h4>
+      ${toolRows}
+    </div>
+    <div class="cmp-section">
+      <h4>Files changed</h4>
+      <div class="cmp-files">
+        <div class="cmp-files-cell"><div class="cmp-files-num">${aOnly.length}</div><div class="cmp-files-label">A only</div></div>
+        <div class="cmp-files-cell"><div class="cmp-files-num">${bOnly.length}</div><div class="cmp-files-label">B only</div></div>
+        <div class="cmp-files-cell"><div class="cmp-files-num">${common.length}</div><div class="cmp-files-label">Both</div></div>
+      </div>
+      ${fileList('A only',aOnly)}${fileList('B only',bOnly)}${fileList('Both',common)}
+    </div>`;
+}
+function closeCompare(){
+  $('cmpView').classList.remove('show');$('overview').classList.remove('hide');
+  if(location.hash.startsWith('#compare/'))history.pushState(null,null,'#');
+}
 
 refresh();connectEvents();
 
