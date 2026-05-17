@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -272,21 +273,46 @@ func runDaemon() {
 
 	fmt.Printf("tokenmeter daemon running (socket: %s)\n", sockPath)
 
-	sigCh := make(chan os.Signal, 1)
+	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
+	fmt.Fprintln(os.Stderr, "\nstopping daemon... (press Ctrl+C again to force quit)")
+
+	// Watchdog goroutine: if Stop hangs, a second signal force-exits.
+	go func() {
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "force quit")
+		os.Exit(130)
+	}()
 
 	// Stop watchers first so no new events are sent to the batch channel,
 	// then stop daemon which drains remaining events before cleanup.
 	claudeLogWatcher.Stop()
 	codexWatcher.Stop()
 	d.Stop()
-	fmt.Println("\ndaemon stopped")
+	fmt.Println("daemon stopped")
 }
 
 func runEmit() {
+	// Redirect log output to a dedicated file so emit errors don't pollute
+	// Claude Code's hook stderr parsing. Open in append mode; if it fails,
+	// silence logging entirely to avoid leaking anything to Claude's stderr.
+	logPath := appdir.PathFor("emit.log", "emit.log")
+	// Self-truncate at ~10MB so a crash loop can't fill the disk. emit.log is
+	// a transient failure log, not an audit trail — losing history is fine.
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 10*1024*1024 {
+		_ = os.Truncate(logPath, 0)
+	}
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+		defer f.Close()
+		log.SetOutput(f)
+	} else {
+		log.SetOutput(io.Discard)
+	}
+
 	if err := runEmitWithReader(daemon.DefaultSocketPath(), os.Stdin); err != nil {
 		log.Printf("run emit: %v", err)
+		// Exit 0 so Claude Code never treats hook failure as a tool failure.
 		os.Exit(0)
 	}
 }
@@ -613,7 +639,9 @@ func runShare() {
 }
 
 func runPeriodReport(db *storage.DB, period string) {
-	now := time.Now().UTC()
+	// Local time boundaries align reports with the user's calendar — see
+	// storage/query.go P2-15 for why DB aggregates use 'localtime'.
+	now := time.Now()
 	var from, to time.Time
 	var title string
 
@@ -623,14 +651,14 @@ func runPeriodReport(db *storage.DB, period string) {
 		if wd == 0 {
 			wd = 7
 		}
-		from = time.Date(now.Year(), now.Month(), now.Day()-int(wd-1), 0, 0, 0, 0, time.UTC)
+		from = time.Date(now.Year(), now.Month(), now.Day()-int(wd-1), 0, 0, 0, 0, time.Local)
 		to = from.AddDate(0, 0, 7)
 		if to.After(now) {
 			to = now
 		}
 		title = fmt.Sprintf("Weekly Cost Report (%s ~ %s)", from.Format("2006-01-02"), now.Format("2006-01-02"))
 	case "monthly":
-		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
 		to = from.AddDate(0, 1, 0)
 		if to.After(now) {
 			to = now
@@ -753,10 +781,10 @@ func runWeb() error {
 	srv := web.NewServer(db, port)
 	fmt.Printf("TokenMeter web dashboard: http://localhost:%s\n", port)
 
-	sigCh := make(chan os.Signal, 1)
+	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	errCh := make(chan error, 1)
 
+	errCh := make(chan error, 1)
 	go func() {
 		errCh <- srv.Start()
 	}()
@@ -768,8 +796,21 @@ func runWeb() error {
 		}
 		return nil
 	case <-sigCh:
+		fmt.Println("\nshutting down web server... (press Ctrl+C again to force quit)")
+		// Watchdog: second signal force-quits if Shutdown hangs.
+		go func() {
+			<-sigCh
+			fmt.Fprintln(os.Stderr, "force quit")
+			os.Exit(130)
+		}()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+		if err := <-errCh; err != nil {
+			return fmt.Errorf("web server shutdown: %w", err)
+		}
 	}
-	fmt.Println("\nweb server stopped")
+	fmt.Println("web server stopped")
 	return nil
 }
 
@@ -834,8 +875,10 @@ func runCost() {
 		period = os.Args[2]
 	}
 
-	now := time.Now().UTC()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// Local time so "today/week/month" boundaries match the user's calendar
+	// (DB aggregates with DATE(timestamp, 'localtime')).
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 
 	var since *time.Time
 	var label string
@@ -851,13 +894,13 @@ func runCost() {
 		t := startOfDay.AddDate(0, 0, -int(wd-1))
 		since, label = &t, "This week"
 	case "month":
-		t := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		t := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
 		since, label = &t, "This month"
 	case "3month":
-		t := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -2, 0)
+		t := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local).AddDate(0, -2, 0)
 		since, label = &t, "Last 3 months"
 	case "year":
-		t := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		t := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.Local)
 		since, label = &t, "This year"
 	case "all":
 		since, label = nil, "All time"

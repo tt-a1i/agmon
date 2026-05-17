@@ -87,12 +87,48 @@ func (s *DB) Close() error {
 }
 
 func (s *DB) addColumnIfMissing(table, column, def string) {
-	_, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, def))
-	// SQLite (including modernc.org/sqlite) returns "duplicate column name: <col>"
-	// when the column already exists. We treat this as a no-op for idempotent migrations.
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+	// Check column existence up-front via PRAGMA table_info, which is stable
+	// across SQLite driver versions. The previous implementation parsed the
+	// driver's error string ("duplicate column name: ..."), which would break
+	// silently if modernc.org/sqlite ever changed the wording.
+	exists, err := s.columnExists(table, column)
+	if err != nil {
+		log.Printf("check column %s.%s: %v", table, column, err)
+		return
+	}
+	if exists {
+		return
+	}
+	if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, def)); err != nil {
 		log.Printf("alter table %s add %s: %v", table, column, err)
 	}
+}
+
+func (s *DB) columnExists(table, column string) (bool, error) {
+	// PRAGMA table_info is non-parameterizable on the table name in SQLite;
+	// table names come from string literals in migrate(), not user input.
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			typ       string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(name, column) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (s *DB) migrate() error {
@@ -155,8 +191,11 @@ func (s *DB) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id);
 		CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
 		CREATE INDEX IF NOT EXISTS idx_tool_calls_agent ON tool_calls(agent_id);
+		CREATE INDEX IF NOT EXISTS idx_tool_calls_start ON tool_calls(start_time);
 		CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id);
+		CREATE INDEX IF NOT EXISTS idx_token_usage_ts ON token_usage(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_file_changes_session ON file_changes(session_id);
+		CREATE INDEX IF NOT EXISTS idx_file_changes_ts ON file_changes(timestamp);
 	`)
 	if err != nil {
 		return err
@@ -175,17 +214,31 @@ func (s *DB) migrate() error {
 	s.addColumnIfMissing("token_usage", "cache_creation_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("token_usage", "cache_read_tokens", "INT NOT NULL DEFAULT 0")
 	s.addColumnIfMissing("file_changes", "source_id", "TEXT NOT NULL DEFAULT ''")
-	if err := s.normalizeTimeColumns(); err != nil {
-		return err
+
+	// Schema version controls one-shot migrations (time normalization, stale
+	// session fixup) so they don't re-scan all rows on every daemon restart.
+	// Bump schemaVersion when you add a new one-shot step.
+	const schemaVersion = 1
+	var userVersion int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&userVersion); err != nil {
+		return fmt.Errorf("read user_version: %w", err)
 	}
-	if _, err = s.db.Exec(`
-		UPDATE sessions
-		SET end_time = COALESCE(NULLIF(last_event_time, ''), start_time)
-		WHERE status = 'stale'
-		  AND COALESCE(NULLIF(last_event_time, ''), start_time) != ''
-		  AND (end_time IS NULL OR end_time = '' OR end_time > COALESCE(NULLIF(last_event_time, ''), start_time))
-	`); err != nil {
-		return err
+	if userVersion < schemaVersion {
+		if err := s.normalizeTimeColumns(); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(`
+			UPDATE sessions
+			SET end_time = COALESCE(NULLIF(last_event_time, ''), start_time)
+			WHERE status = 'stale'
+			  AND COALESCE(NULLIF(last_event_time, ''), start_time) != ''
+			  AND (end_time IS NULL OR end_time = '' OR end_time > COALESCE(NULLIF(last_event_time, ''), start_time))
+		`); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+			return fmt.Errorf("set user_version: %w", err)
+		}
 	}
 	_, err = s.db.Exec(`
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_token_usage_source
@@ -387,12 +440,21 @@ func (s *DB) EndAgent(agentID string, endTime time.Time) error {
 	return err
 }
 
-func (s *DB) InsertToolCallStart(callID, agentID, sessionID, toolName, params string, startTime time.Time) error {
-	_, err := s.db.Exec(`
+// InsertToolCallStart records a tool call's "pre" event. Returns whether a
+// new row was inserted — false means the call_id already existed (a Pre
+// re-emit, which Claude shouldn't normally do). Callers can use this to
+// measure how often re-emits occur before committing to an ON CONFLICT
+// DO UPDATE policy.
+func (s *DB) InsertToolCallStart(callID, agentID, sessionID, toolName, params string, startTime time.Time) (inserted bool, err error) {
+	res, err := s.db.Exec(`
 		INSERT OR IGNORE INTO tool_calls (call_id, agent_id, session_id, tool_name, params_summary, start_time)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, callID, agentID, sessionID, toolName, params, formatStorageTime(startTime))
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatus, durationMs int64, endTime time.Time) error {

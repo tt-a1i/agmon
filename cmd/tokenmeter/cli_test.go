@@ -251,7 +251,7 @@ func TestRunShareOutputsMarkdownRecap(t *testing.T) {
 	if err := db.UpsertAgent("agent-1", "share-session", "", "main", now); err != nil {
 		t.Fatalf("upsert agent: %v", err)
 	}
-	if err := db.InsertToolCallStart("call-1", "agent-1", "share-session", "Edit", "{}", now.Add(time.Minute)); err != nil {
+	if _, err := db.InsertToolCallStart("call-1", "agent-1", "share-session", "Edit", "{}", now.Add(time.Minute)); err != nil {
 		t.Fatalf("insert tool: %v", err)
 	}
 	if err := db.UpdateToolCallEnd("call-1", "ok", event.StatusSuccess, 1200, now.Add(2*time.Minute)); err != nil {

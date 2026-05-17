@@ -1,11 +1,14 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/tt-a1i/tokenmeter/internal/collector"
@@ -20,26 +23,47 @@ var staticFiles embed.FS
 type Server struct {
 	db   *storage.DB
 	addr string
+	srv  *http.Server // built in NewServer so Shutdown is race-free vs Start
 }
 
 func NewServer(db *storage.DB, port string) *Server {
-	return &Server{db: db, addr: "127.0.0.1:" + port}
-}
+	s := &Server{db: db, addr: "127.0.0.1:" + port}
 
-func (s *Server) Start() error {
 	mux := http.NewServeMux()
-
-	// Static files
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
-
-	// API endpoints
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/costs", s.handleCosts)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/session/", s.handleSessionDetail)
 
-	return http.ListenAndServe(s.addr, mux)
+	s.srv = &http.Server{
+		Addr:              s.addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	return s
+}
+
+// Start binds and runs the HTTP server. It blocks until the server stops,
+// returning nil on graceful shutdown and the underlying error otherwise.
+// Pair with Shutdown(ctx) for graceful termination — see runWeb in cmd/.
+// Read/Write timeouts cap slow clients; Idle timeout limits keep-alive hogs.
+func (s *Server) Start() error {
+	if err := s.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// Shutdown gracefully stops a Start()ed server, waiting up to ctx's deadline
+// for in-flight requests to complete. Safe to call before Start: it issues
+// Shutdown against a never-listening server, which returns nil immediately.
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.srv.Shutdown(ctx)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -74,7 +98,17 @@ type sessionJSON struct {
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	sessions, err := s.db.ListSessions()
+	// Optional ?limit=N — capped at 1000 to keep a single response bounded.
+	limit := storage.DefaultSessionListLimit
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			if n > 1000 {
+				n = 1000
+			}
+			limit = n
+		}
+	}
+	sessions, err := s.db.ListSessionsLimit(limit)
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -117,20 +151,23 @@ func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
 		rangeParam = "week"
 	}
 
-	now := time.Now().UTC()
+	// Use local time for bucket boundaries — SQL aggregates with
+	// DATE(timestamp, 'localtime'), so the from/to range must match the
+	// local calendar day or UTC+8 users miss their local-today early hours.
+	now := time.Now()
 	var from time.Time
 
 	switch rangeParam {
 	case "today":
-		from = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		from = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	case "week":
 		wd := now.Weekday()
 		if wd == 0 {
 			wd = 7
 		}
-		from = time.Date(now.Year(), now.Month(), now.Day()-int(wd-1), 0, 0, 0, 0, time.UTC)
+		from = time.Date(now.Year(), now.Month(), now.Day()-int(wd-1), 0, 0, 0, 0, time.Local)
 	case "month":
-		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
 	case "all":
 		firstDate, err := s.db.GetFirstTokenDate()
 		if err != nil {
@@ -138,12 +175,12 @@ func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if firstDate.IsZero() {
-			from = time.Now().UTC().AddDate(0, 0, -29)
+			from = now.AddDate(0, 0, -29)
 		} else {
 			from = firstDate
 		}
 	default:
-		from = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -6)
+		from = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 0, -6)
 	}
 
 	totalCost, err := s.db.GetCostBetween(from, now)
@@ -191,23 +228,26 @@ type statsResponse struct {
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	now := time.Now().UTC()
+	// Local time so the week boundary aligns with the user's calendar — see
+	// handleCosts for the same rationale.
+	now := time.Now()
 	wd := now.Weekday()
 	if wd == 0 {
 		wd = 7
 	}
-	startOfWeek := time.Date(now.Year(), now.Month(), now.Day()-int(wd-1), 0, 0, 0, 0, time.UTC)
+	startOfWeek := time.Date(now.Year(), now.Month(), now.Day()-int(wd-1), 0, 0, 0, 0, time.Local)
 
-	sessions, err := s.db.ListSessions()
+	// Active session count is a single COUNT(*) — no need to materialize all
+	// sessions just to filter and count them in Go.
+	activeCount, err := s.db.GetActiveSessionCount()
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	activeCount := 0
-	for _, sess := range sessions {
-		if sess.Status == "active" {
-			activeCount++
-		}
+	totalSessions, err := s.db.GetVisibleSessionCount()
+	if err != nil {
+		writeInternalError(w, err)
+		return
 	}
 
 	todayCost, err := s.db.GetTodayCost()
@@ -242,7 +282,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, statsResponse{
-		TotalSessions: len(sessions),
+		TotalSessions: totalSessions,
 		ActiveCount:   activeCount,
 		TodayCost:     todayCost,
 		WeekCost:      weekCost,
@@ -265,7 +305,12 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 
 	sess, found, err := s.db.GetSessionByIDPrefix(idPrefix)
 	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, err.Error())
+		if errors.Is(err, storage.ErrAmbiguousSessionPrefix) {
+			// User-input error: safe to surface the message (no SQL/table internals).
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeInternalError(w, err)
 		return
 	}
 	if !found {

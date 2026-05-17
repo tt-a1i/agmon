@@ -73,16 +73,18 @@ func startOfCalendarWeek(t time.Time) time.Time {
 	return t.AddDate(0, 0, -int(wd-1))
 }
 
-// startOfCalendarMonth returns the 1st day 00:00 UTC of the month containing t.
+// startOfCalendarMonth returns the 1st day 00:00 local of the month containing t.
 func startOfCalendarMonth(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.Local)
 }
 
 // rangeCutoff converts a timeRange to a *time.Time cutoff for DB queries.
+// Boundaries use the daemon host's local time so the chart's "today" aligns
+// with the user's calendar (storage layer aggregates with DATE(... 'localtime')).
 // Returns nil for rangeAll (meaning no time filter).
 func rangeCutoff(r timeRange) *time.Time {
-	now := time.Now().UTC()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	var t time.Time
 	switch r {
 	case rangeWeek:
@@ -92,7 +94,7 @@ func rangeCutoff(r timeRange) *time.Time {
 	case range3Month:
 		t = startOfCalendarMonth(startOfDay).AddDate(0, -2, 0)
 	case rangeYear:
-		t = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+		t = time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.Local)
 	case rangeAll:
 		return nil
 	default: // rangeToday
@@ -104,8 +106,8 @@ func rangeCutoff(r timeRange) *time.Time {
 // prevPeriodCost returns the cost for the period before the current range
 // (e.g. yesterday when range is Today, last week when range is Week).
 func prevPeriodCost(db *storage.DB, r timeRange) float64 {
-	now := time.Now().UTC()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	var from, to time.Time
 	switch r {
 	case rangeToday:

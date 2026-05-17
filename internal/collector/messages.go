@@ -194,8 +194,12 @@ func readCodexUserMessages(sessionID string, maxMessages int) []UserMessage {
 			continue
 		}
 
+		ts, ok := parseTimestamp(entry.Timestamp)
+		if !ok {
+			continue
+		}
 		messages = append(messages, UserMessage{
-			Timestamp: parseTimestamp(entry.Timestamp).Local(),
+			Timestamp: ts.Local(),
 			Content:   content,
 		})
 	}
@@ -216,13 +220,22 @@ func findCodexLogPath(sessionID string) string {
 			return p
 		}
 	}
-	// Slow path: recursive walk (Codex may store files in dated subdirs).
+	// Slow path: scan recent date partitions first (last 14 days × 2 buckets
+	// = 28 directories), then fall back to a full walk only if necessary.
+	// Codex names files rollout-<date>-<uuid>.jsonl and partitions by
+	// YYYY/MM/DD, so the recent window covers ~all active sessions a user
+	// would open from the TUI Messages view.
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return ""
 	}
 	codexDir := filepath.Join(home, ".codex")
 	suffix := sessionID + ".jsonl"
+
+	if p := findInRecentCodexDirs(codexDir, suffix); p != "" {
+		return p
+	}
+
 	for _, dir := range []string{"sessions", "archived_sessions"} {
 		baseDir := filepath.Join(codexDir, dir)
 		var match string
@@ -238,6 +251,33 @@ func findCodexLogPath(sessionID string) string {
 		})
 		if match != "" {
 			return match
+		}
+	}
+	return ""
+}
+
+// findInRecentCodexDirs scans ~/.codex/{sessions,archived_sessions}/YYYY/MM/DD
+// for the last 14 days. Most TUI Messages requests target recent sessions, so
+// this avoids walking thousands of historical partitions.
+func findInRecentCodexDirs(codexDir, suffix string) string {
+	now := time.Now()
+	for _, bucket := range []string{"sessions", "archived_sessions"} {
+		baseDir := filepath.Join(codexDir, bucket)
+		for i := 0; i < 14; i++ {
+			day := now.AddDate(0, 0, -i).UTC()
+			dir := filepath.Join(baseDir, day.Format("2006"), day.Format("01"), day.Format("02"))
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				if strings.HasSuffix(e.Name(), suffix) {
+					return filepath.Join(dir, e.Name())
+				}
+			}
 		}
 	}
 	return ""

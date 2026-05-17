@@ -41,6 +41,11 @@ func TestOpenNormalizesLegacySecondPrecisionTimes(t *testing.T) {
 	`, legacy, legacy); err != nil {
 		t.Fatalf("insert legacy session: %v", err)
 	}
+	// Simulate a pre-normalization DB by rewinding the schema version so the
+	// next Open triggers the one-shot normalize step.
+	if _, err := db.db.Exec("PRAGMA user_version = 0"); err != nil {
+		t.Fatalf("reset user_version: %v", err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
@@ -58,6 +63,42 @@ func TestOpenNormalizesLegacySecondPrecisionTimes(t *testing.T) {
 	want := "2026-01-02T12:00:00.000000000Z"
 	if startTime != want || lastEvent != want {
 		t.Fatalf("legacy times not normalized: start=%q last=%q want=%q", startTime, lastEvent, want)
+	}
+}
+
+// TestOpenSkipsNormalizeOnUpToDateSchema verifies the schema-version gate so
+// daemon restarts on a healthy DB don't re-scan all rows.
+func TestOpenSkipsNormalizeOnUpToDateSchema(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "skip.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	// Insert a row whose timestamp is intentionally NOT in the canonical
+	// format. If normalize re-ran, this would be rewritten.
+	const odd = "2026-01-02T12:00:00Z"
+	if _, err := db.db.Exec(`
+		INSERT INTO sessions (session_id, platform, start_time, last_event_time, status)
+		VALUES ('keep', 'claude', ?, ?, 'active')
+	`, odd, odd); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	db.Close()
+
+	// Reopen — schema version is already current, so normalize must be skipped.
+	db, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db.Close()
+
+	var start string
+	if err := db.db.QueryRow(`SELECT start_time FROM sessions WHERE session_id = 'keep'`).Scan(&start); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if start != odd {
+		t.Errorf("normalize re-ran on up-to-date schema: got %q want %q", start, odd)
 	}
 }
 
@@ -157,7 +198,7 @@ func TestToolCallCRUD(t *testing.T) {
 	db.UpsertSession("s1", event.PlatformClaude, now)
 
 	// Insert tool call
-	if err := db.InsertToolCallStart("tc1", "a1", "s1", "Edit", "src/main.go", now); err != nil {
+	if _, err := db.InsertToolCallStart("tc1", "a1", "s1", "Edit", "src/main.go", now); err != nil {
 		t.Fatalf("insert tool call: %v", err)
 	}
 
@@ -192,7 +233,7 @@ func TestToolCallDurationAutoCalculated(t *testing.T) {
 	db.UpsertSession("s1", event.PlatformClaude, now)
 
 	// Insert tool call start
-	if err := db.InsertToolCallStart("tc-auto", "a1", "s1", "Bash", "ls", now); err != nil {
+	if _, err := db.InsertToolCallStart("tc-auto", "a1", "s1", "Bash", "ls", now); err != nil {
 		t.Fatalf("insert tool call: %v", err)
 	}
 
@@ -438,7 +479,7 @@ func TestListAgentStatsSynthesizesMainAgentForCodexSession(t *testing.T) {
 	if err := db.UpsertSession("s-codex-no-agent", event.PlatformCodex, now); err != nil {
 		t.Fatalf("upsert session: %v", err)
 	}
-	if err := db.InsertToolCallStart("call-empty", "", "s-codex-no-agent", "apply_patch", "{}", now); err != nil {
+	if _, err := db.InsertToolCallStart("call-empty", "", "s-codex-no-agent", "apply_patch", "{}", now); err != nil {
 		t.Fatalf("insert tool call: %v", err)
 	}
 	if err := db.InsertTokenUsage("", "s-codex-no-agent", 1200, 300, 0, 0, "gpt-5-codex", 0.02, now, "src-codex-no-agent"); err != nil {
@@ -1085,14 +1126,16 @@ func TestSetSessionTag(t *testing.T) {
 
 func TestGetDailyCosts(t *testing.T) {
 	db := testDB(t)
-	now := time.Now().UTC()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	// Pick "today" at local-noon so the timestamp falls cleanly within the
+	// local-day bucket regardless of the test host's UTC offset.
+	now := time.Now()
+	todayLocal := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.Local)
 
-	db.UpsertSession("s1", event.PlatformClaude, today)
+	db.UpsertSession("s1", event.PlatformClaude, todayLocal)
 
-	// Insert costs for today and yesterday
-	db.InsertTokenUsage("a1", "s1", 1000, 500, 0, 0, "sonnet", 1.50, today, "src-today")
-	db.InsertTokenUsage("a1", "s1", 800, 400, 0, 0, "sonnet", 0.80, today.AddDate(0, 0, -1), "src-yesterday")
+	// Insert costs for today and yesterday (both local-noon, well inside their buckets).
+	db.InsertTokenUsage("a1", "s1", 1000, 500, 0, 0, "sonnet", 1.50, todayLocal, "src-today")
+	db.InsertTokenUsage("a1", "s1", 800, 400, 0, 0, "sonnet", 0.80, todayLocal.AddDate(0, 0, -1), "src-yesterday")
 
 	costs, err := db.GetDailyCosts(7)
 	if err != nil {
@@ -1102,10 +1145,10 @@ func TestGetDailyCosts(t *testing.T) {
 		t.Fatalf("expected 7 days, got %d", len(costs))
 	}
 
-	// Last entry should be today
+	// Last entry should be today (local calendar).
 	todayEntry := costs[6]
-	if todayEntry.Date != today.Format("2006-01-02") {
-		t.Errorf("last day: got %q, want %q", todayEntry.Date, today.Format("2006-01-02"))
+	if todayEntry.Date != todayLocal.Format("2006-01-02") {
+		t.Errorf("last day: got %q, want %q", todayEntry.Date, todayLocal.Format("2006-01-02"))
 	}
 	if todayEntry.Cost < 1.49 || todayEntry.Cost > 1.51 {
 		t.Errorf("today cost: got %f, want ~1.50", todayEntry.Cost)
@@ -1204,8 +1247,9 @@ func TestGetTopSessionsByCost(t *testing.T) {
 
 func TestGetDailyCostsBetween(t *testing.T) {
 	db := testDB(t)
-	now := time.Now().UTC()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	// Use local-noon for consistent bucket placement regardless of host TZ.
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.Local)
 	from := today.AddDate(0, 0, -2)
 	to := today.AddDate(0, 0, 1)
 
@@ -1217,20 +1261,22 @@ func TestGetDailyCostsBetween(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get daily costs between: %v", err)
 	}
-	if len(costs) != 3 {
-		t.Fatalf("expected 3 days, got %d", len(costs))
+	// Endpoint is inclusive: [today-2, today+1] returns 4 days. Tomorrow has
+	// no data so its cost is 0.
+	if len(costs) != 4 {
+		t.Fatalf("expected 4 days, got %d", len(costs))
 	}
-	// First day (2 days ago) should be 0
 	if costs[0].Cost != 0 {
-		t.Errorf("day 0 cost: got %f, want 0", costs[0].Cost)
+		t.Errorf("day 0 cost (2 days ago): got %f, want 0", costs[0].Cost)
 	}
-	// Yesterday should be ~1.00
 	if costs[1].Cost < 0.99 || costs[1].Cost > 1.01 {
-		t.Errorf("day 1 cost: got %f, want ~1.00", costs[1].Cost)
+		t.Errorf("day 1 cost (yesterday): got %f, want ~1.00", costs[1].Cost)
 	}
-	// Today should be ~2.50
 	if costs[2].Cost < 2.49 || costs[2].Cost > 2.51 {
-		t.Errorf("day 2 cost: got %f, want ~2.50", costs[2].Cost)
+		t.Errorf("day 2 cost (today): got %f, want ~2.50", costs[2].Cost)
+	}
+	if costs[3].Cost != 0 {
+		t.Errorf("day 3 cost (tomorrow): got %f, want 0", costs[3].Cost)
 	}
 }
 
@@ -1308,8 +1354,10 @@ func TestGetFirstTokenDate(t *testing.T) {
 		t.Errorf("empty table: want zero time, got %v", got)
 	}
 
-	now := time.Now().UTC()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	// Use local time so the truncated day-start matches GetFirstTokenDate's
+	// returned local-day anchor (P2-15).
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.Local)
 	older := today.AddDate(0, 0, -5)
 
 	db.UpsertSession("s1", event.PlatformClaude, today)
@@ -1320,7 +1368,7 @@ func TestGetFirstTokenDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("with data: %v", err)
 	}
-	want := time.Date(older.Year(), older.Month(), older.Day(), 0, 0, 0, 0, time.UTC)
+	want := time.Date(older.Year(), older.Month(), older.Day(), 0, 0, 0, 0, time.Local)
 	if !got.Equal(want) {
 		t.Errorf("first token date: got %v, want %v", got, want)
 	}

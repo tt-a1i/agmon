@@ -29,11 +29,22 @@ type CodexWatcher struct {
 	sessionPaths       map[string]string // sessionID -> file path; protected by pathsMu
 	sessionModels      map[string]string
 	sessionCWDs        map[string]string
-	pendingFileChanges map[string][]codexFileChange
+	pendingFileChanges map[string]codexPendingChange
 	pendingStarts      map[string]event.Event // deferred SessionStart events for empty sessions
 	initialDiscovery   bool
 	tickInterval       time.Duration
+	pendingTTL         time.Duration // GC pending entries older than this (default 2h)
+	gcInterval         int           // run gcPending every Nth scanLogs call
+	scanCount          int           // monotonic counter for GC throttling
 	scanFn             func()
+}
+
+// codexPendingChange tracks file changes parsed from a function_call until
+// the matching function_call_output is observed. insertedAt drives GC so an
+// orphaned entry (codex died mid-tool-call) doesn't leak forever.
+type codexPendingChange struct {
+	changes    []codexFileChange
+	insertedAt time.Time
 }
 
 func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
@@ -49,8 +60,14 @@ func NewCodexWatcher(emitFn func(event.Event)) *CodexWatcher {
 		seen:               make(map[string]int64),
 		sessionModels:      make(map[string]string),
 		sessionCWDs:        make(map[string]string),
-		pendingFileChanges: make(map[string][]codexFileChange),
+		pendingFileChanges: make(map[string]codexPendingChange),
 		tickInterval:       3 * time.Second,
+		// 2h aligned with MarkStaleSessionsEnded — a tool call still pending
+		// after that is almost certainly orphaned (codex crashed mid-call).
+		pendingTTL: 2 * time.Hour,
+		// 3s ticks × 10 = 30s GC cadence; map iteration is cheap but no
+		// reason to do it 20× per minute.
+		gcInterval: 10,
 	}
 }
 
@@ -126,6 +143,31 @@ func (w *CodexWatcher) scanLogs() {
 
 	w.scanKnownFiles()
 	w.scanRecentDirs()
+	w.scanCount++
+	if w.gcInterval > 0 && w.scanCount%w.gcInterval == 0 {
+		w.gcPending()
+	}
+}
+
+// gcPending drops orphaned pending entries whose insertedAt is older than
+// pendingTTL. These accumulate when a codex tool call starts (function_call
+// observed) but the matching function_call_output never arrives because the
+// codex process died, the JSONL was truncated, or the tool ran past TTL.
+func (w *CodexWatcher) gcPending() {
+	if w.pendingTTL <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-w.pendingTTL)
+	dropped := 0
+	for callID, p := range w.pendingFileChanges {
+		if p.insertedAt.Before(cutoff) {
+			delete(w.pendingFileChanges, callID)
+			dropped++
+		}
+	}
+	if dropped > 0 {
+		log.Printf("codex watcher: gc dropped %d orphaned pending file-change entries (TTL %s)", dropped, w.pendingTTL)
+	}
 }
 
 type codexFileJob struct {
@@ -140,7 +182,7 @@ type codexFileResult struct {
 	model        string
 	cwd          string
 	events       []event.Event
-	pendingCalls map[string][]codexFileChange
+	pendingCalls map[string]codexPendingChange
 	pendingStart *event.Event // deferred SessionStart when file has no substantive data
 }
 
@@ -275,7 +317,7 @@ func processCodexFileCollect(path string, size, startOffset int64, prevModel, pr
 
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := startOffset
-	pendingFileChanges := make(map[string][]codexFileChange)
+	pendingFileChanges := make(map[string]codexPendingChange)
 	linesRead := 0
 
 	for {
@@ -309,22 +351,26 @@ func processCodexFileCollect(path string, size, startOffset int64, prevModel, pr
 
 					payload, ok := decodeCodexResponsePayload(raw)
 					if ok && payload.Type == "function_call" {
-						pendingFileChanges[payload.CallID] = extractCodexFileChanges(payload.Name, payload.Arguments)
+						pendingFileChanges[payload.CallID] = codexPendingChange{
+							changes:    extractCodexFileChanges(payload.Name, payload.Arguments),
+							insertedAt: time.Now(),
+						}
 					}
 
 					for _, ev := range parseCodexEntryWithContext(raw, sessionID, result.model, result.cwd) {
 						result.events = append(result.events, ev)
 					}
 
+					ts, tsOk := parseTimestamp(raw.Timestamp)
 					if ok && payload.Type == "function_call_output" {
-						if payload.Status != "error" && payload.Status != "failed" {
-							for _, change := range pendingFileChanges[payload.CallID] {
+						if tsOk && payload.Status != "error" && payload.Status != "failed" {
+							for _, change := range pendingFileChanges[payload.CallID].changes {
 								result.events = append(result.events, event.Event{
 									ID:        fmt.Sprintf("%s:%s", payload.CallID, change.Path),
 									Type:      event.EventFileChange,
 									SessionID: sessionID,
 									Platform:  event.PlatformCodex,
-									Timestamp: parseTimestamp(raw.Timestamp),
+									Timestamp: ts,
 									Data: event.EventData{
 										FilePath:   change.Path,
 										ChangeType: change.ChangeType,
@@ -334,14 +380,14 @@ func processCodexFileCollect(path string, size, startOffset int64, prevModel, pr
 						}
 						delete(pendingFileChanges, payload.CallID)
 					}
-					if ok && payload.Type == "custom_tool_call" && payload.Name == "apply_patch" && payload.Status != "error" && payload.Status != "failed" {
+					if tsOk && ok && payload.Type == "custom_tool_call" && payload.Name == "apply_patch" && payload.Status != "error" && payload.Status != "failed" {
 						for _, change := range extractPatchFileChanges(payload.Input) {
 							result.events = append(result.events, event.Event{
 								ID:        fmt.Sprintf("%s:%s", codexPayloadCallID(payload, raw, sessionID), change.Path),
 								Type:      event.EventFileChange,
 								SessionID: sessionID,
 								Platform:  event.PlatformCodex,
-								Timestamp: parseTimestamp(raw.Timestamp),
+								Timestamp: ts,
 								Data: event.EventData{
 									FilePath:   change.Path,
 									ChangeType: change.ChangeType,
@@ -407,7 +453,10 @@ func (w *CodexWatcher) scanKnownFiles() {
 			w.removeSessionPath(path)
 			continue
 		}
-		if info.Size() <= w.seen[path] {
+		// Only short-circuit when the file is unchanged. Shrunk files (size <
+		// offset = truncation/rotation) must reach processFile so it can reset
+		// the offset to 0 and re-scan.
+		if info.Size() == w.seen[path] {
 			continue
 		}
 		w.processFile(path, info.Size())
@@ -441,7 +490,9 @@ func (w *CodexWatcher) scanRecentDirs() {
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
-			if offset, seen := w.seen[path]; seen && info.Size() <= offset {
+			// Same as scanKnownFiles: only `==` short-circuits; shrunk files
+			// must reach processFile for truncation detection.
+			if offset, seen := w.seen[path]; seen && info.Size() == offset {
 				continue
 			}
 			w.processFile(path, info.Size())
@@ -478,8 +529,17 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 	w.ensureState()
 
 	offset := w.seen[path]
-	if offset > 0 && size <= offset {
-		return
+	// Detect truncation/rotation: file shrank since last scan. Reset to read
+	// from the start; dedup via source_id keeps already-stored rows from
+	// double-counting. Mirror w.seen so a subsequent same-size scan can
+	// short-circuit cleanly (parity with claude_log.go).
+	if offset > 0 && size < offset {
+		log.Printf("codex watcher: file %s shrank (%d → %d), restarting from offset 0", path, offset, size)
+		offset = 0
+		w.seen[path] = 0
+	}
+	if size == offset {
+		return // no new bytes
 	}
 
 	f, err := os.Open(path)
@@ -526,22 +586,26 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 
 					payload, ok := decodeCodexResponsePayload(raw)
 					if ok && payload.Type == "function_call" {
-						w.pendingFileChanges[payload.CallID] = extractCodexFileChanges(payload.Name, payload.Arguments)
+						w.pendingFileChanges[payload.CallID] = codexPendingChange{
+							changes:    extractCodexFileChanges(payload.Name, payload.Arguments),
+							insertedAt: time.Now(),
+						}
 					}
 
 					for _, ev := range parseCodexEntryWithContext(raw, sessionID, w.sessionModels[sessionID], w.sessionCWDs[sessionID]) {
 						bufferedEvents = append(bufferedEvents, ev)
 					}
 
+					ts, tsOk := parseTimestamp(raw.Timestamp)
 					if ok && payload.Type == "function_call_output" {
-						if payload.Status != "error" && payload.Status != "failed" {
-							for _, change := range w.pendingFileChanges[payload.CallID] {
+						if tsOk && payload.Status != "error" && payload.Status != "failed" {
+							for _, change := range w.pendingFileChanges[payload.CallID].changes {
 								bufferedEvents = append(bufferedEvents, event.Event{
 									ID:        fmt.Sprintf("%s:%s", payload.CallID, change.Path),
 									Type:      event.EventFileChange,
 									SessionID: sessionID,
 									Platform:  event.PlatformCodex,
-									Timestamp: parseTimestamp(raw.Timestamp),
+									Timestamp: ts,
 									Data: event.EventData{
 										FilePath:   change.Path,
 										ChangeType: change.ChangeType,
@@ -551,14 +615,14 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 						}
 						delete(w.pendingFileChanges, payload.CallID)
 					}
-					if ok && payload.Type == "custom_tool_call" && payload.Name == "apply_patch" && payload.Status != "error" && payload.Status != "failed" {
+					if tsOk && ok && payload.Type == "custom_tool_call" && payload.Name == "apply_patch" && payload.Status != "error" && payload.Status != "failed" {
 						for _, change := range extractPatchFileChanges(payload.Input) {
 							bufferedEvents = append(bufferedEvents, event.Event{
 								ID:        fmt.Sprintf("%s:%s", codexPayloadCallID(payload, raw, sessionID), change.Path),
 								Type:      event.EventFileChange,
 								SessionID: sessionID,
 								Platform:  event.PlatformCodex,
-								Timestamp: parseTimestamp(raw.Timestamp),
+								Timestamp: ts,
 								Data: event.EventData{
 									FilePath:   change.Path,
 									ChangeType: change.ChangeType,
@@ -684,7 +748,14 @@ func parseCodexEntry(entry codexLogEntry, sessionID string) []event.Event {
 }
 
 func parseCodexEntryWithContext(entry codexLogEntry, sessionID, model, cwd string) []event.Event {
-	ts := parseTimestamp(entry.Timestamp)
+	// Every output below uses ts as Event.Timestamp (drives daemon dedup and
+	// aggregation) or as part of a synthetic ID. Substituting time.Now() on
+	// parse failure would let stale or malformed log lines land in today's
+	// stats; dropping the entry is the safer universal choice.
+	ts, ok := parseTimestamp(entry.Timestamp)
+	if !ok {
+		return nil
+	}
 
 	switch entry.Type {
 	case "session_meta":
@@ -840,15 +911,19 @@ func parseCodexEntryWithContext(entry codexLogEntry, sessionID, model, cwd strin
 	return nil
 }
 
-func parseTimestamp(s string) time.Time {
+// parseTimestamp parses RFC3339(Nano) and returns (zero, false) on failure.
+// Callers must decide whether to skip the entry or substitute a sentinel —
+// silently falling back to time.Now() would let malformed historical logs
+// pollute today's cost/dedup buckets.
+func parseTimestamp(s string) (time.Time, bool) {
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
 		t, err = time.Parse(time.RFC3339, s)
 		if err != nil {
-			return time.Now()
+			return time.Time{}, false
 		}
 	}
-	return t
+	return t, true
 }
 
 // CodexPricing returns per-million-token pricing for a Codex model.
@@ -917,7 +992,7 @@ func (w *CodexWatcher) ensureState() {
 		w.sessionCWDs = make(map[string]string)
 	}
 	if w.pendingFileChanges == nil {
-		w.pendingFileChanges = make(map[string][]codexFileChange)
+		w.pendingFileChanges = make(map[string]codexPendingChange)
 	}
 	if w.pendingStarts == nil {
 		w.pendingStarts = make(map[string]event.Event)
@@ -952,7 +1027,10 @@ func codexPayloadCallID(payload codexResponsePayload, entry codexLogEntry, sessi
 	if payload.CallID != "" {
 		return payload.CallID
 	}
-	ts := parseTimestamp(entry.Timestamp)
+	ts, ok := parseTimestamp(entry.Timestamp)
+	if !ok {
+		ts = time.Now()
+	}
 	return fmt.Sprintf("codex-custom-%s-%s-%d", sessionID, payload.Name, ts.UnixNano())
 }
 
@@ -984,6 +1062,10 @@ func extractPatchFileChanges(patch string) []codexFileChange {
 	var changes []codexFileChange
 	seen := make(map[string]event.FileChangeType)
 	scanner := bufio.NewScanner(strings.NewReader(patch))
+	// Default bufio.Scanner max token size is 64KB. apply_patch bodies can
+	// contain long minified/base64 lines that exceed it; raise the cap so
+	// trailing "*** Update File:" headers are not silently skipped.
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		switch {
@@ -994,6 +1076,9 @@ func extractPatchFileChanges(patch string) []codexFileChange {
 		case strings.HasPrefix(line, "*** Delete File: "):
 			recordPatchFileChange(seen, &changes, strings.TrimSpace(strings.TrimPrefix(line, "*** Delete File: ")), event.FileDelete)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("extractPatchFileChanges scan: %v", err)
 	}
 	return changes
 }

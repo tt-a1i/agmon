@@ -20,11 +20,14 @@ case "$OS" in
   *) echo "Unsupported OS: $OS"; exit 1 ;;
 esac
 
-# Get latest release tag
-LATEST=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+# Resolve latest release tag via GitHub's redirect endpoint (avoids fragile
+# JSON-grepping and works without jq).
+LATEST=$(curl -sI -o /dev/null -w "%{redirect_url}" "https://github.com/${REPO}/releases/latest" | awk -F'/' '{print $NF}' | tr -d '\r\n')
 
-if [ -z "$LATEST" ]; then
-  echo "Error: could not determine latest release"
+# Sanity-check the tag format. If the repo has no releases, GitHub redirects
+# to /releases (no tag), which would otherwise produce a bogus download URL.
+if [ -z "$LATEST" ] || ! echo "$LATEST" | grep -q '^v'; then
+  echo "Error: could not determine latest release (got: ${LATEST:-empty})"
   exit 1
 fi
 

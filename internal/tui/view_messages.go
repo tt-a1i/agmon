@@ -59,17 +59,28 @@ func (m Model) viewMessages(width int) string {
 				if rawLine == "" {
 					continue
 				}
-				for len(rawLine) > 0 {
-					chunk := displayTruncate(rawLine, width-10)
-					actual := chunk
-					if strings.HasSuffix(chunk, "...") {
-						actual = chunk[:len(chunk)-3]
-					}
-					b.WriteString(mutedStyle.Render("         "+actual) + "\n")
-					if len(actual) >= len(rawLine) {
+				// Wrap long lines by chunks that fit width-10. displayTruncate
+				// returns at a rune boundary, so byte slicing the chunk's
+				// "...-stripped" prefix is safe (no half rune).
+				remaining := rawLine
+				for len(remaining) > 0 {
+					chunk := displayTruncate(remaining, width-10)
+					// Content equality (not length): when displayTruncate cuts at
+					// i == len(s)-3 the result `s[:i] + "..."` has the SAME length
+					// as the input but isn't `==` it. Length-only comparison would
+					// drop the trailing 3 bytes of user content on this boundary.
+					if chunk == remaining {
+						b.WriteString(mutedStyle.Render("         "+chunk) + "\n")
 						break
 					}
-					rawLine = rawLine[len(actual):]
+					// displayTruncate appended "..." — strip those 3 ASCII bytes
+					// to get the rune-aligned visible prefix for continuation.
+					visible := chunk[:len(chunk)-3]
+					b.WriteString(mutedStyle.Render("         "+visible) + "\n")
+					if len(visible) == 0 {
+						break // degenerate width: nothing fits
+					}
+					remaining = remaining[len(visible):]
 				}
 			}
 			continue

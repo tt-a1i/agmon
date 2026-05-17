@@ -154,13 +154,6 @@ func contextPercent(latest int, model string) string {
 	}
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}
-
 func displayTruncate(s string, maxCols int) string {
 	if maxCols < 4 {
 		maxCols = 4

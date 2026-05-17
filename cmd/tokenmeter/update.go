@@ -18,7 +18,8 @@ import (
 	"time"
 )
 
-const releaseAPI = "https://api.github.com/repos/tt-a1i/tokenmeter/releases/latest"
+// releaseAPI is a var (not const) so tests can point it at an httptest.Server.
+var releaseAPI = "https://api.github.com/repos/tt-a1i/tokenmeter/releases/latest"
 
 type ghRelease struct {
 	TagName string    `json:"tag_name"`

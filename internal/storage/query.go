@@ -2,10 +2,16 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// ErrAmbiguousSessionPrefix is returned by GetSessionByIDPrefix when the prefix matches
+// more than one session. Callers (e.g. HTTP handlers) can use errors.Is to
+// distinguish user-input errors from system errors without parsing strings.
+var ErrAmbiguousSessionPrefix = errors.New("ambiguous session prefix")
 
 type SessionRow struct {
 	SessionID                string
@@ -94,7 +100,22 @@ func formatQueryTime(t time.Time) string {
 	return formatStorageTime(t)
 }
 
+// DefaultSessionListLimit caps the row count for ListSessions(). Use
+// ListSessionsLimit when a different cap is needed (e.g. the web dashboard
+// asking for more than the default).
+const DefaultSessionListLimit = 200
+
 func (s *DB) ListSessions() ([]SessionRow, error) {
+	return s.ListSessionsLimit(DefaultSessionListLimit)
+}
+
+// ListSessionsLimit returns up to limit "visible" sessions ordered by start
+// time desc. A session is visible when it's active or has accumulated any
+// tokens. Pass <= 0 to use DefaultSessionListLimit.
+func (s *DB) ListSessionsLimit(limit int) ([]SessionRow, error) {
+	if limit <= 0 {
+		limit = DefaultSessionListLimit
+	}
 	rows, err := s.db.Query(`
 		SELECT session_id, platform, start_time, end_time, status,
 		       total_input_tokens, total_output_tokens, total_cost_usd,
@@ -104,8 +125,8 @@ func (s *DB) ListSessions() ([]SessionRow, error) {
 		WHERE status = 'active'
 		   OR total_input_tokens > 0 OR total_output_tokens > 0
 		   OR total_cache_read_tokens > 0 OR total_cache_creation_tokens > 0
-		ORDER BY start_time DESC LIMIT 200
-	`)
+		ORDER BY start_time DESC LIMIT ?
+	`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +168,7 @@ func (s *DB) GetSessionByIDPrefix(prefix string) (SessionRow, bool, error) {
 		return SessionRow{}, false, err
 	}
 	if count > 1 {
-		return SessionRow{}, false, fmt.Errorf("ambiguous prefix %q matches %d sessions; use more characters", prefix, count)
+		return SessionRow{}, false, fmt.Errorf("%w: %q matches %d sessions; use more characters", ErrAmbiguousSessionPrefix, prefix, count)
 	}
 
 	row := s.db.QueryRow(`
@@ -414,6 +435,20 @@ func (s *DB) GetActiveSessionCount() (int, error) {
 	return count, err
 }
 
+// GetVisibleSessionCount counts the sessions that ListSessions would return
+// (ignoring its LIMIT), so /api/stats "total sessions" stays consistent with
+// what the dashboard list actually shows. Filter must match ListSessions.
+func (s *DB) GetVisibleSessionCount() (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM sessions
+		WHERE status = 'active'
+		   OR total_input_tokens > 0 OR total_output_tokens > 0
+		   OR total_cache_read_tokens > 0 OR total_cache_creation_tokens > 0
+	`).Scan(&count)
+	return count, err
+}
+
 func (s *DB) GetAgentTokenSummary(agentID string) (inputTokens, outputTokens int, costUSD float64, err error) {
 	err = s.db.QueryRow(`
 		SELECT COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cost_usd), 0)
@@ -455,9 +490,13 @@ func (s *DB) GetTodayCost() (float64, error) {
 	return s.GetCostSince(&t)
 }
 
+// startOfToday returns the start of "today" in the daemon host's local
+// time zone. Returned in time.Local so AddDate and Format produce calendar
+// dates the user expects; callers that compare against stored timestamps
+// already pass them through formatQueryTime which UTC-normalizes.
 func startOfToday() time.Time {
-	now := time.Now().UTC()
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	now := time.Now()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 }
 
 // ModelCostRow holds cost data for a single model.
@@ -537,15 +576,18 @@ func (s *DB) GetTopSessionsByCost(from, to time.Time, limit int) ([]TopSessionRo
 
 // GetDailyCostsBetween returns per-day cost totals between from and to.
 // Results are ordered oldest-first, with zero-filled gaps.
+//
+// Bucketing is in the daemon-host local time zone so a UTC+8 user's
+// "Today" matches calendar-local midnight (not UTC midnight). The stored
+// timestamps remain UTC strings; SQL converts at query time via SQLite's
+// 'localtime' modifier.
 func (s *DB) GetDailyCostsBetween(from, to time.Time) ([]DailyCost, error) {
-	from = from.UTC()
-	to = to.UTC()
 	rows, err := s.db.Query(`
-		SELECT DATE(timestamp) as day, SUM(cost_usd) as cost
+		SELECT DATE(timestamp, 'localtime') as day, SUM(cost_usd) as cost
 		FROM token_usage
 		WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY day ORDER BY day ASC
-	`, formatQueryTime(from), formatQueryTime(to))
+	`, formatQueryTime(from.UTC()), formatQueryTime(to.UTC()))
 	if err != nil {
 		return nil, err
 	}
@@ -564,8 +606,19 @@ func (s *DB) GetDailyCostsBetween(from, to time.Time) ([]DailyCost, error) {
 		return nil, err
 	}
 
+	// Zero-fill in local time so the iteration keys align with the SQL
+	// 'localtime' DATE() output.
+	fromLocal := from.In(time.Local)
+	toLocal := to.In(time.Local)
+	startDay := time.Date(fromLocal.Year(), fromLocal.Month(), fromLocal.Day(), 0, 0, 0, 0, time.Local)
+	endDay := time.Date(toLocal.Year(), toLocal.Month(), toLocal.Day(), 0, 0, 0, 0, time.Local)
+
+	// Iterate inclusive of endDay so the partial current day (where `to` is
+	// "now" before midnight) still appears in the chart with whatever cost
+	// has accumulated so far. Otherwise users see an empty bar for today
+	// when their query bounds are [past, now] within a single local day.
 	var result []DailyCost
-	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+	for d := startDay; !d.After(endDay); d = d.AddDate(0, 0, 1) {
 		key := d.Format("2006-01-02")
 		result = append(result, DailyCost{Date: key, Cost: costMap[key]})
 	}
@@ -605,7 +658,9 @@ type DailyCost struct {
 	Cost float64
 }
 
-// GetFirstTokenDate returns the earliest date in token_usage, truncated to day start (UTC).
+// GetFirstTokenDate returns the earliest date in token_usage, truncated to
+// the local calendar day. Used by Web "all-time" range to anchor the chart
+// at the user's first calendar day, matching the local-bucketed aggregations.
 // Returns zero time if the table is empty.
 func (s *DB) GetFirstTokenDate() (time.Time, error) {
 	var ts *string
@@ -615,16 +670,16 @@ func (s *DB) GetFirstTokenDate() (time.Time, error) {
 	if ts == nil || *ts == "" {
 		return time.Time{}, nil
 	}
-	t := parseTime(*ts).UTC()
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC), nil
+	t := parseTime(*ts).In(time.Local)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local), nil
 }
 
 // GetDailyCosts returns per-day cost totals for the last N days (including today).
-// Results are ordered oldest-first.
+// Results are ordered oldest-first. Buckets use the daemon host's local time.
 func (s *DB) GetDailyCosts(days int) ([]DailyCost, error) {
 	since := startOfToday().AddDate(0, 0, -(days - 1))
 	rows, err := s.db.Query(`
-		SELECT DATE(timestamp) as day, SUM(cost_usd) as cost
+		SELECT DATE(timestamp, 'localtime') as day, SUM(cost_usd) as cost
 		FROM token_usage
 		WHERE timestamp >= ?
 		GROUP BY day ORDER BY day ASC

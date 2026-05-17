@@ -206,11 +206,23 @@ tokenmeter web --port 9000  # 自定义端口
 ```
 ~/.tokenmeter/
 ├── data/tokenmeter.db    # SQLite 数据库
-├── tokenmeter.sock       # Unix domain socket
-└── daemon.pid       # PID 锁文件
+├── tokenmeter.sock       # Unix domain socket（0600，仅当前用户可连接）
+├── emit.log              # hook emit 错误日志（自动 10MB 截断）
+└── daemon.pid            # PID 锁文件
 ```
 
 从旧版升级时，如果本机已有 `~/.agmon/` 且尚未创建 `~/.tokenmeter/`，TokenMeter 会继续读取旧目录，避免历史数据丢失。
+
+## 升级提示（v0.7.0+）
+
+- **每日费用按本地时区分桶** — 之前按 UTC 0 点切日，UTC+8 用户上午看到的"今天"实际从昨天下午 4 点开始；v0.7 起 dashboard / Web 图表按本机日历日分桶。历史总额不变，**单日柱状值会因为切桶边界变化**。
+- **首次启动会建索引** — 老库 reopen 时新建 3 个时间索引（token_usage / tool_calls / file_changes 的 timestamp）。几十万行的库可能多花几秒到十几秒，一次性。
+- **Unix socket 现为 0600** — 之前是 0644，本机其他用户可能注入伪事件；新版 chmod 仅当前用户可 connect。无需手动操作。
+
+## 配置 / 环境变量
+
+- `INSTALL_DIR`（仅 `install.sh`）— 覆盖默认 `/usr/local/bin` 安装位置。
+- HTTP 端口通过 `tokenmeter web --port N` 指定；Web Dashboard `?limit=N` query 参数可拉取 200 以外的 session 数量（cap 1000）。
 
 ## 卸载
 

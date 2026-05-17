@@ -135,7 +135,10 @@ func (w *ClaudeLogWatcher) scanLogs() {
 				continue
 			}
 			path := filepath.Join(projectPath, f.Name())
-			if offset, seen := w.seen[path]; seen && info.Size() <= offset {
+			// Only `==` short-circuits; shrunk files (size < offset =
+			// truncation/rotation) must reach processFile so it can reset
+			// the offset to 0 and re-scan.
+			if offset, seen := w.seen[path]; seen && info.Size() == offset {
 				continue
 			}
 			sessionID := strings.TrimSuffix(f.Name(), ".jsonl")
@@ -265,38 +268,11 @@ func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGit
 				var entry claudeLogEntry
 				if json.Unmarshal(line, &entry) == nil {
 					parsedLine = true
-					if result.gitBranch == "" && entry.GitBranch != "" {
-						result.gitBranch = entry.GitBranch
-					}
-
-					if entry.Type == "assistant" && entry.Message != nil && entry.Message.Usage != nil {
-						usage := entry.Message.Usage
-						model := entry.Message.Model
-						totalInput := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
-						cost := EstimateClaudeCost(usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, model)
-
-						evTime := parseTimestamp(entry.Timestamp)
-						if evTime.IsZero() {
-							evTime = time.Now()
+					if ev, newBranch, ok := parseClaudeLogTokenEvent(entry, sessionID, result.gitBranch); ok || newBranch != result.gitBranch {
+						result.gitBranch = newBranch
+						if ok {
+							result.events = append(result.events, ev)
 						}
-
-						result.events = append(result.events, event.Event{
-							ID:        fmt.Sprintf("claude-tokens-%s-%s", sessionID, entry.UUID),
-							Type:      event.EventTokenUsage,
-							SessionID: sessionID,
-							Platform:  event.PlatformClaude,
-							Timestamp: evTime,
-							Data: event.EventData{
-								InputTokens:         totalInput,
-								OutputTokens:        usage.OutputTokens,
-								CacheCreationTokens: usage.CacheCreationInputTokens,
-								CacheReadTokens:     usage.CacheReadInputTokens,
-								Model:               model,
-								CostUSD:             cost,
-								GitBranch:           result.gitBranch,
-								CWD:                 entry.CWD,
-							},
-						})
 					}
 				}
 			}
@@ -313,6 +289,50 @@ func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGit
 
 	result.offset = committedOffset
 	return result
+}
+
+// parseClaudeLogTokenEvent extracts a TokenUsage event from a parsed log
+// entry, if the entry is an assistant message with valid usage and a
+// parseable timestamp. It also returns the updated gitBranch (caller should
+// adopt it) — gitBranch is recorded from the first entry that carries it,
+// regardless of message type.
+//
+// The (entry, gitBranch) → (event, gitBranch, ok) signature lets both the
+// parallel initial scan and the incremental processFile share parsing logic.
+func parseClaudeLogTokenEvent(entry claudeLogEntry, sessionID, gitBranch string) (event.Event, string, bool) {
+	newBranch := gitBranch
+	if newBranch == "" && entry.GitBranch != "" {
+		newBranch = entry.GitBranch
+	}
+	if entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
+		return event.Event{}, newBranch, false
+	}
+	evTime, ok := parseTimestamp(entry.Timestamp)
+	if !ok {
+		return event.Event{}, newBranch, false
+	}
+	usage := entry.Message.Usage
+	model := entry.Message.Model
+	totalInput := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+	cost := EstimateClaudeCost(usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, model)
+	return event.Event{
+		ID:        fmt.Sprintf("claude-tokens-%s-%s", sessionID, entry.UUID),
+		Type:      event.EventTokenUsage,
+		SessionID: sessionID,
+		Platform:  event.PlatformClaude,
+		Timestamp: evTime,
+		Data: event.EventData{
+			// InputTokens = total (input + cacheCreate + cacheRead) for context tracking.
+			InputTokens:         totalInput,
+			OutputTokens:        usage.OutputTokens,
+			CacheCreationTokens: usage.CacheCreationInputTokens,
+			CacheReadTokens:     usage.CacheReadInputTokens,
+			Model:               model,
+			CostUSD:             cost,
+			GitBranch:           newBranch,
+			CWD:                 entry.CWD,
+		},
+	}, newBranch, true
 }
 
 type claudeLogEntry struct {
@@ -344,8 +364,15 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 	}
 
 	offset := w.seen[path]
-	if info.Size() <= offset {
-		return
+	// Detect truncation/rotation: file shrank since last scan. Reset to 0;
+	// dedup via source_id prevents already-stored token rows from doubling.
+	if offset > 0 && info.Size() < offset {
+		log.Printf("claude watcher: file %s shrank (%d → %d), restarting from offset 0", path, offset, info.Size())
+		offset = 0
+		w.seen[path] = 0
+	}
+	if info.Size() == offset {
+		return // no new bytes
 	}
 
 	f, err := os.Open(path)
@@ -359,8 +386,6 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 			return
 		}
 	}
-
-	_, hasGitBranch := w.sessionGitBranch[sessionID]
 
 	reader := bufio.NewReaderSize(f, 1024*1024)
 	committedOffset := offset
@@ -383,45 +408,13 @@ func (w *ClaudeLogWatcher) processFile(path, sessionID string) {
 				var entry claudeLogEntry
 				if json.Unmarshal(line, &entry) == nil {
 					parsedLine = true
-					// Collect git_branch from any line that has it.
-					if !hasGitBranch && entry.GitBranch != "" {
-						w.sessionGitBranch[sessionID] = entry.GitBranch
-						hasGitBranch = true
+					curBranch := w.sessionGitBranch[sessionID]
+					ev, newBranch, ok := parseClaudeLogTokenEvent(entry, sessionID, curBranch)
+					if newBranch != curBranch {
+						w.sessionGitBranch[sessionID] = newBranch
 					}
-
-					// Only assistant messages carry token usage.
-					if entry.Type == "assistant" && entry.Message != nil && entry.Message.Usage != nil {
-						usage := entry.Message.Usage
-						model := entry.Message.Model
-						totalInput := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
-						cost := EstimateClaudeCost(usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens, model)
-
-						// Use the actual timestamp from the JSONL entry so historical
-						// sessions get their real start_time, not time.Now().
-						evTime := parseTimestamp(entry.Timestamp)
-						if evTime.IsZero() {
-							evTime = time.Now()
-						}
-
-						w.emitFn(event.Event{
-							ID:        fmt.Sprintf("claude-tokens-%s-%s", sessionID, entry.UUID),
-							Type:      event.EventTokenUsage,
-							SessionID: sessionID,
-							Platform:  event.PlatformClaude,
-							Timestamp: evTime,
-							Data: event.EventData{
-								// InputTokens = total (input + cacheCreate + cacheRead) for context tracking.
-								InputTokens:         totalInput,
-								OutputTokens:        usage.OutputTokens,
-								CacheCreationTokens: usage.CacheCreationInputTokens,
-								CacheReadTokens:     usage.CacheReadInputTokens,
-								Model:               model,
-								CostUSD:             cost,
-								// Carry git_branch so the daemon can set it on the session.
-								GitBranch: w.sessionGitBranch[sessionID],
-								CWD:       entry.CWD,
-							},
-						})
+					if ok {
+						w.emitFn(ev)
 					}
 				}
 			}

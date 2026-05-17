@@ -4,6 +4,7 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -63,7 +64,24 @@ func listenSocket(path string) (net.Listener, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	return net.Listen("unix", path)
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	// Restrict so only the owning user can connect. net.Listen creates the
+	// socket file with 0666 & ~umask (typically 0644), which on Linux and
+	// macOS (10.5+) lets group/world open the socket and write fake events
+	// into the daemon. Chmod-after-Listen leaves a µs-level TOCTOU window
+	// where a same-host attacker who's already racing connect() could slip
+	// in — practically unreachable, but if you need strict guarantees wrap
+	// the Listen in syscall.Umask(0o077). For local dev tooling 0600 is
+	// sufficient.
+	if err := os.Chmod(path, 0o600); err != nil {
+		ln.Close()
+		os.Remove(path)
+		return nil, fmt.Errorf("chmod socket: %w", err)
+	}
+	return ln, nil
 }
 
 func dialSocket(path string) (net.Conn, error) {

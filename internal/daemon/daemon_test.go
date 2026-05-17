@@ -213,7 +213,7 @@ func TestProcessEventSessionEndInterruptsPendingToolCalls(t *testing.T) {
 	if err := db.UpsertSession("s1", event.PlatformClaude, now); err != nil {
 		t.Fatalf("upsert session: %v", err)
 	}
-	if err := db.InsertToolCallStart("call-1", "agent-1", "s1", "Edit", "{}", now); err != nil {
+	if _, err := db.InsertToolCallStart("call-1", "agent-1", "s1", "Edit", "{}", now); err != nil {
 		t.Fatalf("insert tool call: %v", err)
 	}
 
@@ -263,7 +263,7 @@ func TestProcessEventStaleSessionEndDoesNotInterruptNewerPendingToolCalls(t *tes
 	if err := db.UpsertSession("s-stale-end", event.PlatformClaude, newer); err != nil {
 		t.Fatalf("record newer activity: %v", err)
 	}
-	if err := db.InsertToolCallStart("call-newer", "agent-1", "s-stale-end", "Edit", "{}", newer); err != nil {
+	if _, err := db.InsertToolCallStart("call-newer", "agent-1", "s-stale-end", "Edit", "{}", newer); err != nil {
 		t.Fatalf("insert tool call: %v", err)
 	}
 
@@ -350,7 +350,7 @@ func TestProcessEventToolCallEndInsertsFileChange(t *testing.T) {
 	if err := db.UpsertSession("s-file", event.PlatformClaude, now); err != nil {
 		t.Fatalf("upsert session: %v", err)
 	}
-	if err := db.InsertToolCallStart("call-file", "agent-1", "s-file", "Edit", "{}", now); err != nil {
+	if _, err := db.InsertToolCallStart("call-file", "agent-1", "s-file", "Edit", "{}", now); err != nil {
 		t.Fatalf("insert tool call: %v", err)
 	}
 

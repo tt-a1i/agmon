@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tt-a1i/tokenmeter/internal/collector"
@@ -29,6 +30,14 @@ type Daemon struct {
 	stopOnce    sync.Once
 	batchCh     chan event.Event // buffered channel for async event processing
 	batchDone   chan struct{}    // closed when batch consumer exits
+	bgWG        sync.WaitGroup   // background goroutines started in Start() (sweepers, etc.)
+
+	// Observability counters. Atomic so callers/inspectors don't need the
+	// daemon mutex. Currently logged at Stop(); a future /metrics endpoint
+	// or web stats page can surface them live.
+	droppedBroadcasts   atomic.Int64 // local subscriber channel full
+	droppedShutdownEvts atomic.Int64 // ProcessExternalEventAsync after done close
+	duplicateToolStarts atomic.Int64 // EventToolCallStart hit existing call_id (Pre re-emit)
 }
 
 func New(db *storage.DB, sockPath string) *Daemon {
@@ -43,6 +52,20 @@ func New(db *storage.DB, sockPath string) *Daemon {
 	}
 }
 
+// Subscribe returns a buffered channel that receives every event broadcast
+// by the daemon. The daemon owns sends; the caller MUST NOT close the
+// returned channel — closing it races with the broadcast path, which
+// snapshots `subs` under RLock and sends to each subscriber outside the
+// lock, so a send-on-closed-channel panic is possible.
+//
+// Lifecycle contract:
+//  1. Subscribe → caller spawns a reader goroutine
+//  2. (Optionally) signal that reader to exit (e.g. via its own done channel)
+//  3. Unsubscribe(ch) to detach from broadcast
+//  4. Drop the channel reference; GC handles cleanup
+//
+// Buffer is 256 — events that exceed buffer capacity are dropped by
+// `broadcast` rather than blocking. Slow subscribers won't stall the daemon.
 func (d *Daemon) Subscribe() chan event.Event {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -51,15 +74,15 @@ func (d *Daemon) Subscribe() chan event.Event {
 	return ch
 }
 
+// Unsubscribe removes ch from the broadcast set. See Subscribe for the
+// caller-must-not-close contract — Unsubscribe deliberately does not close
+// ch either.
 func (d *Daemon) Unsubscribe(ch chan event.Event) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for i, s := range d.subs {
 		if s == ch {
 			d.subs = append(d.subs[:i], d.subs[i+1:]...)
-			// Do not close ch here — closing is the caller's responsibility.
-			// Closing here races with broadcast, which copies subs under RLock
-			// and then sends outside the lock, potentially sending to a closed channel.
 			return
 		}
 	}
@@ -78,7 +101,9 @@ func (d *Daemon) broadcast(ev event.Event) {
 		select {
 		case ch <- ev:
 		default:
-			// drop if subscriber is slow
+			// Subscriber buffer (256) is full — drop rather than stall the
+			// daemon. Tracked so we can surface "your UI is too slow" later.
+			d.droppedBroadcasts.Add(1)
 		}
 	}
 	for _, conn := range remoteSubs {
@@ -137,7 +162,31 @@ func (d *Daemon) Start() error {
 	go d.acceptLoop()
 	go d.acceptSubscriberLoop()
 	go d.batchConsumer()
+	d.bgWG.Add(1)
+	go func() {
+		defer d.bgWG.Done()
+		d.staleSweepLoop()
+	}()
 	return nil
+}
+
+// staleSweepLoop periodically re-runs MarkStaleSessionsEnded so a daemon that
+// stays up for days doesn't leave sessions stuck in "active" once their last
+// event is older than the stale threshold. The startup pass at Start() only
+// catches sessions stale at boot.
+func (d *Daemon) staleSweepLoop() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.done:
+			return
+		case <-ticker.C:
+			if err := d.db.MarkStaleSessionsEnded(2 * time.Hour); err != nil {
+				log.Printf("staleSweepLoop: %v", err)
+			}
+		}
+	}
 }
 
 func (d *Daemon) repairEmptyTokenModels() {
@@ -152,9 +201,15 @@ func (d *Daemon) repairEmptyTokenModels() {
 			continue
 		}
 		inP, outP, cacheP := collector.CodexPricing(s.Model)
-		n, _ := d.db.BackfillEmptyTokenModel(s.SessionID, s.Model, inP, outP, cacheP)
+		n, err := d.db.BackfillEmptyTokenModel(s.SessionID, s.Model, inP, outP, cacheP)
+		if err != nil {
+			log.Printf("repairEmptyTokenModels: backfill %s: %v", s.SessionID, err)
+			continue
+		}
 		if n > 0 {
-			d.db.UpdateSessionTokens(s.SessionID)
+			if err := d.db.UpdateSessionTokens(s.SessionID); err != nil {
+				log.Printf("repairEmptyTokenModels: update session %s: %v", s.SessionID, err)
+			}
 			total += n
 		}
 	}
@@ -220,6 +275,16 @@ func (d *Daemon) Stop() {
 		d.mu.Unlock()
 		d.connWG.Wait()
 		<-d.batchDone // wait for batch consumer to drain
+		d.bgWG.Wait() // wait for background loops (sweepers) so they don't outlive db
+
+		// Surface observability counters once at shutdown so operators see if
+		// the daemon was leaking events to slow subscribers, dropping work
+		// during the final batch flush, or hitting duplicate Pre-emits.
+		if bcast, shut, dup := d.Stats(); bcast > 0 || shut > 0 || dup > 0 {
+			log.Printf("daemon stats: dropped_broadcasts=%d dropped_shutdown=%d duplicate_tool_starts=%d",
+				bcast, shut, dup)
+		}
+
 		cleanupSocket(d.sockPath)
 		cleanupSocket(subscriberSocketPath(d.sockPath))
 		if d.socketLock != nil {
@@ -308,25 +373,33 @@ func (d *Daemon) processEvent(ev event.Event) error {
 	// For historical events (>2h old, e.g. from log watcher), mark session as ended
 	// immediately so they don't appear as "running".
 	if ev.SessionID != "" && ev.Type != event.EventSessionEnd {
-		d.db.UpsertSession(ev.SessionID, ev.Platform, ev.Timestamp)
+		if err := d.db.UpsertSession(ev.SessionID, ev.Platform, ev.Timestamp); err != nil {
+			log.Printf("upsert session %s: %v", ev.SessionID, err)
+		}
 		// Any event older than 2h is from a historical log replay — end the session
 		// so it doesn't linger as "active". Previously only EventTokenUsage triggered
 		// this, leaving sessions without token rows permanently active.
 		if time.Since(ev.Timestamp) > 2*time.Hour {
-			d.db.EndSession(ev.SessionID, ev.Timestamp)
+			if err := d.db.EndSession(ev.SessionID, ev.Timestamp); err != nil {
+				log.Printf("end historical session %s: %v", ev.SessionID, err)
+			}
 		}
 	}
 
 	switch ev.Type {
 	case event.EventSessionStart:
 		if ev.Data.CWD != "" || ev.Data.GitBranch != "" {
-			d.db.UpdateSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch)
+			if err := d.db.UpdateSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch); err != nil {
+				log.Printf("update session meta %s: %v", ev.SessionID, err)
+			}
 		}
 		return nil
 
 	case event.EventSessionUpdate:
 		if ev.Data.CWD != "" || ev.Data.GitBranch != "" {
-			d.db.FillSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch)
+			if err := d.db.FillSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch); err != nil {
+				log.Printf("fill session meta %s: %v", ev.SessionID, err)
+			}
 		}
 		if ev.Platform == event.PlatformCodex && ev.Data.Model != "" {
 			return d.reconcileCodexTokenModel(ev.SessionID, ev.Data.Model, ev.Timestamp, true)
@@ -353,7 +426,17 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		return d.db.EndAgent(ev.AgentID, ev.Timestamp)
 
 	case event.EventToolCallStart:
-		return d.db.InsertToolCallStart(ev.ID, ev.AgentID, ev.SessionID, ev.Data.ToolName, ev.Data.ToolParams, ev.Timestamp)
+		inserted, err := d.db.InsertToolCallStart(ev.ID, ev.AgentID, ev.SessionID, ev.Data.ToolName, ev.Data.ToolParams, ev.Timestamp)
+		if err != nil {
+			return err
+		}
+		if !inserted {
+			// Pre re-emit for an existing call_id — Claude doesn't normally
+			// do this, but if it ever does we want to know how often before
+			// switching to ON CONFLICT DO UPDATE semantics.
+			d.duplicateToolStarts.Add(1)
+		}
+		return nil
 
 	case event.EventToolCallEnd:
 		if err := d.db.UpdateToolCallEnd(ev.ID, ev.Data.ToolResult, ev.Data.ToolStatus, ev.Data.DurationMs, ev.Timestamp); err != nil {
@@ -366,7 +449,9 @@ func (d *Daemon) processEvent(ev event.Event) error {
 
 	case event.EventTokenUsage:
 		if ev.Data.GitBranch != "" || ev.Data.CWD != "" {
-			d.db.FillSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch)
+			if err := d.db.FillSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch); err != nil {
+				log.Printf("fill session meta %s: %v", ev.SessionID, err)
+			}
 		}
 		if err := d.db.InsertTokenUsage(ev.AgentID, ev.SessionID, ev.Data.InputTokens, ev.Data.OutputTokens, ev.Data.CacheCreationTokens, ev.Data.CacheReadTokens, ev.Data.Model, ev.Data.CostUSD, ev.Timestamp, ev.ID); err != nil {
 			return err
@@ -392,13 +477,29 @@ func (d *Daemon) ProcessExternalEvent(ev event.Event) {
 	d.broadcast(ev)
 }
 
-// ProcessExternalEventAsync sends an event to the batch channel for async processing.
-// Falls back to synchronous processing if the daemon is shutting down.
+// ProcessExternalEventAsync sends an event to the batch channel for async
+// processing. Returns silently if the daemon is shutting down — the event is
+// counted in droppedShutdownEvts so the count appears in the Stop() log.
+// (Going synchronous on shutdown is unsafe: db.Close may have already run.)
 func (d *Daemon) ProcessExternalEventAsync(ev event.Event) {
+	// Try non-blocking send first so a healthy daemon doesn't lose events to
+	// the random-pick semantics of the two-case select on done close.
+	select {
+	case d.batchCh <- ev:
+		return
+	default:
+	}
+	// Channel full — block until either consumer drains or done closes.
 	select {
 	case d.batchCh <- ev:
 	case <-d.done:
+		d.droppedShutdownEvts.Add(1)
 	}
+}
+
+// Stats returns a snapshot of observability counters. Safe to call concurrently.
+func (d *Daemon) Stats() (droppedBroadcasts, droppedShutdownEvts, duplicateToolStarts int64) {
+	return d.droppedBroadcasts.Load(), d.droppedShutdownEvts.Load(), d.duplicateToolStarts.Load()
 }
 
 func (d *Daemon) batchConsumer() {

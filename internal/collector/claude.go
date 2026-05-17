@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tt-a1i/tokenmeter/internal/event"
 )
@@ -203,9 +204,18 @@ func truncateBytes(b json.RawMessage, maxLen int) string {
 	return truncate(s, maxLen)
 }
 
+// truncate cuts s to at most maxLen bytes plus "...", aligned to a UTF-8 rune
+// boundary so we never introduce a fresh invalid byte by splitting a multi-byte
+// rune. Worst-case it drops up to 3 trailing bytes (one 4-byte rune). It does
+// NOT validate the input: invalid UTF-8 bytes outside the cut point pass
+// through unchanged — caller decides whether to sanitize upstream.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }

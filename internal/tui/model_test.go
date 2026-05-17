@@ -38,7 +38,7 @@ func seedModelSession(t *testing.T, db *storage.DB) {
 	if err := db.UpsertAgent("agent-1", "session-1", "", "main", now); err != nil {
 		t.Fatalf("upsert agent: %v", err)
 	}
-	if err := db.InsertToolCallStart("call-1", "agent-1", "session-1", "Edit", "{}", now.Add(time.Second)); err != nil {
+	if _, err := db.InsertToolCallStart("call-1", "agent-1", "session-1", "Edit", "{}", now.Add(time.Second)); err != nil {
 		t.Fatalf("insert tool call: %v", err)
 	}
 	if err := db.UpdateToolCallEnd("call-1", "ok", event.StatusSuccess, 250, now.Add(2*time.Second)); err != nil {
