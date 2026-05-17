@@ -153,6 +153,15 @@ tr:hover td{background:var(--bg-hover)}
 .day-filter{display:inline-flex;align-items:center;gap:6px;background:var(--accent-bg);color:var(--accent);font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;margin-bottom:10px;cursor:pointer;transition:background .1s}
 .day-filter:hover{background:var(--accent-bg)}
 .day-filter .x{opacity:.5;margin-left:2px}
+/* Tag-chip filter row: shows "All" + each unique tag + "Untagged".
+   Click toggles. Selected uses accent like .sort-btn.on. Empty when no
+   sessions carry a tag (avoids visual clutter). */
+.tag-chips{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;overflow-x:auto}
+.tag-chips:empty{display:none}
+.tag-chip{background:0;border:1px solid var(--border);border-radius:999px;padding:3px 10px;font:inherit;font-size:11px;font-weight:500;color:var(--text-muted);cursor:pointer;white-space:nowrap;transition:all .1s}
+.tag-chip:hover{color:var(--text);border-color:var(--text-faint)}
+.tag-chip.on{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
+.tag-chip.muted{color:var(--text-faint);font-style:italic}
 
 /* Insight */
 .insight{font-size:11px;color:var(--text-muted);margin-bottom:8px;display:flex;align-items:center;gap:4px}
@@ -375,6 +384,10 @@ tr:hover td{background:var(--bg-hover)}
   .sr{padding:10px 12px;gap:10px}
   /* Hide secondary metadata so mobile rows only show time + cost. */
   .sr-meta span:not(:first-child){display:none}
+  /* Tag chips: single-row horizontal scroll on phones so a long tag list
+     doesn't stack vertically and push the session list off-screen. */
+  .tag-chips{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .tag-chip{flex-shrink:0}
   .dh-grid{grid-template-columns:repeat(2,1fr)}
   .qstats{grid-template-columns:repeat(3,1fr)}
   .tabs{flex-wrap:nowrap;overflow-x:auto}
@@ -485,6 +498,7 @@ tr:hover td{background:var(--bg-hover)}
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-title">📋 Sessions</span><span class="section-sub" id="sCnt"></span></div>
     <div id="dayFilter"></div>
     <input class="sess-search" id="sessSearch" placeholder="Search by name, model, tag..." autocomplete="off">
+    <div class="tag-chips" id="tagChips"></div>
     <div class="session-controls">
       <div class="seg" id="sessionPlatform">
         <button class="on" data-platform="all">All</button>
@@ -567,7 +581,7 @@ function toggleTheme(){
   if(isDark){document.documentElement.setAttribute('data-theme','dark');$('themeBtn').textContent='☀️'}
 })();
 let lastCostDays=null;
-let range=localStorage.getItem('tokenmeter-range')||'week',sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null;
+let range=localStorage.getItem('tokenmeter-range')||'week',sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null,tagFilter=null;
 document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r===range));
 
 const fc=v=>v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4);
@@ -745,11 +759,30 @@ function renderOpsStrip(stats,costs,sessions){
 }
 
 // Sessions
+// Render the tag chip row above the session list. Chips are derived from
+// the current session set so they grow with what the user actually has
+// tagged. "All" is always present; "Untagged" only appears if some
+// sessions lack a tag AND at least one tagged session exists (otherwise
+// the row would be a no-op).
+function renderTagChips(sessions){
+  const el=$('tagChips');if(!el)return;
+  const tags=[...new Set((sessions||[]).map(s=>s.tag).filter(t=>t&&t.length))].sort();
+  if(!tags.length){el.innerHTML='';return}
+  const untagged=(sessions||[]).some(s=>!s.tag);
+  let h=`<button class="tag-chip${tagFilter==null?' on':''}" onclick="setTagFilter(null)">All</button>`;
+  for(const t of tags){h+=`<button class="tag-chip${tagFilter===t?' on':''}" onclick='setTagFilter(${jsString(t)})' title="Filter to '${escAttr(t)}'">${escHtml(t)}</button>`}
+  if(untagged)h+=`<button class="tag-chip muted${tagFilter===''?' on':''}" onclick="setTagFilter('')" title="Sessions without a tag">Untagged</button>`;
+  el.innerHTML=h;
+}
+function setTagFilter(t){tagFilter=t;sLim=20;kbIdx=-1;renderSessions(allS)}
+
 function renderSessions(sessions){
   allS=sessions||[];const el=$('sList'),cnt=$('sCnt'),btn=$('sMore');
+  renderTagChips(allS);
   let filtered=allS.slice();
   if(searchQ)filtered=filtered.filter(s=>{const q=searchQ.toLowerCase();return sname(s).toLowerCase().includes(q)||(s.tag||'').toLowerCase().includes(q)||(s.model||'').toLowerCase().includes(q)||s.platform.includes(q)});
   if(sessionPlatform!=='all')filtered=filtered.filter(s=>s.platform===sessionPlatform);
+  if(tagFilter!==null){if(tagFilter==='')filtered=filtered.filter(s=>!s.tag);else filtered=filtered.filter(s=>s.tag===tagFilter)}
   if(dayFilter)filtered=filtered.filter(s=>s.start_time.substring(0,10)===dayFilter);
   if(sessSort==='cost')filtered.sort((a,b)=>b.cost_usd-a.cost_usd);
   else filtered.sort((a,b)=>{if(a.status==='active'&&b.status!=='active')return -1;if(b.status==='active'&&a.status!=='active')return 1;return new Date(b.start_time)-new Date(a.start_time)});
@@ -1129,7 +1162,7 @@ document.querySelectorAll('#sessionPlatform button').forEach(b=>{b.onclick=()=>{
 let gPressed=false,gTimer=null;
 document.addEventListener('keydown',e=>{
   const inInput=document.activeElement.matches('input');
-  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if($('navR')&&$('navR').classList.contains('open')){$('navR').classList.remove('open');$('hamburgerBtn').classList.remove('open')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
+  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if($('navR')&&$('navR').classList.contains('open')){$('navR').classList.remove('open');$('hamburgerBtn').classList.remove('open')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if(tagFilter!==null){tagFilter=null;renderSessions(allS)}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
   // g-prefix sequence: g d → dashboard / g s → stats / g m → messages.
   // First `g` arms for 1s; second key dispatches and consumes the prefix.
   if(!inInput&&!$('kbdModal').classList.contains('show')){
