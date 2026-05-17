@@ -169,6 +169,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "top":
+		if err := runTop(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "backup":
 		if err := runBackup(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1162,6 +1167,7 @@ Usage:
   tokenmeter webhook <command>  Manage webhook endpoints
   tokenmeter analyze [--json]   Usage insights summary
   tokenmeter watch [session]    Live event stream from daemon
+  tokenmeter top [--once]       Minimal live usage dashboard
   tokenmeter backup [path]      Back up the local database
   tokenmeter restore <path>     Restore database from backup
   tokenmeter doctor [--json]    Run installation diagnostics
