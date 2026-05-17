@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"time"
@@ -173,6 +174,8 @@ type Model struct {
 	messages               []collector.UserMessage
 	messagesCacheID        string // session ID for which messages were loaded
 	budgetChips            []budgetChip
+	projection             storage.CostProjection
+	costAnomalies          map[string]bool
 	filteredSessionsCache  []storage.SessionRow
 	filteredToolCallsCache []storage.ToolCallRow
 	filteredMessagesCache  []collector.UserMessage
@@ -292,6 +295,9 @@ func (m Model) tabVisibleRows() int {
 	switch m.activeTab {
 	case tabDashboard:
 		rows = base - 6 // summary + header + "more" hint + blank + preview bar
+		if m.projection.DaysInMonth > 0 {
+			rows -= 2
+		}
 		if len(m.budgetChips) > 0 {
 			rows--
 		}
@@ -433,6 +439,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case tea.KeyEsc:
 				m.resetFilter()
+				m.refreshCostAnomalies()
 				m.resetListPosition()
 				return m, nil
 			case tea.KeyEnter:
@@ -443,11 +450,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyBackspace, tea.KeyDelete:
 				if len(m.filterText) > 0 {
 					m.setFilterText(m.filterText[:len(m.filterText)-1])
+					m.refreshCostAnomalies()
 					m.resetListPosition()
 				}
 				return m, nil
 			case tea.KeyRunes:
 				m.setFilterText(m.filterText + string(msg.Runes))
+				m.refreshCostAnomalies()
 				m.resetListPosition()
 				return m, nil
 			}
@@ -466,6 +475,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Enter filter mode; pressing / again clears the existing filter.
 			m.filterMode = true
 			m.setFilterText("")
+			m.refreshCostAnomalies()
 			m.resetListPosition()
 			return m, nil
 
@@ -473,6 +483,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clear active filter without entering filter mode.
 			if m.filterText != "" {
 				m.setFilterText("")
+				m.refreshCostAnomalies()
 				m.resetListPosition()
 			}
 			return m, nil
@@ -637,6 +648,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("T"))):
 			if m.activeTab == tabDashboard {
 				m.cycleTagFilter()
+				m.refreshCostAnomalies()
 			}
 			return m, nil
 
@@ -650,6 +662,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == tabDashboard {
 				m.platformFilter = (m.platformFilter + 1) % platformFilterCount
 				m.refreshFilteredViews()
+				m.refreshCostAnomalies()
 				m.resetListPosition()
 				m.syncSessionFromRow()
 			}
@@ -659,6 +672,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == tabDashboard {
 				m.dashboardSort = (m.dashboardSort + 1) % sortCount
 				m.refreshFilteredViews()
+				m.refreshCostAnomalies()
 				m.resetListPosition()
 				m.syncSessionFromRow()
 			}
@@ -699,6 +713,7 @@ func (m *Model) refresh() {
 	m.prevCost = prevPeriodCost(m.db, m.summaryRange)
 	m.dailyCosts, _ = m.db.GetDailyCosts(7)
 	m.refreshBudgetChips()
+	m.projection, _ = m.db.GetMonthCostProjection(time.Now())
 
 	if len(m.sessions) > 0 {
 		if m.selectedSession >= len(m.sessions) {
@@ -731,6 +746,7 @@ func (m *Model) refresh() {
 	}
 
 	m.refreshFilteredViews()
+	m.refreshCostAnomalies()
 	m.pruneExpandedCalls()
 	if m.activeTab == tabDashboard {
 		if !m.syncRowFromSelectedSession() {
@@ -752,6 +768,40 @@ func (m *Model) refresh() {
 		}
 	}
 	m.adjustScroll()
+}
+
+func (m *Model) refreshCostAnomalies() {
+	m.costAnomalies = detectCostAnomalies(m.filteredSessionsCache)
+}
+
+func detectCostAnomalies(sessions []storage.SessionRow) map[string]bool {
+	out := make(map[string]bool)
+	if len(sessions) < 3 {
+		return out
+	}
+
+	sum := 0.0
+	for _, s := range sessions {
+		sum += s.TotalCostUSD
+	}
+	mean := sum / float64(len(sessions))
+	variance := 0.0
+	for _, s := range sessions {
+		delta := s.TotalCostUSD - mean
+		variance += delta * delta
+	}
+	stddev := math.Sqrt(variance / float64(len(sessions)))
+	if stddev <= 0 {
+		return out
+	}
+
+	threshold := mean + 2*stddev
+	for _, s := range sessions {
+		if s.TotalCostUSD > 0 && s.TotalCostUSD > threshold {
+			out[s.SessionID] = true
+		}
+	}
+	return out
 }
 
 func (m *Model) refreshBudgetChips() {

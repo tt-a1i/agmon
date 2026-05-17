@@ -222,6 +222,77 @@ func TestModelRefreshLoadsBudgetChips(t *testing.T) {
 	}
 }
 
+func TestRefreshLoadsProjection(t *testing.T) {
+	db := testModelDB(t)
+	seedModelSession(t, db)
+
+	m := NewModel(db, make(chan EventMsg, 1))
+	m.refresh()
+
+	if m.projection.DaysElapsed == 0 || m.projection.DaysInMonth == 0 {
+		t.Fatalf("expected projection days to load, got %#v", m.projection)
+	}
+	if m.projection.UsedSoFar <= 0 || m.projection.ProjectedTotal <= 0 {
+		t.Fatalf("expected projection costs to load, got %#v", m.projection)
+	}
+}
+
+func TestAnomalyDetectionAbove2Sigma(t *testing.T) {
+	m := Model{costAnomalies: make(map[string]bool)}
+	now := time.Now()
+	for i := 0; i < 20; i++ {
+		m.sessions = append(m.sessions, storage.SessionRow{
+			SessionID:    fmt.Sprintf("normal-%02d", i),
+			Platform:     "claude",
+			StartTime:    now.Add(-time.Duration(i) * time.Minute),
+			TotalCostUSD: 0.50,
+		})
+	}
+	m.sessions = append(m.sessions, storage.SessionRow{
+		SessionID:    "expensive-outlier",
+		Platform:     "codex",
+		StartTime:    now.Add(time.Minute),
+		TotalCostUSD: 50,
+	})
+	m.refreshFilteredViews()
+	m.refreshCostAnomalies()
+
+	if !m.costAnomalies["expensive-outlier"] {
+		t.Fatalf("expected outlier session to be marked, got %#v", m.costAnomalies)
+	}
+	if m.costAnomalies["normal-00"] {
+		t.Fatalf("normal session should not be marked, got %#v", m.costAnomalies)
+	}
+}
+
+func TestViewDashboardRendersProjectionAndAnomalyIcon(t *testing.T) {
+	now := time.Now()
+	m := Model{
+		width:  120,
+		height: 40,
+		sessions: []storage.SessionRow{
+			{SessionID: "normal", Platform: "claude", StartTime: now, TotalCostUSD: 0.50},
+			{SessionID: "outlier", Platform: "codex", StartTime: now.Add(time.Minute), TotalCostUSD: 50},
+		},
+		projection: storage.CostProjection{
+			UsedSoFar:      42.50,
+			DaysElapsed:    10,
+			DaysInMonth:    30,
+			ProjectedTotal: 128.30,
+			Confidence:     "medium",
+		},
+		costAnomalies: map[string]bool{"outlier": true},
+	}
+	m.refreshFilteredViews()
+
+	out := m.viewDashboard(120)
+	for _, want := range []string{"This month", "$42.50", "Projected by EOM", "$128.30", "medium", "⚡"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dashboard output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestViewMessagesRendersModelBreakdownForMultipleModels(t *testing.T) {
 	m := Model{
 		width:  120,
@@ -527,8 +598,20 @@ func TestViewDashboardLeftAlignsColumnsAfterBadge(t *testing.T) {
 		t.Fatalf("expected dashboard view to include header and row, got %q", view)
 	}
 
-	headerLine := lines[2]
-	rowLine := lines[3]
+	headerLine := ""
+	rowLine := ""
+	for i, line := range lines {
+		if strings.Contains(line, "SESSION") {
+			headerLine = line
+			if i+1 < len(lines) {
+				rowLine = lines[i+1]
+			}
+			break
+		}
+	}
+	if headerLine == "" || rowLine == "" {
+		t.Fatalf("expected dashboard view to include header and row, got %q", view)
+	}
 
 	sessionHeader := strings.Index(headerLine, "SESSION")
 	sessionValue := strings.Index(rowLine, "main")

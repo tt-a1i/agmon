@@ -20,6 +20,10 @@ func (m Model) viewDashboard(width int) string {
 		mutedStyle.Render("In"), headerStyle.Render(formatTokens(m.todayInput)),
 		mutedStyle.Render("Out"), headerStyle.Render(formatTokens(m.todayOutput))))
 
+	if projection := m.renderProjectionSummary(); projection != "" {
+		b.WriteString(projection + "\n\n")
+	}
+
 	budgetLine := m.renderBudgetChips()
 	tagLine := m.renderTagChips()
 	if budgetLine != "" {
@@ -66,6 +70,7 @@ func (m Model) viewDashboard(width int) string {
 
 	for i := start; i < end; i++ {
 		s := filtered[i]
+		isAnomaly := m.costAnomalies[s.SessionID]
 		badge := platformBadge(s.Platform)
 		name := displayTruncate(sessionDisplayName(s), 16)
 		started := formatStartTime(s.StartTime)
@@ -91,14 +96,21 @@ func (m Model) viewDashboard(width int) string {
 			tagText = " " + tagStyle.Render(truncateTag(s.Tag))
 		}
 
-		line := fmt.Sprintf("  %s %-16s %s  %s  %s  %s",
-			badge, name,
+		prefix := "  "
+		if isAnomaly {
+			prefix = contextWarnStyle.Render("⚡ ")
+		}
+		line := fmt.Sprintf("%s%s %-16s %s  %s  %s  %s",
+			prefix, badge, name,
 			mutedStyle.Render(fmt.Sprintf("%-14s", started)),
 			costStyle.Render(costPad),
 			dashboardMetricStyle.Render(inPad),
 			dashboardMetricStyle.Render(outPad))
 		line += tagText
 
+		if isAnomaly {
+			line = contextWarnStyle.Render(line)
+		}
 		if i == m.selectedRow {
 			line = selectedStyle.Render(line)
 		}
@@ -126,4 +138,43 @@ func (m Model) viewDashboard(width int) string {
 	}
 
 	return b.String()
+}
+
+func (m Model) renderProjectionSummary() string {
+	if m.projection.DaysInMonth == 0 {
+		return ""
+	}
+	arrow := ""
+	if m.projection.ProjectedTotal > m.projection.UsedSoFar {
+		arrow = mutedStyle.Render("↑")
+	}
+	confidence := renderProjectionConfidence(m.projection.Confidence)
+	return fmt.Sprintf(" %s %s %s      %s %s %s\n %s      %s",
+		mutedStyle.Render("This month"),
+		costStyle.Render(formatProjectionCost(m.projection.UsedSoFar)),
+		arrow,
+		mutedStyle.Render("Projected by EOM"),
+		costStyle.Render(formatProjectionCost(m.projection.ProjectedTotal)),
+		confidence,
+		mutedStyle.Render(fmt.Sprintf("%d sessions", len(m.sessions))),
+		mutedStyle.Render(fmt.Sprintf("Based on %d days", m.projection.DaysElapsed)))
+}
+
+func renderProjectionConfidence(confidence string) string {
+	if confidence == "" {
+		confidence = "low"
+	}
+	text := "(" + confidence + ")"
+	switch confidence {
+	case "high":
+		return keyStyle.Render(text)
+	case "medium":
+		return contextWarnStyle.Render(text)
+	default:
+		return mutedStyle.Render(text)
+	}
+}
+
+func formatProjectionCost(v float64) string {
+	return fmt.Sprintf("$%.2f", v)
 }
