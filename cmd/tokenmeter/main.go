@@ -159,6 +159,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "watch":
+		if err := runWatch(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "backup":
 		if err := runBackup(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1150,6 +1155,7 @@ Usage:
   tokenmeter search <query>     Search tools, results, and files
   tokenmeter budget <command>   Manage monthly budgets
   tokenmeter analyze [--json]   Usage insights summary
+  tokenmeter watch [session]    Live event stream from daemon
   tokenmeter backup [path]      Back up the local database
   tokenmeter restore <path>     Restore database from backup
   tokenmeter doctor [--json]    Run installation diagnostics
