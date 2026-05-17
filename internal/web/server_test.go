@@ -998,3 +998,33 @@ func TestHandleMetricsEscapesLabels(t *testing.T) {
 		t.Fatalf("escaped label %q not found\n%s", want, body)
 	}
 }
+
+func TestHandleProjection(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().Add(-time.Hour)
+	if err := db.UpsertSession("projection-web", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("agent-projection", "projection-web", 1, 1, 0, 0, "sonnet", 12.5, now, "projection-web"); err != nil {
+		t.Fatalf("insert usage: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodGet, "/api/projection", nil)
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	var p storage.CostProjection
+	if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+		t.Fatalf("unmarshal projection: %v", err)
+	}
+	if p.DaysElapsed == 0 || p.DaysInMonth == 0 || p.Confidence == "" {
+		t.Fatalf("missing projection fields: %#v", p)
+	}
+	if p.UsedSoFar <= 0 || p.ProjectedTotal <= 0 {
+		t.Fatalf("projection should include cost values, got %#v", p)
+	}
+}

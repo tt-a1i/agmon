@@ -53,6 +53,15 @@ type SearchHit struct {
 	Timestamp   time.Time `json:"timestamp"`
 }
 
+type CostProjection struct {
+	UsedSoFar      float64 `json:"used_so_far"`
+	DaysElapsed    int     `json:"days_elapsed"`
+	DaysInMonth    int     `json:"days_in_month"`
+	AvgDailyCost   float64 `json:"avg_daily_cost"`
+	ProjectedTotal float64 `json:"projected_total"`
+	Confidence     string  `json:"confidence"`
+}
+
 type AgentRow struct {
 	AgentID       string
 	SessionID     string
@@ -805,6 +814,42 @@ func (s *DB) GetCostBetweenForPlatform(from, to time.Time, platform string) (flo
 		WHERE t.timestamp >= ? AND t.timestamp < ? AND s.platform = ?
 	`, formatQueryTime(from), formatQueryTime(to), platform).Scan(&cost)
 	return cost, err
+}
+
+func (s *DB) GetMonthCostProjection(now time.Time) (CostProjection, error) {
+	localNow := now.In(time.Local)
+	monthStart := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, time.Local)
+	daysElapsed := localNow.Day()
+	daysInMonth := monthStart.AddDate(0, 1, -1).Day()
+
+	used, err := s.GetCostBetween(monthStart, localNow)
+	if err != nil {
+		return CostProjection{}, err
+	}
+
+	avgDaily := 0.0
+	projected := 0.0
+	if daysElapsed > 0 {
+		avgDaily = used / float64(daysElapsed)
+		projected = avgDaily * float64(daysInMonth)
+	}
+
+	confidence := "high"
+	switch {
+	case daysElapsed < 3:
+		confidence = "low"
+	case daysElapsed < 10:
+		confidence = "medium"
+	}
+
+	return CostProjection{
+		UsedSoFar:      used,
+		DaysElapsed:    daysElapsed,
+		DaysInMonth:    daysInMonth,
+		AvgDailyCost:   avgDaily,
+		ProjectedTotal: projected,
+		Confidence:     confidence,
+	}, nil
 }
 
 func (s *DB) GetTodayCost() (float64, error) {

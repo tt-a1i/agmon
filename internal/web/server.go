@@ -87,6 +87,7 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/costs", s.handleCosts)
 	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/projection", s.handleProjection)
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/export", s.handleExport)
 	mux.HandleFunc("/api/compare", s.handleCompare)
@@ -557,6 +558,20 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		TopTools:      topTools,
 		TopSessions:   topSessions,
 	})
+}
+
+func (s *Server) handleProjection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	projection, err := s.db.GetMonthCostProjection(time.Now())
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	writeJSON(w, projection)
 }
 
 // handleMetrics emits Prometheus text exposition metrics. Metric names use the

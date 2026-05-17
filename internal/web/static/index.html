@@ -61,16 +61,21 @@ nav{display:flex;align-items:center;justify-content:space-between;height:48px;ma
 .theme-btn:hover{border-color:var(--border-hover);background:var(--bg-hover)}
 
 /* Metrics */
-.metrics{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:12px;margin-bottom:24px}
+.metrics{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:12px;margin-bottom:24px}
 @media(max-width:640px){.metrics{grid-template-columns:repeat(2,1fr)}}
 .metric{padding:16px 18px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;transition:box-shadow .15s,border-color .15s}
 .metric:hover{border-color:var(--border-hover);box-shadow:var(--card-shadow)}
 .metric.hero-metric{border-color:var(--accent-border);background:var(--accent-bg)}
+.hide-projection #projectionMetric{display:none}
 .metric-label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
 .metric-val{font-size:26px;font-weight:700;color:var(--text-strong);letter-spacing:-.6px;line-height:1}
 .hero-metric .metric-val{font-size:32px;letter-spacing:-1px;color:var(--accent)}
 .metric-sub{font-size:11px;color:var(--text-muted);margin-top:4px}
 .metric-sub .up{color:var(--red)}.metric-sub .dn{color:var(--green)}
+.projection-metric.high{border-color:var(--accent-border)}
+.projection-conf.low{color:var(--text-muted)}
+.projection-conf.medium{color:var(--amber);font-weight:650}
+.projection-conf.high{color:var(--accent);font-weight:750}
 .metric-spark{height:24px;margin-top:8px}
 .metric-spark canvas{width:100%;height:100%}
 
@@ -146,6 +151,9 @@ tr:hover td{background:var(--bg-hover)}
 .sr{display:flex;align-items:center;padding:12px 16px;gap:12px;border-bottom:1px solid var(--border-light);cursor:pointer;transition:background .1s}
 .sr:last-child{border-bottom:0}
 .sr:hover{background:var(--bg)}
+.sr.anomaly{background:color-mix(in srgb,var(--amber) 10%,var(--bg2));box-shadow:inset 3px 0 0 color-mix(in srgb,var(--amber) 75%,transparent)}
+.sr.anomaly:hover{background:color-mix(in srgb,var(--amber) 14%,var(--bg))}
+.sr-anom{color:var(--amber);font-size:12px;margin-right:2px}
 .sr-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .sr-dot.active{background:var(--green)}.sr-dot.ended{background:var(--text-faint)}.sr-dot.stale{background:var(--amber)}
 .sr-info{flex:1;min-width:0}
@@ -625,7 +633,7 @@ tr:hover td{background:var(--bg-hover)}
 /* Skeleton */
 @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
 .skel{border-radius:8px;background:linear-gradient(90deg,var(--bg3) 25%,var(--border-light) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s ease-in-out infinite}
-.skel-metrics{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:12px;margin-bottom:24px}
+.skel-metrics{display:grid;grid-template-columns:1.4fr repeat(4,1fr);gap:12px;margin-bottom:24px}
 .skel-card{height:90px;border-radius:10px}
 .skel-chart{height:260px;border-radius:10px;margin-bottom:24px}
 .skel-row{height:48px;border-radius:6px;margin-bottom:8px}
@@ -661,7 +669,7 @@ tr:hover td{background:var(--bg-hover)}
 </nav>
 
 <div id="skeleton">
-  <div class="skel-metrics"><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div>
+  <div class="skel-metrics"><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div>
   <div class="skel skel-chart"></div>
   <div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div>
 </div>
@@ -670,6 +678,7 @@ tr:hover td{background:var(--bg-hover)}
   <div class="metrics">
     <div class="metric hero-metric"><div class="metric-label">Period Cost</div><div class="metric-val" id="hCost">—</div><div class="metric-sub" id="hCostSub"></div><div class="metric-spark"><canvas id="sparkCost"></canvas></div></div>
     <div class="metric"><div class="metric-label">Today</div><div class="metric-val" id="hToday">—</div><div class="metric-sub" id="hTodaySub"></div></div>
+    <div class="metric projection-metric" id="projectionMetric"><div class="metric-label">Projected</div><div class="metric-val" id="hProjection">—</div><div class="metric-sub" id="hProjectionSub"></div></div>
     <div class="metric"><div class="metric-label">Sessions</div><div class="metric-val" id="hSess">—</div><div class="metric-sub" id="hSessSub"></div></div>
     <div class="metric"><div class="metric-label">Avg / Session</div><div class="metric-val" id="hAvg">—</div><div class="metric-sub" id="hAvgSub"></div></div>
   </div>
@@ -813,6 +822,8 @@ tr:hover td{background:var(--bg-hover)}
       </div></div>
       <div class="settings-row"><label for="prefShowCwd">Show project path (cwd) in session list</label><input type="checkbox" class="settings-check" id="prefShowCwd" data-pref="showCwd"></div>
       <div class="settings-row"><label for="prefShowSpark">Show cost-trend sparkline on session rows</label><input type="checkbox" class="settings-check" id="prefShowSpark" data-pref="showSpark"></div>
+      <div class="settings-row"><label for="prefShowProjection">Show projection card</label><input type="checkbox" class="settings-check" id="prefShowProjection" data-pref="showProjection"></div>
+      <div class="settings-row"><label for="prefHighlightAnomalies">Highlight unusual cost sessions</label><input type="checkbox" class="settings-check" id="prefHighlightAnomalies" data-pref="highlightAnomalies"></div>
     </div>
     <div class="settings-section">
       <h4>Budgets</h4>
@@ -846,7 +857,7 @@ const COLORS=['#4f46e5','#06b6d4','#22c55e','#eab308','#ef4444','#f97316','#ec48
 const $=id=>document.getElementById(id);
 
 // Preferences — all persist to localStorage under 'tokenmeter-<key>'.
-const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1',showSpark:'1'};
+const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1',showSpark:'1',showProjection:'1',highlightAnomalies:'1'};
 function getPref(k){const v=localStorage.getItem('tokenmeter-'+k);return v==null?PREFS_DEFAULTS[k]:v}
 function setPref(k,v){localStorage.setItem('tokenmeter-'+k,v);applyPreferences()}
 
@@ -869,6 +880,7 @@ function applyPreferences(){
   document.body.classList.toggle('compact',getPref('compact')==='1');
   document.body.classList.toggle('hide-cwd',getPref('showCwd')!=='1');
   document.body.classList.toggle('hide-spark',getPref('showSpark')!=='1');
+  document.body.classList.toggle('hide-projection',getPref('showProjection')!=='1');
   // Restart slow-poll backstop with current interval. 0 = disabled.
   if(slowPoll){clearInterval(slowPoll);slowPoll=null}
   const sec=parseInt(getPref('poll'),10);
@@ -899,9 +911,10 @@ document.addEventListener('click',e=>{
 document.addEventListener('change',e=>{
   const c=e.target.closest('.settings-check');
   if(!c)return;setPref(c.dataset.pref,c.checked?'1':'0');
+  if(c.dataset.pref==='highlightAnomalies'&&typeof renderSessions==='function')renderSessions(allS);
 });
 let lastCostDays=null;
-let range=getPref('range'),sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null,tagFilter=null;
+let range=getPref('range'),sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null,lastProjection=null,tagFilter=null;
 document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r===range));
 
 const fc=v=>v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4);
@@ -1141,6 +1154,17 @@ function renderTagChips(sessions){
 }
 function setTagFilter(t){tagFilter=t;sLim=20;kbIdx=-1;renderSessions(allS)}
 
+function anomalySessionIDs(sessions){
+  if(getPref('highlightAnomalies')!=='1'||!sessions||sessions.length<3)return new Set();
+  const costs=sessions.map(s=>Number(s.cost_usd)||0);
+  const mean=costs.reduce((a,c)=>a+c,0)/costs.length;
+  const variance=costs.reduce((a,c)=>a+Math.pow(c-mean,2),0)/costs.length;
+  const std=Math.sqrt(variance);
+  if(std<=0)return new Set();
+  const threshold=mean+2*std;
+  return new Set(sessions.filter(s=>(Number(s.cost_usd)||0)>threshold&&(Number(s.cost_usd)||0)>0).map(s=>s.session_id));
+}
+
 function renderSessions(sessions){
   allS=sessions||[];const el=$('sList'),cnt=$('sCnt'),btn=$('sMore');
   renderTagChips(allS);
@@ -1161,6 +1185,7 @@ function renderSessions(sessions){
   // is small (<200 bytes) and identical across rows.
   const daily=(lastCosts&&lastCosts.daily_costs)||[];
   const trendSpark=daily.length>1?buildSrSparkSVG(daily.map(d=>d.Cost||0)):'';
+  const anomalies=anomalySessionIDs(filtered);
   el.innerHTML=filtered.slice(0,sLim).map(s=>{
     const sc=s.status==='active'?'active':s.status==='stale'?'stale':'ended';
     const dur=s.end_time?Math.round((new Date(s.end_time)-new Date(s.start_time))/60000):0;
@@ -1169,7 +1194,9 @@ function renderSessions(sessions){
     const barW=(s.cost_usd/maxC*100).toFixed(1);
     const cwdShort=s.cwd?s.cwd.split('/').slice(-2).join('/'):'';
     const selCls=(typeof compareSet!=='undefined'&&compareSet.has(s.session_id))?' selected':'';
-    return`<div class="sr${selCls}" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><span class="sr-spark" style="color:var(--text-faint)">${trendSpark}</span><div class="sr-arr">›</div></div>`
+    const isAnomaly=anomalies.has(s.session_id);
+    const anomalyIcon=isAnomaly?'<span class="sr-anom" title="Unusually high cost">⚡</span>':'';
+    return`<div class="sr${selCls}${isAnomaly?' anomaly':''}" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${anomalyIcon}${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><span class="sr-spark" style="color:var(--text-faint)">${trendSpark}</span><div class="sr-arr">›</div></div>`
   }).join('');
 }
 $('sMore').onclick=()=>{sLim+=30;renderSessions(allS)};
@@ -1465,8 +1492,20 @@ function showRefreshError(e){
   $('webError').classList.add('show');
 }
 
-function applyDashboardData(stats,costs,sessions){
-  lastStats=stats;lastCosts=costs;
+function renderProjection(projection){
+  lastProjection=projection||lastProjection;
+  const p=lastProjection,card=$('projectionMetric'),val=$('hProjection'),sub=$('hProjectionSub');
+  if(!card||!val||!sub)return;
+  if(!p){val.textContent='—';sub.textContent='';card.classList.remove('high');return}
+  val.textContent=fc(p.projected_total||0);
+  const conf=p.confidence||'low';
+  card.classList.toggle('high',conf==='high');
+  const icon=conf==='low'?'⚠ ':'';
+  sub.innerHTML=`${fc(p.used_so_far||0)} this month · ${p.days_elapsed||0}/${p.days_in_month||0} days · <span class="projection-conf ${escAttr(conf)}">${icon}${escHtml(conf)} conf.</span>`;
+}
+
+function applyDashboardData(stats,costs,sessions,projection){
+  lastStats=stats;lastCosts=costs;lastProjection=projection||lastProjection;
   $('webError').classList.remove('show');
 
   // Show overview (hide skeleton on first load)
@@ -1498,6 +1537,7 @@ function applyDashboardData(stats,costs,sessions){
     const maxD=costs.daily_costs.reduce((m,d)=>d.Cost>m.Cost?d:m,costs.daily_costs[0]);
     if(maxD.Cost>0){const dn=new Date(maxD.Date+'T12:00:00').toLocaleDateString('en',{weekday:'long'});$('insight').innerHTML=`Peak day: <b>${dn}</b> at <b>${fc(maxD.Cost)}</b> · Click chart to filter sessions by day`}else{$('insight').innerHTML=''}
   }else{$('insight').innerHTML=''}
+  renderProjection(lastProjection);
   renderOpsStrip(stats,costs,sessions);
 
   // Platform comparison
@@ -1518,18 +1558,18 @@ function applyDashboardData(stats,costs,sessions){
 }
 
 async function refresh(){try{
-  const[stats,costs,sessions]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),api('/api/sessions')]);
-  applyDashboardData(stats,costs,sessions);
+  const[stats,costs,sessions,projection]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),api('/api/sessions'),api('/api/projection')]);
+  applyDashboardData(stats,costs,sessions,projection);
 }catch(e){showRefreshError(e)}}
 
 async function refreshSessions(){try{
   const sessions=await api('/api/sessions');
-  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,sessions);else renderSessions(sessions);
+  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,sessions,lastProjection);else renderSessions(sessions);
 }catch(e){showRefreshError(e)}}
 
 async function refreshCosts(){try{
-  const[stats,costs]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range)]);
-  applyDashboardData(stats,costs,allS);
+  const[stats,costs,projection]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),api('/api/projection')]);
+  applyDashboardData(stats,costs,allS,projection);
 }catch(e){showRefreshError(e)}}
 
 async function refreshDetail(sid){if(sid)return openSession(sid)}
@@ -1539,7 +1579,7 @@ async function refreshSessionSummary(id){if(!id)return;try{
   if(!d||!d.session)return;
   const idx=allS.findIndex(s=>s.session_id===d.session.session_id);
   if(idx>=0)allS[idx]=d.session;else allS.unshift(d.session);
-  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,allS);else renderSessions(allS);
+  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,allS,lastProjection);else renderSessions(allS);
 }catch(e){console.warn('session summary refresh failed:',e)}}
 
 function isSameLocalDay(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate()}
