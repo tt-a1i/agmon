@@ -1288,6 +1288,83 @@ func TestStaticIndexHasPerfHud(t *testing.T) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+func TestStaticIndexHasEmptyStateTemplate(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="empty-sessions"`) {
+		t.Error("index.html missing <template id=\"empty-sessions\">")
+	}
+	if !strings.Contains(body, `id="empty-search"`) {
+		t.Error("index.html missing <template id=\"empty-search\">")
+	}
+	if !strings.Contains(body, "empty-state") {
+		t.Error("index.html missing .empty-state CSS class usage in templates")
+	}
+}
+
+func TestStaticIndexHasSkeletonRows(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "skeleton-row") {
+		t.Error("index.html missing skeleton-row CSS class")
+	}
+	if !strings.Contains(body, "showSkeletonSessions") {
+		t.Error("index.html missing showSkeletonSessions function")
+	}
+}
+
+func TestStaticIndexHasPullToRefresh(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "pull-to-refresh") && !strings.Contains(body, "ptr-bar") {
+		t.Error("index.html missing pull-to-refresh logic or ptr-bar element")
+	}
+	if !strings.Contains(body, "touchstart") {
+		t.Error("index.html missing touchstart handler (pull-to-refresh)")
+	}
+	if !strings.Contains(body, "touchend") {
+		t.Error("index.html missing touchend handler (pull-to-refresh)")
+	}
+}
+
+func TestStaticIndexHasSwipeTabs(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "dTabs") {
+		t.Error("index.html missing dTabs element reference")
+	}
+	if !strings.Contains(body, "swipe") && !strings.Contains(body, "Swipe") {
+		t.Error("index.html missing swipe tab comment or mention")
+	}
+}
+
+func TestStaticIndexHasClassifyError(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "classifyError") {
+		t.Error("index.html missing classifyError function")
+	}
+	if !strings.Contains(body, "'offline'") && !strings.Contains(body, `"offline"`) {
+		t.Error("index.html classifyError missing 'offline' classification")
+	}
+	if !strings.Contains(body, "'server'") && !strings.Contains(body, `"server"`) {
+		t.Error("index.html classifyError missing 'server' classification")
+	}
+}
+
+func TestStaticIndexHasReducedMotionSkeleton(t *testing.T) {
+	body := getStaticIndex(t)
+	// skeleton-row must have a prefers-reduced-motion override (no animation)
+	if !strings.Contains(body, "skeleton-row") {
+		t.Error("index.html missing skeleton-row class")
+	}
+	if !strings.Contains(body, "prefers-reduced-motion") {
+		t.Error("index.html missing prefers-reduced-motion media query")
+	}
+	// Both must appear together — we check their co-presence since the CSS block
+	// explicitly turns off the shimmer animation when motion is reduced.
+	if !strings.Contains(body, "shimmer") {
+		t.Error("index.html missing shimmer keyframe animation for skeleton")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 func TestHandleProjection(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().Add(-time.Hour)

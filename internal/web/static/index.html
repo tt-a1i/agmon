@@ -678,6 +678,27 @@ body.hide-workspace .workspace-bar{display:none}
 .a11y-toast.success{border-left-color:#3a3}
 .toast-close{background:0;border:0;cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1;padding:0;margin-left:auto;flex-shrink:0}
 .toast-close:hover{color:var(--text-strong)}
+/* Error-classified toast border colors */
+.a11y-toast.offline{border-left-color:#888}
+.a11y-toast.network{border-left-color:#f93}
+.a11y-toast.auth{border-left-color:#d33}
+.a11y-toast.server{border-left-color:#f33}
+.a11y-toast.client{border-left-color:#fa3}
+.toast-retry{background:0;border:1px solid currentColor;border-radius:4px;padding:2px 8px;font:inherit;font-size:11px;font-weight:700;cursor:pointer;color:inherit;opacity:.8;margin-right:4px;flex-shrink:0}
+.toast-retry:hover{opacity:1}
+/* Empty states — richer than .empty, used for 0-session / 0-search */
+.empty-state{display:flex;flex-direction:column;align-items:center;gap:10px;padding:48px 20px;text-align:center}
+.empty-state .empty-icon{font-size:32px;opacity:.6}
+.empty-state h3{font-size:14px;font-weight:700;color:var(--text-strong)}
+.empty-state p{font-size:13px;color:var(--text-muted);max-width:300px;margin:0}
+.empty-state code{display:inline-block;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:4px 12px;font-family:'SF Mono',monospace;font-size:12px;color:var(--text-strong)}
+.empty-state .muted{font-size:11px;color:var(--text-faint)}
+/* Skeleton session rows (list-level loading state) */
+.skeleton-row{height:56px;border-radius:6px;margin-bottom:4px;background:linear-gradient(90deg,var(--bg3) 25%,var(--border-light) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.skeleton-row{animation:none;background:var(--bg3)}}
+/* Pull-to-refresh progress bar */
+#ptr-bar{position:fixed;top:0;left:0;right:0;height:3px;background:var(--accent);transform:scaleX(0);transform-origin:left;z-index:200;display:none;transition:transform .15s}
+#ptr-bar.active{display:block}
 </style>
 </head>
 <body>
@@ -897,6 +918,23 @@ body.hide-workspace .workspace-bar{display:none}
   <button onclick="window.location.reload()">Retry</button>
 </div>
 <div id="perf-hud" aria-hidden="true" style="display:none;position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,.8);color:#0f0;font:11px/1.6 monospace;padding:8px 10px;border-radius:6px;z-index:9998;min-width:96px;pointer-events:none"></div>
+<template id="empty-sessions">
+  <div class="empty-state">
+    <div class="empty-icon" aria-hidden="true">📋</div>
+    <h3>No sessions yet</h3>
+    <p>Start using Claude Code or Codex to record your first session.</p>
+    <code>tokenmeter setup</code>
+    <p class="muted">Then open Claude Code and run a task.</p>
+  </div>
+</template>
+<template id="empty-search">
+  <div class="empty-state">
+    <div class="empty-icon" aria-hidden="true">🔍</div>
+    <h3>No matching sessions</h3>
+    <p>Try a different search query or clear active filters.</p>
+  </div>
+</template>
+<div id="ptr-bar" aria-hidden="true"></div>
 <div id="toast-container" role="region" aria-live="polite" aria-label="Notifications"></div>
 <div class="toast" id="toast"></div>
 </div>
@@ -1331,7 +1369,15 @@ function renderSessions(sessions){
   // Day filter UI
   const dfEl=$('dayFilter');
   if(dayFilter){const dt=new Date(dayFilter+'T12:00:00'),label=dt.toLocaleDateString('en',{weekday:'long',month:'short',day:'numeric'});dfEl.innerHTML=`<div class="day-filter" onclick="dayFilter=null;renderSessions(allS)">📅 ${label} <span class="x">×</span></div>`}else{dfEl.innerHTML=''}
-  if(!filtered.length){el.innerHTML='<div class="empty">'+(searchQ||sessionPlatform!=='all'||dayFilter||workspaceFilter?'No matching sessions':'No sessions yet')+'</div>';cnt.textContent=allS.length+' total';btn.style.display='none';return}
+  if(!filtered.length){
+    const hasFilter=searchQ||sessionPlatform!=='all'||dayFilter||workspaceFilter;
+    const tplId=hasFilter?'empty-search':'empty-sessions';
+    const tpl=document.getElementById(tplId);
+    el.innerHTML='';
+    if(tpl){el.appendChild(tpl.content.cloneNode(true))}
+    else{el.innerHTML='<div class="empty">'+(hasFilter?'No matching sessions':'No sessions yet')+'</div>'}
+    cnt.textContent=allS.length+' total';btn.style.display='none';return;
+  }
   cnt.textContent=(filtered.length===allS.length?allS.length:filtered.length+'/'+allS.length)+' total';btn.style.display=filtered.length>sLim?'block':'none';
   const maxC=Math.max(...filtered.map(s=>s.cost_usd),.01);
   // Global 7-day trend sparkline reused per row. Computed once: SVG string
@@ -1356,6 +1402,10 @@ function renderSessions(sessions){
   el.innerHTML=filtered.slice(0,sLim).map(s=>buildSrRowHtml(s,maxC,trendSpark,anomalies)).join('');
 }
 $('sMore').onclick=()=>{sLim+=30;renderSessions(allS)};
+function showSkeletonSessions(el,n){
+  el=el||$('sList');if(!el)return;
+  el.innerHTML=Array.from({length:n||5},()=>'<div class="skeleton-row" aria-hidden="true"></div>').join('');
+}
 
 // === Performance: debounce utility ===
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}}
@@ -2249,14 +2299,21 @@ window.addEventListener('online',()=>{hideOfflineBadge();toast('Back online');re
 })();
 
 // === A11y: Toast notification system ===
-function showToast(message,type='info',timeoutMs=5000){
+function showToast(message,type,timeoutMs,onRetry){
+  if(type===undefined)type='info';
+  if(timeoutMs===undefined)timeoutMs=5000;
   const container=$('toast-container');if(!container)return;
+  const icons={offline:'📡',network:'⚠️',auth:'🔒',server:'🔴',client:'🟡',error:'❌',warning:'⚠️',success:'✅',info:'ℹ️'};
+  const icon=icons[type]||'ℹ️';
   const t=document.createElement('div');
   t.className='a11y-toast '+(type||'info');
-  t.setAttribute('role',type==='error'?'alert':'status');
-  t.innerHTML='<span>'+escHtml(message)+'</span><button aria-label="Dismiss" class="toast-close">×</button>';
+  const alertTypes=['error','server','auth'];
+  t.setAttribute('role',alertTypes.indexOf(type)>=0?'alert':'status');
+  const retryHtml=onRetry?'<button class="toast-retry" aria-label="Retry">Retry</button>':'';
+  t.innerHTML=`<span>${icon} ${escHtml(message)}</span>${retryHtml}<button aria-label="Dismiss" class="toast-close">×</button>`;
   container.appendChild(t);
   const remove=()=>{if(t.parentNode)t.remove()};
+  if(onRetry)t.querySelector('.toast-retry').addEventListener('click',function(){remove();onRetry()});
   t.querySelector('.toast-close').addEventListener('click',remove);
   if(timeoutMs>0)setTimeout(remove,timeoutMs);
 }
@@ -2344,17 +2401,34 @@ function closeTokenModal(){
   if(_tokenCleanup){_tokenCleanup();_tokenCleanup=null}
 }
 
+// === Error classification ===
+function classifyError(err,res){
+  if(!navigator.onLine)return 'offline';
+  if(res){
+    if(res.status===401)return 'auth';
+    if(res.status>=500)return 'server';
+    if(res.status>=400)return 'client';
+  }
+  return 'network';
+}
+
 // === A11y: safeFetch wrapper ===
 async function safeFetch(url,opts={}){
   try{
     const res=await fetch(url,opts);
     if(res.status===401){showTokenModal();throw new Error('unauthorized')}
-    if(!res.ok){showToast('Request failed: '+res.status,'error');throw new Error('HTTP '+res.status)}
+    if(res.status>=500){
+      const retry=()=>safeFetch(url,opts).catch(()=>{});
+      showToast('Server error: '+res.status,'server',8000,retry);
+      throw new Error('HTTP '+res.status);
+    }
+    if(!res.ok){showToast('Request failed: '+res.status,'client');throw new Error('HTTP '+res.status)}
     return res;
   }catch(e){
     if(e.message==='unauthorized')throw e;
-    if(!navigator.onLine){/* offline badge already shown */}
-    else{showToast('Network error: '+e.message,'error')}
+    if(e.message.startsWith('HTTP '))throw e;
+    const errType=classifyError(e,null);
+    if(errType!=='offline')showToast('Network error: '+e.message,errType);
     throw e;
   }
 }
@@ -2377,6 +2451,49 @@ window.addEventListener('unhandledrejection',function(e){
   const msg=e.reason instanceof Error?e.reason.message:String(e.reason||'unknown');
   showToast('Unhandled error: '+msg,'error',8000);
 });
+
+// === Touch: pull-to-refresh on main ===
+(function(){
+  const main=document.getElementById('main-content')||document.querySelector('main');
+  if(!main)return;
+  var startY=0,pulling=false,ptrBar;
+  var THRESHOLD=64;
+  function getBar(){return ptrBar||(ptrBar=document.getElementById('ptr-bar'),ptrBar)}
+  main.addEventListener('touchstart',function(e){
+    if(window.scrollY>4)return;
+    startY=e.touches[0].clientY;pulling=true;
+  },{passive:true});
+  main.addEventListener('touchmove',function(e){
+    if(!pulling)return;
+    var dy=e.touches[0].clientY-startY;
+    if(dy<=0){pulling=false;return}
+    var b=getBar();if(!b)return;
+    b.style.display='block';
+    b.style.transform='scaleX('+Math.min(dy/THRESHOLD,1)+')';
+  },{passive:true});
+  main.addEventListener('touchend',function(e){
+    if(!pulling)return;pulling=false;
+    var b=getBar();if(b){b.style.transform='scaleX(0)';b.style.display='none'}
+    var endY=e.changedTouches[0]?e.changedTouches[0].clientY:startY;
+    if((endY-startY)>=THRESHOLD&&typeof refreshActiveView==='function')refreshActiveView();
+  },{passive:true});
+})();
+
+// === Touch: swipe left/right to change detail tabs ===
+(function(){
+  var tabs=document.getElementById('dTabs');if(!tabs)return;
+  var sx=0,sy=0;
+  tabs.addEventListener('touchstart',function(e){sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});
+  tabs.addEventListener('touchend',function(e){
+    var dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;
+    if(Math.abs(dx)<40||Math.abs(dx)<Math.abs(dy)*1.5)return;
+    var btns=Array.from(tabs.querySelectorAll('.tab'));
+    var idx=btns.findIndex(function(b){return b.classList.contains('on')});
+    if(idx<0)return;
+    var next=dx<0?btns[idx+1]:btns[idx-1];
+    if(next)next.click();
+  },{passive:true});
+})();
 </script>
 </body>
 </html>
