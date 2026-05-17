@@ -2156,7 +2156,7 @@ async function refreshSessionSummary(id){if(!id)return;try{
   if(!d||!d.session)return;
   const idx=allS.findIndex(s=>s.session_id===d.session.session_id);
   if(idx>=0)allS[idx]=d.session;else allS.unshift(d.session);
-  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,allS,lastProjection);else renderSessions(allS);
+  scheduleLiveRedraw();
 }catch(e){console.warn('session summary refresh failed:',e)}}
 
 function isSameLocalDay(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate()}
@@ -2172,6 +2172,17 @@ function eventInCurrentRange(ev){
   const ts=new Date(ev.timestamp),start=rangeStartDate(range,new Date());
   return !start||ts>=start;
 }
+let liveRedrawTimer=null;
+// Coalesce dashboard re-renders triggered by SSE token_usage bursts. The
+// in-memory totals update synchronously so optimistic state stays accurate;
+// the expensive DOM/Canvas re-render fires once per 200ms window.
+function scheduleLiveRedraw(){
+  if(liveRedrawTimer)return;
+  liveRedrawTimer=setTimeout(()=>{
+    liveRedrawTimer=null;
+    if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,allS);else renderSessions(allS);
+  },200);
+}
 function bumpLiveTotals(ev){
   const d=ev.data||{},cost=Number(d.cost_usd)||0,inTok=Number(d.input_tokens)||0,outTok=Number(d.output_tokens)||0;
   const idx=allS.findIndex(s=>s.session_id===ev.session_id);
@@ -2181,7 +2192,7 @@ function bumpLiveTotals(ev){
   }
   if(cost&&lastStats&&isSameLocalDay(ev.timestamp?new Date(ev.timestamp):new Date(),new Date()))lastStats.today_cost=(lastStats.today_cost||0)+cost;
   if(cost&&lastCosts&&eventInCurrentRange(ev))lastCosts.total_cost=(lastCosts.total_cost||0)+cost;
-  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,allS);else renderSessions(allS);
+  scheduleLiveRedraw();
 }
 
 let eventSource=null,fallbackPoll=null,slowPoll=null,sessionsTimer=null,totalsTimer=null,detailTimer=null,summaryTimers={};
