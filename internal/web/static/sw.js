@@ -1,14 +1,14 @@
 // TokenMeter Service Worker
 //
 // Strategy:
-//   /api/events  → pass through (SSE: never cache, never buffer)
-//   /api/*       → network-first; offline → 503 JSON {error:"offline"}
-//   everything   → cache-first with background refresh (stale-while-revalidate)
-//
-// Bump VERSION on every release that ships a new HTML/JS/SVG asset — old
-// caches are dropped in activate().
+//   /api/events  -> pass through (SSE: never cache, never buffer)
+//   GET /api/*   -> stale-while-revalidate API cache
+//   mutating API -> network only
+//   everything   -> cache-first static assets
 
-const VERSION = 'tokenmeter-v1';
+const STATIC_CACHE = 'tokenmeter-static-v2';
+const API_CACHE = 'tokenmeter-api-v1';
+const MAX_API_CACHE_BYTES = 1024 * 1024;
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -19,7 +19,7 @@ const STATIC_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(VERSION).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(STATIC_CACHE).then((cache) => cache.addAll(STATIC_ASSETS))
   );
   self.skipWaiting();
 });
@@ -27,7 +27,11 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter((key) => key !== STATIC_CACHE && key !== API_CACHE)
+          .map((key) => caches.delete(key))
+      )
     )
   );
   self.clients.claim();
@@ -35,8 +39,6 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
-
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
@@ -44,35 +46,97 @@ self.addEventListener('fetch', (event) => {
   // the browser to handle it directly so EventSource keep-alive works.
   if (url.pathname === '/api/events') return;
 
-  // API endpoints: network-first. Failure surfaces as 503 JSON so the
-  // existing dashboard error handlers can detect offline state.
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(req).catch(
-        () =>
-          new Response(JSON.stringify({ error: 'offline' }), {
-            status: 503,
-            headers: { 'Content-Type': 'application/json' },
-          })
-      )
-    );
+    if (event.request.method === 'GET') {
+      event.respondWith(staleWhileRevalidate(req));
+    }
+    // POST/PUT/DELETE stay network-only.
     return;
   }
 
-  // Static assets: serve cached copy immediately if present, refresh in
-  // the background so the next visit sees newer content.
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((resp) => {
-          if (resp && resp.ok && resp.type === 'basic') {
-            const clone = resp.clone();
-            caches.open(VERSION).then((cache) => cache.put(req, clone));
-          }
-          return resp;
-        })
-        .catch(() => cached);
-      return cached || network;
+  if (req.method !== 'GET') return;
+  event.respondWith(cacheFirst(req));
+});
+
+async function cacheFirst(req) {
+  const cached = await caches.match(req);
+  if (cached) {
+    refreshStatic(req);
+    return cached;
+  }
+  const resp = await fetch(req);
+  if (resp && resp.ok && resp.type === 'basic') {
+    const cache = await caches.open(STATIC_CACHE);
+    await cache.put(req, resp.clone());
+  }
+  return resp;
+}
+
+function refreshStatic(req) {
+  fetch(req)
+    .then((resp) => {
+      if (resp && resp.ok && resp.type === 'basic') {
+        caches.open(STATIC_CACHE).then((cache) => cache.put(req, resp.clone()));
+      }
+    })
+    .catch(() => {});
+}
+
+async function staleWhileRevalidate(req) {
+  const cache = await caches.open(API_CACHE);
+  const cached = await cache.match(req);
+  const network = fetch(req)
+    .then((resp) => {
+      cacheAPIResponse(cache, req, resp).catch(() => {});
+      return resp;
+    })
+    .catch(() => null);
+
+  if (cached) {
+    return withCacheHeader(cached);
+  }
+
+  const resp = await network;
+  if (resp) return resp;
+  return new Response(JSON.stringify({ error: 'offline', cached: false }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+async function cacheAPIResponse(cache, req, resp) {
+  if (!resp || !resp.ok) return;
+  const contentType = resp.headers.get('Content-Type') || '';
+  if (!contentType.includes('application/json')) return;
+
+  const contentLength = Number(resp.headers.get('Content-Length') || 0);
+  if (contentLength > MAX_API_CACHE_BYTES) return;
+
+  if (contentLength > 0) {
+    await cache.put(req, resp.clone());
+    return;
+  }
+
+  const clone = resp.clone();
+  const body = await clone.arrayBuffer();
+  if (body.byteLength > MAX_API_CACHE_BYTES) return;
+
+  await cache.put(
+    req,
+    new Response(body, {
+      status: resp.status,
+      statusText: resp.statusText,
+      headers: resp.headers,
     })
   );
-});
+}
+
+function withCacheHeader(resp) {
+  const headers = new Headers(resp.headers);
+  headers.set('X-TokenMeter-Cache', 'hit');
+  return new Response(resp.body, {
+    status: resp.status,
+    statusText: resp.statusText,
+    headers,
+  });
+}

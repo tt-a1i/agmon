@@ -637,6 +637,7 @@ body.hide-workspace .workspace-bar{display:none}
    have room to breathe. */
 @media(max-width:640px){
   .settings-box{max-width:none;width:100%;height:100%;max-height:100vh;border-radius:0;border:0;padding:20px}
+  .offline-badge{top:auto;right:12px;left:12px;bottom:12px;justify-content:space-between;border-radius:10px}
 }
 
 /* Skeleton */
@@ -653,6 +654,10 @@ body.hide-workspace .workspace-bar{display:none}
 .scroll-top:hover{color:var(--text-strong);border-color:var(--border-hover)}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(40px);background:var(--text-strong);color:var(--bg);border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;z-index:100;opacity:0;transition:all .2s;pointer-events:none}
 .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.offline-badge{position:fixed;top:72px;right:20px;z-index:95;display:flex;align-items:center;gap:10px;background:color-mix(in srgb,var(--amber) 16%,var(--bg2));border:1px solid color-mix(in srgb,var(--amber) 45%,var(--border));box-shadow:var(--card-shadow);color:var(--text-strong);border-radius:999px;padding:8px 10px 8px 12px;font-size:12px;font-weight:650}
+.offline-badge.hidden{display:none}
+.offline-badge button{background:var(--bg);border:1px solid var(--border);border-radius:999px;color:var(--text-muted);font:inherit;font-size:11px;font-weight:650;padding:4px 9px;cursor:pointer}
+.offline-badge button:hover{color:var(--text);border-color:var(--text-faint)}
 </style>
 </head>
 <body>
@@ -856,11 +861,16 @@ body.hide-workspace .workspace-bar{display:none}
     </div>
     <div class="settings-footer">
       <button class="settings-reset" onclick="resetPreferences()">Reset to defaults</button>
+      <button class="settings-reset" onclick="clearOfflineCache()">Clear offline cache</button>
       <button class="settings-close" onclick="$('settingsModal').classList.remove('show')">Done</button>
     </div>
   </div>
 </div>
 <div class="scroll-top" id="scrollTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</div>
+<div id="offlineBadge" class="offline-badge hidden">
+  <span>📡 Offline · showing cached data</span>
+  <button onclick="window.location.reload()">Retry</button>
+</div>
 <div class="toast" id="toast"></div>
 </div>
 <script>
@@ -995,6 +1005,27 @@ function sessionsPath(workspace){
 }
 function renderMd(s){let h=escHtml(s);h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');h=h.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');return h}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
+const OFFLINE_API_CACHE='tokenmeter-api-v1';
+function showOfflineBadge(){
+  const b=$('offlineBadge');if(!b)return;
+  b.classList.remove('hidden');
+}
+function hideOfflineBadge(){
+  const b=$('offlineBadge');if(!b)return;
+  b.classList.add('hidden');
+}
+function updateOfflineBadge(){
+  if(navigator.onLine===false)showOfflineBadge();else hideOfflineBadge();
+}
+async function clearOfflineCache(){
+  if(!('caches' in window)){toast('Offline cache unavailable');return}
+  try{
+    await caches.delete(OFFLINE_API_CACHE);
+    toast('Offline cache cleared');
+  }catch(e){
+    toast('Cache clear failed: '+e.message);
+  }
+}
 function renderDetailTagDisplay(s){
   const tag=(s&&s.tag||'').trim();
   const display=tag?`<span class="d-tag-display">${escHtml(tag)}</span>`:`<span class="d-tag-display empty">— none —</span>`;
@@ -1026,12 +1057,20 @@ function drawSparkline(canvasId,values,color){
   ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.lineCap='round';ctx.stroke();
 }
 async function api(u){
-  const r=await fetch(u);
-  if(!r.ok){
-    const text=await r.text();
-    throw new Error(text||r.statusText||('HTTP '+r.status));
+  try{
+    const r=await fetch(u);
+    if(r.headers&&r.headers.get('X-TokenMeter-Cache')==='hit'&&navigator.onLine===false)showOfflineBadge();
+    if(!r.ok){
+      if(r.status===503)showOfflineBadge();
+      const text=await r.text();
+      throw new Error(text||r.statusText||('HTTP '+r.status));
+    }
+    if(navigator.onLine!==false)hideOfflineBadge();
+    return r.json();
+  }catch(e){
+    showOfflineBadge();
+    throw e;
   }
-  return r.json();
 }
 
 // Chart
@@ -2065,8 +2104,9 @@ if('serviceWorker' in navigator){
   window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(err=>console.warn('SW register failed:',err))});
 }
 // Surface network transitions so users know when they're seeing cached data.
-window.addEventListener('offline',()=>toast('Offline — showing cached data'));
-window.addEventListener('online',()=>toast('Back online'));
+updateOfflineBadge();
+window.addEventListener('offline',()=>{showOfflineBadge();toast('Offline — showing cached data')});
+window.addEventListener('online',()=>{hideOfflineBadge();toast('Back online');refreshActiveView()});
 </script>
 </body>
 </html>
