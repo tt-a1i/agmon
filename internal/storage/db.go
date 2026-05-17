@@ -88,6 +88,12 @@ func (s *DB) Close() error {
 	return s.db.Close()
 }
 
+// Stats returns connection pool statistics for the underlying *sql.DB.
+// Satisfies testutil.DBStatter for use with testutil.DBConnLeakCheck.
+func (s *DB) Stats() sql.DBStats {
+	return s.db.Stats()
+}
+
 func (s *DB) addColumnIfMissing(table, column, def string) {
 	// Check column existence up-front via PRAGMA table_info, which is stable
 	// across SQLite driver versions. The previous implementation parsed the
