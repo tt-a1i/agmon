@@ -19,6 +19,9 @@ type initOptions struct {
 }
 
 func runInit() error {
+	if maybePrintCmdHelp("init", os.Args[2:]) {
+		return nil
+	}
 	opts, err := parseInitArgs(os.Args[2:])
 	if err != nil {
 		return err

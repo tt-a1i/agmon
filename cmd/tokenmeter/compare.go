@@ -47,6 +47,9 @@ type compareResult struct {
 
 func runCompare() error {
 	args := os.Args[2:]
+	if maybePrintCmdHelp("compare", args) {
+		return nil
+	}
 	if len(args) < 2 {
 		return fmt.Errorf("usage: tokenmeter compare <sessionA> <sessionB> [--format text|json]")
 	}

@@ -13,6 +13,9 @@ import (
 )
 
 func runAnalyze() error {
+	if maybePrintCmdHelp("analyze", os.Args[2:]) {
+		return nil
+	}
 	opts, err := parseAnalyzeArgs(os.Args[2:])
 	if err != nil {
 		return err

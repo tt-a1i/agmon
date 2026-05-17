@@ -41,6 +41,9 @@ var completionSubcommands = []string{
 }
 
 func runCompletion() error {
+	if maybePrintCmdHelp("completion", os.Args[2:]) {
+		return nil
+	}
 	if len(os.Args) < 3 {
 		return fmt.Errorf("usage: tokenmeter completion bash|zsh|fish")
 	}

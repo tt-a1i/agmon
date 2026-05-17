@@ -12,6 +12,9 @@ import (
 )
 
 func runReload() error {
+	if maybePrintCmdHelp("reload", os.Args[2:]) {
+		return nil
+	}
 	path := appdir.Path("daemon.pid")
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -11,6 +11,9 @@ import (
 )
 
 func runBackup() error {
+	if maybePrintCmdHelp("backup", os.Args[2:]) {
+		return nil
+	}
 	if len(os.Args) > 3 {
 		return fmt.Errorf("usage: tokenmeter backup [dest-path]")
 	}

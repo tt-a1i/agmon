@@ -10,6 +10,9 @@ import (
 )
 
 func runSearch() error {
+	if maybePrintCmdHelp("search", os.Args[2:]) {
+		return nil
+	}
 	query, limit, err := parseSearchArgs(os.Args[2:])
 	if err != nil {
 		return err

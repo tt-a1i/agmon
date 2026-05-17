@@ -14,6 +14,9 @@ import (
 )
 
 func runRestore() error {
+	if maybePrintCmdHelp("restore", os.Args[2:]) {
+		return nil
+	}
 	if len(os.Args) != 3 {
 		return fmt.Errorf("usage: tokenmeter restore <source-path>")
 	}

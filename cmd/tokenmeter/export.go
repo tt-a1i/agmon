@@ -13,6 +13,9 @@ import (
 )
 
 func runExport() error {
+	if maybePrintCmdHelp("export", os.Args[2:]) {
+		return nil
+	}
 	opts, err := parseExportArgs(os.Args[2:])
 	if err != nil {
 		return err

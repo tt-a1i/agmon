@@ -10,6 +10,9 @@ import (
 )
 
 func runBudget() error {
+	if maybePrintCmdHelp("budget", os.Args[2:]) {
+		return nil
+	}
 	if len(os.Args) < 3 {
 		return fmt.Errorf("usage: tokenmeter budget <list|set|delete|usage>")
 	}

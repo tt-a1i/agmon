@@ -11,6 +11,9 @@ import (
 )
 
 func runCompact() error {
+	if maybePrintCmdHelp("compact", os.Args[2:]) {
+		return nil
+	}
 	full := false
 	for _, arg := range os.Args[2:] {
 		switch arg {

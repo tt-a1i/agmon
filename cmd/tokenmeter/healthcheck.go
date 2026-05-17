@@ -34,6 +34,9 @@ type healthcheckCheck struct {
 }
 
 func runHealthcheck() error {
+	if maybePrintCmdHelp("healthcheck", os.Args[2:]) {
+		return nil
+	}
 	code, err := runHealthcheckWithDeps(os.Args[2:], os.Stdout, defaultHealthcheckURL)
 	if err != nil {
 		return err

@@ -20,6 +20,9 @@ type VersionInfo struct {
 }
 
 func runVersion() error {
+	if maybePrintCmdHelp("version", os.Args[2:]) {
+		return nil
+	}
 	return runVersionWithDeps(os.Args[1:], os.Stdout)
 }
 

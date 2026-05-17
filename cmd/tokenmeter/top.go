@@ -24,6 +24,9 @@ type topOptions struct {
 }
 
 func runTop() error {
+	if maybePrintCmdHelp("top", os.Args[2:]) {
+		return nil
+	}
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	sigCh := make(chan os.Signal, 1)

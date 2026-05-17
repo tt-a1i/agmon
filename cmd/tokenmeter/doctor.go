@@ -70,6 +70,9 @@ type doctorCheck struct {
 }
 
 func runDoctor() error {
+	if maybePrintCmdHelp("doctor", os.Args[2:]) {
+		return nil
+	}
 	jsonOutput := false
 	fixMode := false
 	for _, arg := range os.Args[2:] {

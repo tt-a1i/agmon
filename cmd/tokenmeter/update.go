@@ -33,6 +33,9 @@ type ghAsset struct {
 }
 
 func runUpdate() {
+	if maybePrintCmdHelp("update", os.Args[2:]) {
+		return
+	}
 	fmt.Printf("tokenmeter v%s — checking for updates...\n", version)
 
 	rel, err := fetchLatestRelease()

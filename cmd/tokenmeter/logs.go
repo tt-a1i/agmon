@@ -13,6 +13,9 @@ import (
 )
 
 func runLogs() error {
+	if maybePrintCmdHelp("logs", os.Args[2:]) {
+		return nil
+	}
 	opts, err := parseLogsArgs(os.Args[2:])
 	if err != nil {
 		return err

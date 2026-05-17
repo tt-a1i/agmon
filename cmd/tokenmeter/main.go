@@ -323,7 +323,7 @@ func main() {
 	case "help", "-h", "--help":
 		printHelp()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
+		fmt.Fprint(os.Stderr, unknownCommandHelpMessage(os.Args[1]))
 		printHelp()
 		os.Exit(1)
 	}
@@ -463,6 +463,9 @@ func runTUI(args ...string) {
 }
 
 func runDaemon() {
+	if maybePrintCmdHelp("daemon", os.Args[2:]) {
+		return
+	}
 	if err := daemon.EnsureNotRunning(); err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -536,6 +539,9 @@ func runDaemon() {
 }
 
 func runEmit() {
+	if maybePrintCmdHelp("emit", os.Args[2:]) {
+		return
+	}
 	// Redirect log output to a dedicated file so emit errors don't pollute
 	// Claude Code's hook stderr parsing. Open in append mode; if it fails,
 	// silence logging entirely to avoid leaking anything to Claude's stderr.
@@ -581,6 +587,9 @@ func runEmitWithReader(sockPath string, r io.Reader) error {
 // tokenmeter setup hook format:
 // Claude Code settings.json uses: [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }]
 func runSetup() {
+	if maybePrintCmdHelp("setup", os.Args[2:]) {
+		return
+	}
 	home, _ := os.UserHomeDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 
@@ -675,6 +684,9 @@ func addHookEntry(hooks map[string]any, hookName, emitCmd string) {
 }
 
 func runUninstall() {
+	if maybePrintCmdHelp("uninstall", os.Args[2:]) {
+		return
+	}
 	home, _ := os.UserHomeDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 
@@ -763,6 +775,9 @@ func isTokenMeterEmitCommand(cmd string) bool {
 }
 
 func runReport() {
+	if maybePrintCmdHelp("report", os.Args[2:]) {
+		return
+	}
 	db := mustOpenDB()
 	defer db.Close()
 
@@ -866,6 +881,9 @@ func runReport() {
 }
 
 func runShare() {
+	if maybePrintCmdHelp("share", os.Args[2:]) {
+		return
+	}
 	db := mustOpenDB()
 	defer db.Close()
 
@@ -976,6 +994,9 @@ func runPeriodReport(db *storage.DB, period string) {
 }
 
 func runWeb() error {
+	if maybePrintCmdHelp("web", os.Args[2:]) {
+		return nil
+	}
 	port := "8370"
 	for i, arg := range os.Args {
 		if arg == "--port" && i+1 < len(os.Args) {
@@ -1080,6 +1101,9 @@ func runWeb() error {
 }
 
 func runStatus() {
+	if maybePrintCmdHelp("status", os.Args[2:]) {
+		return
+	}
 	db := mustOpenDB()
 	defer db.Close()
 
@@ -1132,6 +1156,9 @@ func runStatus() {
 }
 
 func runCost() {
+	if maybePrintCmdHelp("cost", os.Args[2:]) {
+		return
+	}
 	db := mustOpenDB()
 	defer db.Close()
 
@@ -1182,6 +1209,9 @@ func runCost() {
 }
 
 func runClean() {
+	if maybePrintCmdHelp("clean", os.Args[2:]) {
+		return
+	}
 	days := 7
 	if len(os.Args) > 2 {
 		d, err := strconv.Atoi(os.Args[2])
@@ -1207,6 +1237,9 @@ func runClean() {
 }
 
 func runTag() {
+	if maybePrintCmdHelp("tag", os.Args[2:]) {
+		return
+	}
 	if len(os.Args) < 3 {
 		fmt.Fprintf(os.Stderr, "Usage: tokenmeter tag <session-id> [text]\n")
 		fmt.Fprintf(os.Stderr, "  Set a tag:   tokenmeter tag abc123 \"refactoring auth\"\n")

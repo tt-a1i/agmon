@@ -9,6 +9,9 @@ import (
 )
 
 func runCheckpoint() error {
+	if maybePrintCmdHelp("checkpoint", os.Args[2:]) {
+		return nil
+	}
 	if len(os.Args) > 2 {
 		return fmt.Errorf("usage: tokenmeter checkpoint")
 	}

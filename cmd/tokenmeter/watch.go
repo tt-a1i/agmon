@@ -25,6 +25,9 @@ type watchOptions struct {
 type watchSubscribeFunc func(string) (<-chan event.Event, func(), error)
 
 func runWatch() error {
+	if maybePrintCmdHelp("watch", os.Args[2:]) {
+		return nil
+	}
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(stopCh)
