@@ -149,6 +149,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "doctor":
+		if err := runDoctor(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "clean":
 		runClean()
 	case "tag":
@@ -1118,6 +1123,7 @@ Usage:
   tokenmeter compare <a> <b>    Compare two sessions
   tokenmeter search <query>     Search tools, results, and files
   tokenmeter budget <command>   Manage monthly budgets
+  tokenmeter doctor [--json]    Run installation diagnostics
   tokenmeter web [--port N]     Start web dashboard (default port: 8370)
   tokenmeter clean [days]       Remove sessions older than N days (default: 7)
   tokenmeter tag <id> [text]    Tag a session with a note (omit text to clear)
