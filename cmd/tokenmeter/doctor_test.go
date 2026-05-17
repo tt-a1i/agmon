@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,9 @@ func prepareDoctorCleanInstall(t *testing.T) *storage.DB {
 	}
 	if err := os.WriteFile(filepath.Join(codexDir, "session.jsonl"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("write codex session: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".tokenmeter", "backups"), 0o755); err != nil {
+		t.Fatalf("mkdir backups: %v", err)
 	}
 
 	_ = captureStdout(t, runSetup)
@@ -201,5 +205,167 @@ func TestDoctorDetectsMissingDB(t *testing.T) {
 	want := fmt.Sprintf("[✗] Database %s missing", storage.DefaultDBPath())
 	if !strings.Contains(out, want) {
 		t.Fatalf("expected missing db error %q:\n%s", want, out)
+	}
+}
+
+func TestDoctorFixCreatesMissingBackupsDir(t *testing.T) {
+	home := t.TempDir()
+	openHomeDB(t, home)
+	backupsDir := filepath.Join(home, ".tokenmeter", "backups")
+	if err := os.RemoveAll(backupsDir); err != nil {
+		t.Fatalf("remove backups dir: %v", err)
+	}
+	withArgs(t, []string{"tokenmeter", "doctor", "--fix"})
+
+	out := captureStdout(t, func() {
+		if err := runDoctor(); err != nil {
+			t.Fatalf("runDoctor: %v", err)
+		}
+	})
+
+	if _, err := os.Stat(backupsDir); err != nil {
+		t.Fatalf("expected backups dir created: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Backups dir") || !strings.Contains(out, "[✗→✓]") {
+		t.Fatalf("expected fixed backups output:\n%s", out)
+	}
+}
+
+func TestDoctorFixRemovesStalePidFile(t *testing.T) {
+	home := t.TempDir()
+	openHomeDB(t, home)
+	pidPath := filepath.Join(home, ".tokenmeter", "daemon.pid")
+	if err := os.WriteFile(pidPath, []byte("999999"), 0o644); err != nil {
+		t.Fatalf("write pid: %v", err)
+	}
+	withArgs(t, []string{"tokenmeter", "doctor", "--fix"})
+
+	out := captureStdout(t, func() {
+		if err := runDoctor(); err != nil {
+			t.Fatalf("runDoctor: %v", err)
+		}
+	})
+
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale pid removed, stat err=%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Stale daemon.pid") || !strings.Contains(out, "[✗→✓]") {
+		t.Fatalf("expected fixed stale pid output:\n%s", out)
+	}
+}
+
+func TestDoctorFixChmodsSocketTo0600(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix socket mode does not apply on windows")
+	}
+	home := t.TempDir()
+	openHomeDB(t, home)
+	socketPath := daemon.DefaultSocketPath()
+	if err := os.WriteFile(socketPath, []byte("socket placeholder"), 0o644); err != nil {
+		t.Fatalf("write socket placeholder: %v", err)
+	}
+	withArgs(t, []string{"tokenmeter", "doctor", "--fix"})
+
+	out := captureStdout(t, func() {
+		if err := runDoctor(); err != nil {
+			t.Fatalf("runDoctor: %v", err)
+		}
+	})
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("socket mode = %04o, want 0600\n%s", got, out)
+	}
+	if !strings.Contains(out, "fixed to 0600") || !strings.Contains(out, "[✗→✓]") {
+		t.Fatalf("expected fixed socket output:\n%s", out)
+	}
+}
+
+func TestDoctorFixDoesNotTouchRunningDaemon(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix socket mode does not apply on windows")
+	}
+	db := prepareDoctorCleanInstall(t)
+	socketPath := daemon.DefaultSocketPath()
+	if err := os.Chmod(socketPath, 0o644); err != nil {
+		t.Fatalf("chmod socket: %v", err)
+	}
+	withArgs(t, []string{"tokenmeter", "doctor", "--fix"})
+
+	out := captureStdout(t, func() {
+		if err := runDoctor(); err != nil {
+			t.Fatalf("runDoctor: %v", err)
+		}
+	})
+
+	info, err := os.Stat(socketPath)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("running daemon socket mode changed to %04o\n%s", got, out)
+	}
+	_ = db
+}
+
+func TestDoctorFixReportsActionsInOutput(t *testing.T) {
+	home := t.TempDir()
+	openHomeDB(t, home)
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings: %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+	withArgs(t, []string{"tokenmeter", "doctor", "--fix"})
+
+	out := captureStdout(t, func() {
+		if err := runDoctor(); err != nil {
+			t.Fatalf("runDoctor: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "[✗→✓]") {
+		t.Fatalf("expected fixed marker:\n%s", out)
+	}
+	if !strings.Contains(out, "Fixed:") || !strings.Contains(out, "Manual action needed:") {
+		t.Fatalf("expected fix summary:\n%s", out)
+	}
+}
+
+func TestDoctorFixJSON(t *testing.T) {
+	home := t.TempDir()
+	openHomeDB(t, home)
+	backupsDir := filepath.Join(home, ".tokenmeter", "backups")
+	if err := os.RemoveAll(backupsDir); err != nil {
+		t.Fatalf("remove backups dir: %v", err)
+	}
+	withArgs(t, []string{"tokenmeter", "doctor", "--fix", "--json"})
+
+	out := captureStdout(t, func() {
+		if err := runDoctor(); err != nil {
+			t.Fatalf("runDoctor: %v", err)
+		}
+	})
+
+	var payload struct {
+		FixedCount int `json:"fixed_count"`
+		Actions    []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("doctor --fix --json should be valid JSON: %v\n%s", err, out)
+	}
+	if payload.FixedCount == 0 {
+		t.Fatalf("expected fixed_count > 0: %#v\n%s", payload, out)
+	}
+	if len(payload.Actions) == 0 {
+		t.Fatalf("expected actions in json: %#v\n%s", payload, out)
 	}
 }

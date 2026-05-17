@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/tt-a1i/tokenmeter/internal/appdir"
@@ -31,9 +32,28 @@ var (
 )
 
 type doctorCheckResult struct {
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Message      string `json:"message"`
+	Fixed        bool   `json:"fixed,omitempty"`
+	FixAttempted bool   `json:"fix_attempted,omitempty"`
+	FixError     string `json:"fix_error,omitempty"`
+	FixMessage   string `json:"fix_message,omitempty"`
+	fix          func() error
+}
+
+type doctorFixReport struct {
+	Checks             []doctorCheckResult `json:"checks"`
+	FixedCount         int                 `json:"fixed_count"`
+	ManualActionNeeded int                 `json:"manual_action_needed"`
+	Actions            []doctorFixAction   `json:"actions"`
+}
+
+type doctorFixAction struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"`
 	Message string `json:"message"`
+	Error   string `json:"error,omitempty"`
 }
 
 type doctorContext struct {
@@ -51,32 +71,49 @@ type doctorCheck struct {
 
 func runDoctor() error {
 	jsonOutput := false
+	fixMode := false
 	for _, arg := range os.Args[2:] {
 		switch arg {
 		case "--json":
 			jsonOutput = true
 		case "--fix":
-			return fmt.Errorf("tokenmeter doctor --fix is not implemented yet")
+			fixMode = true
 		default:
 			return fmt.Errorf("unknown doctor argument: %s", arg)
 		}
 	}
 
 	results := collectDoctorChecks()
+	var report doctorFixReport
+	if fixMode {
+		results, report = applyDoctorFixes(results)
+	}
 	if jsonOutput {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(results)
+		if fixMode {
+			return enc.Encode(report)
+		}
+		return enc.Encode(stripDoctorFixFuncs(results))
 	}
 
-	fmt.Println("TokenMeter Doctor — diagnostics")
+	if fixMode {
+		fmt.Println("TokenMeter Doctor (--fix mode)")
+	} else {
+		fmt.Println("TokenMeter Doctor — diagnostics")
+	}
 	fmt.Println()
 	for _, result := range results {
-		fmt.Printf("[%s] %s\n", doctorIcon(result.Status), result.Message)
+		fmt.Printf("[%s] %s\n", doctorDisplayIcon(result), result.Message)
 	}
 	ok, warnings, errs := doctorCounts(results)
 	fmt.Println()
-	fmt.Printf("Summary: %d OK, %d warnings, %d errors.\n", ok, warnings, errs)
+	if fixMode {
+		fmt.Printf("Summary: %d OK, %d warnings, %d still errors.\n", ok, warnings, errs)
+		fmt.Printf("Fixed: %d issues. Manual action needed: %d.\n", report.FixedCount, report.ManualActionNeeded)
+	} else {
+		fmt.Printf("Summary: %d OK, %d warnings, %d errors.\n", ok, warnings, errs)
+	}
 	if doctorHooksNeedSetup(results) {
 		fmt.Println("Run 'tokenmeter setup' if hooks missing.")
 	}
@@ -114,6 +151,7 @@ func collectDoctorChecks() []doctorCheckResult {
 		{"pricing_json", checkDoctorPricingJSON},
 		{"webhooks_json", checkDoctorWebhooksJSON},
 		{"budgets", checkDoctorBudgets},
+		{"backups_dir", checkDoctorBackupsDir},
 		{"last_token_activity", checkDoctorLastTokenActivity},
 		{"active_sessions", checkDoctorActiveSessions},
 	}
@@ -139,6 +177,79 @@ func doctorResult(name, status, message string) doctorCheckResult {
 	return doctorCheckResult{Name: name, Status: status, Message: message}
 }
 
+func doctorFixableResult(name, status, message string, fix func() error) doctorCheckResult {
+	return doctorCheckResult{Name: name, Status: status, Message: message, fix: fix}
+}
+
+func stripDoctorFixFuncs(results []doctorCheckResult) []doctorCheckResult {
+	out := make([]doctorCheckResult, len(results))
+	copy(out, results)
+	for i := range out {
+		out[i].fix = nil
+	}
+	return out
+}
+
+func applyDoctorFixes(results []doctorCheckResult) ([]doctorCheckResult, doctorFixReport) {
+	fixed := make([]doctorCheckResult, len(results))
+	copy(fixed, results)
+	report := doctorFixReport{Checks: fixed}
+	for i := range fixed {
+		result := &fixed[i]
+		if result.Status != doctorStatusError || result.fix == nil {
+			continue
+		}
+		result.FixAttempted = true
+		action := doctorFixAction{Name: result.Name}
+		if err := result.fix(); err != nil {
+			result.FixError = err.Error()
+			action.Status = doctorStatusError
+			action.Message = result.Message
+			action.Error = err.Error()
+			report.Actions = append(report.Actions, action)
+			continue
+		}
+		result.Fixed = true
+		result.Status = doctorStatusOK
+		result.Message = result.Message + " → " + doctorFixedMessage(result.Name)
+		result.FixMessage = doctorFixedMessage(result.Name)
+		action.Status = doctorStatusOK
+		action.Message = result.Message
+		report.FixedCount++
+		report.Actions = append(report.Actions, action)
+	}
+	report.Checks = stripDoctorFixFuncs(fixed)
+	_, _, report.ManualActionNeeded = doctorCounts(fixed)
+	return fixed, report
+}
+
+func doctorFixedMessage(name string) string {
+	switch name {
+	case "home":
+		return "created app directories"
+	case "schema_version":
+		return "migration triggered"
+	case "socket_file":
+		return "fixed to 0600"
+	case "daemon_pid":
+		return "removed"
+	case "claude_settings":
+		return "backed up and restored defaults"
+	case "claude_hook_command", "claude_hook_events":
+		return "hooks installed"
+	case "codex_sessions":
+		return "created sessions directory"
+	case "pricing_json":
+		return "backed up and removed"
+	case "webhooks_json":
+		return "backed up and removed"
+	case "backups_dir":
+		return "created backups directory"
+	default:
+		return "fixed"
+	}
+}
+
 func checkDoctorBinary(ctx doctorContext) doctorCheckResult {
 	path, err := os.Executable()
 	if err != nil {
@@ -151,7 +262,14 @@ func checkDoctorHome(ctx doctorContext) doctorCheckResult {
 	info, err := os.Stat(ctx.appBase)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return doctorResult("home", doctorStatusError, fmt.Sprintf("Home directory %s missing", ctx.appBase))
+			return doctorFixableResult("home", doctorStatusError, fmt.Sprintf("Home directory %s missing", ctx.appBase), func() error {
+				for _, path := range []string{ctx.appBase, filepath.Join(ctx.appBase, "data"), filepath.Join(ctx.appBase, "backups")} {
+					if err := os.MkdirAll(path, 0o755); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
 		}
 		return doctorResult("home", doctorStatusError, fmt.Sprintf("Home directory %s inaccessible: %v", ctx.appBase, err))
 	}
@@ -226,7 +344,13 @@ func checkDoctorSchemaVersion(ctx doctorContext) doctorCheckResult {
 	}
 	defer db.Close()
 	if !doctorTableExists(db, "schema_version") {
-		return doctorResult("schema_version", doctorStatusWarning, "Schema version table missing")
+		return doctorFixableResult("schema_version", doctorStatusError, "Schema version table missing", func() error {
+			migrated, err := storage.Open(ctx.dbPath)
+			if err != nil {
+				return err
+			}
+			return migrated.Close()
+		})
 	}
 	var version int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
@@ -280,18 +404,31 @@ func checkDoctorSocketFile(ctx doctorContext) doctorCheckResult {
 	}
 	mode := info.Mode().Perm()
 	if runtime.GOOS != "windows" && mode != 0o600 {
-		return doctorResult("socket_file", doctorStatusError, fmt.Sprintf("Socket %s mode %04o, expected 0600", ctx.socketPath, mode))
+		running, _ := daemonPIDRunning(ctx.pidPath)
+		if running {
+			return doctorResult("socket_file", doctorStatusError, fmt.Sprintf("Socket %s mode %04o, expected 0600; daemon running, skipped", ctx.socketPath, mode))
+		}
+		return doctorFixableResult("socket_file", doctorStatusError, fmt.Sprintf("Socket %s mode %04o, expected 0600", ctx.socketPath, mode), func() error {
+			return os.Chmod(ctx.socketPath, 0o600)
+		})
 	}
 	return doctorResult("socket_file", doctorStatusOK, fmt.Sprintf("Socket %s mode %04o", ctx.socketPath, mode))
 }
 
 func checkDoctorDaemonPID(ctx doctorContext) doctorCheckResult {
-	running, pid := daemon.IsRunning()
+	running, pid := daemonPIDRunning(ctx.pidPath)
 	if !running {
-		if _, err := os.Stat(ctx.pidPath); err != nil && errors.Is(err, os.ErrNotExist) {
+		data, err := os.ReadFile(ctx.pidPath)
+		if err != nil && errors.Is(err, os.ErrNotExist) {
 			return doctorResult("daemon_pid", doctorStatusError, fmt.Sprintf("Daemon pid file %s missing; daemon not running", ctx.pidPath))
 		}
-		return doctorResult("daemon_pid", doctorStatusError, "Daemon not running")
+		if err == nil {
+			stalePID := strings.TrimSpace(string(data))
+			return doctorFixableResult("daemon_pid", doctorStatusError, fmt.Sprintf("Stale daemon.pid (pid %s dead)", stalePID), func() error {
+				return os.Remove(ctx.pidPath)
+			})
+		}
+		return doctorResult("daemon_pid", doctorStatusError, fmt.Sprintf("Daemon pid file %s unreadable: %v", ctx.pidPath, err))
 	}
 	return doctorResult("daemon_pid", doctorStatusOK, fmt.Sprintf("Daemon running (pid %d)", pid))
 }
@@ -326,7 +463,15 @@ func checkDoctorEventStream(ctx doctorContext) doctorCheckResult {
 func checkDoctorClaudeSettingsJSON(ctx doctorContext) doctorCheckResult {
 	path := claudeSettingsPath(ctx)
 	if _, err := readClaudeSettings(path); err != nil {
-		return doctorResult("claude_settings", doctorStatusError, fmt.Sprintf("Claude settings %s invalid: %v", path, err))
+		return doctorFixableResult("claude_settings", doctorStatusError, fmt.Sprintf("Claude settings %s invalid: %v", path, err), func() error {
+			if err := backupFile(path, path+".bak"); err != nil {
+				return err
+			}
+			if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+				return err
+			}
+			return runDoctorSetupQuiet()
+		})
 	}
 	return doctorResult("claude_settings", doctorStatusOK, fmt.Sprintf("Claude settings %s valid JSON", path))
 }
@@ -339,7 +484,7 @@ func checkDoctorClaudeHookCommand(ctx doctorContext) doctorCheckResult {
 	}
 	events := tokenMeterHookEvents(settings)
 	if len(events) == 0 {
-		return doctorResult("claude_hook_command", doctorStatusError, "Claude hooks missing tokenmeter emit command")
+		return doctorFixableResult("claude_hook_command", doctorStatusError, "Claude hooks missing tokenmeter emit command", runDoctorSetupQuiet)
 	}
 	return doctorResult("claude_hook_command", doctorStatusOK, fmt.Sprintf("Claude hooks configured (%d entries: %s)", len(events), strings.Join(events, ", ")))
 }
@@ -358,7 +503,7 @@ func checkDoctorClaudeHookEvents(ctx doctorContext) doctorCheckResult {
 		}
 	}
 	if len(missing) > 0 {
-		return doctorResult("claude_hook_events", doctorStatusError, fmt.Sprintf("Claude hooks missing events: %s", strings.Join(missing, ", ")))
+		return doctorFixableResult("claude_hook_events", doctorStatusError, fmt.Sprintf("Claude hooks missing events: %s", strings.Join(missing, ", ")), runDoctorSetupQuiet)
 	}
 	return doctorResult("claude_hook_events", doctorStatusOK, fmt.Sprintf("Claude hook events all registered (%d events)", len(tokenmeterHookNames)))
 }
@@ -368,7 +513,9 @@ func checkDoctorCodexSessions(ctx doctorContext) doctorCheckResult {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return doctorResult("codex_sessions", doctorStatusWarning, fmt.Sprintf("Codex log dir %s missing — no codex sessions yet", path))
+			return doctorFixableResult("codex_sessions", doctorStatusError, fmt.Sprintf("Codex log dir %s missing — no codex sessions yet", path), func() error {
+				return os.MkdirAll(path, 0o755)
+			})
 		}
 		return doctorResult("codex_sessions", doctorStatusWarning, fmt.Sprintf("Codex log dir %s unreadable: %v", path, err))
 	}
@@ -397,6 +544,23 @@ func checkDoctorBudgets(ctx doctorContext) doctorCheckResult {
 		return doctorResult("budgets", doctorStatusError, fmt.Sprintf("Budgets table unreadable: %v", err))
 	}
 	return doctorResult("budgets", doctorStatusOK, fmt.Sprintf("Budgets table readable (%d budgets)", budgets))
+}
+
+func checkDoctorBackupsDir(ctx doctorContext) doctorCheckResult {
+	path := filepath.Join(ctx.appBase, "backups")
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return doctorFixableResult("backups_dir", doctorStatusError, fmt.Sprintf("Backups dir %s missing", path), func() error {
+				return os.MkdirAll(path, 0o755)
+			})
+		}
+		return doctorResult("backups_dir", doctorStatusError, fmt.Sprintf("Backups dir %s inaccessible: %v", path, err))
+	}
+	if !info.IsDir() {
+		return doctorResult("backups_dir", doctorStatusError, fmt.Sprintf("Backups path %s is not a directory", path))
+	}
+	return doctorResult("backups_dir", doctorStatusOK, fmt.Sprintf("Backups dir %s exists", path))
 }
 
 func checkDoctorLastTokenActivity(ctx doctorContext) doctorCheckResult {
@@ -547,9 +711,60 @@ func checkOptionalJSONFile(name, path, label string) doctorCheckResult {
 	}
 	var payload any
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return doctorResult(name, doctorStatusError, fmt.Sprintf("%s %s invalid JSON: %v", label, path, err))
+		return doctorFixableResult(name, doctorStatusError, fmt.Sprintf("%s %s invalid JSON: %v", label, path, err), func() error {
+			if err := backupFile(path, path+".bak"); err != nil {
+				return err
+			}
+			return os.Remove(path)
+		})
 	}
 	return doctorResult(name, doctorStatusOK, fmt.Sprintf("%s %s valid JSON", label, path))
+}
+
+func backupFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o600)
+}
+
+func runDoctorSetupQuiet() error {
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer devNull.Close()
+	prev := os.Stdout
+	os.Stdout = devNull
+	defer func() { os.Stdout = prev }()
+	runSetup()
+	return nil
+}
+
+func daemonPIDRunning(path string) (bool, int) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return false, 0
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false, 0
+	}
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		return false, pid
+	}
+	return true, pid
 }
 
 func doctorIcon(status string) string {
@@ -561,6 +776,13 @@ func doctorIcon(status string) string {
 	default:
 		return "✗"
 	}
+}
+
+func doctorDisplayIcon(result doctorCheckResult) string {
+	if result.Fixed {
+		return "✗→✓"
+	}
+	return doctorIcon(result.Status)
 }
 
 func doctorCounts(results []doctorCheckResult) (ok, warnings, errs int) {
