@@ -1,15 +1,18 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -105,6 +108,8 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux.HandleFunc("/api/budgets", s.authMiddleware(s.handleBudgets))
 	mux.HandleFunc("/api/budgets/", s.authMiddleware(s.handleBudgetByID))
 	mux.HandleFunc("/api/session/", s.authMiddleware(s.handleSessionDetail))
+	mux.HandleFunc("/api/analytics", s.authMiddleware(s.handleAnalytics))
+	mux.HandleFunc("/api/export-report", s.authMiddleware(s.handleExportReport))
 	mux.HandleFunc("/api/health", s.authMiddleware(s.handleHealth))
 	mux.HandleFunc("/metrics", s.authMiddleware(s.handleMetrics))
 
@@ -1501,3 +1506,319 @@ func (s *Server) handleSessionTagUpdate(w http.ResponseWriter, r *http.Request) 
 		"tag":        tag,
 	})
 }
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+type analyticsTopSession struct {
+	ID        string  `json:"id"`
+	CostUSD   float64 `json:"cost_usd"`
+	Workspace string  `json:"workspace"`
+	GitBranch string  `json:"git_branch"`
+	Platform  string  `json:"platform"`
+}
+
+type analyticsToolBreakdown struct {
+	Tool          string `json:"tool"`
+	Count         int    `json:"count"`
+	AvgDurationMs int64  `json:"avg_duration_ms"`
+	FailCount     int    `json:"fail_count"`
+}
+
+type analyticsModelEntry struct {
+	Model        string  `json:"model"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+}
+
+type analyticsModelMixDay struct {
+	Date   string                `json:"date"`
+	Models []analyticsModelEntry `json:"models"`
+}
+
+type analyticsAnomaly struct {
+	SessionID string  `json:"session_id"`
+	Reason    string  `json:"reason"`
+	CostUSD   float64 `json:"cost_usd"`
+	Mean      float64 `json:"mean"`
+	ZScore    float64 `json:"z_score"`
+}
+
+type analyticsResponse struct {
+	Range                string                   `json:"range"`
+	GeneratedAt          string                   `json:"generated_at"`
+	TopExpensiveSessions []analyticsTopSession    `json:"top_expensive_sessions"`
+	ToolBreakdown        []analyticsToolBreakdown `json:"tool_breakdown"`
+	ModelMixDaily        []analyticsModelMixDay   `json:"model_mix_daily"`
+	Anomalies            []analyticsAnomaly       `json:"anomalies"`
+}
+
+// handleAnalytics serves /api/analytics?range=week with 4 analytics cards.
+func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	rangeLabel, from, to, err := s.exportRange(r.URL.Query().Get("range"))
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	// Card 1: top expensive sessions
+	topRows, err := s.db.GetTopSessionsByCost(from, to, 10)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	topJSON := make([]analyticsTopSession, len(topRows))
+	for i, row := range topRows {
+		ws := row.CWD
+		if ws == "" {
+			ws = row.GitBranch
+		}
+		topJSON[i] = analyticsTopSession{
+			ID:        row.SessionID,
+			CostUSD:   row.CostUSD,
+			Workspace: ws,
+			GitBranch: row.GitBranch,
+			Platform:  row.Platform,
+		}
+	}
+
+	// Card 2: tool breakdown
+	toolStats, err := s.db.AllToolStats(from, to)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	toolJSON := make([]analyticsToolBreakdown, len(toolStats))
+	for i, ts := range toolStats {
+		toolJSON[i] = analyticsToolBreakdown{
+			Tool:          ts.ToolName,
+			Count:         ts.Count,
+			AvgDurationMs: ts.AvgMs,
+			FailCount:     ts.FailCount,
+		}
+	}
+
+	// Card 3: model mix (range-level, returned as single entry)
+	modelRows, err := s.db.GetModelCostBreakdown(from, to)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	modelEntries := make([]analyticsModelEntry, len(modelRows))
+	for i, m := range modelRows {
+		modelEntries[i] = analyticsModelEntry{
+			Model:        m.Model,
+			InputTokens:  m.InputTokens,
+			OutputTokens: m.OutputTokens,
+			CostUSD:      m.CostUSD,
+		}
+	}
+	modelMixDaily := []analyticsModelMixDay{{Date: rangeLabel, Models: modelEntries}}
+
+	// Card 4: anomalies — sessions with cost z-score > 2
+	allForAnomalies, err := s.db.GetTopSessionsByCost(from, to, 500)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	anomalies := computeCostAnomalies(allForAnomalies)
+
+	writeJSON(w, analyticsResponse{
+		Range:                rangeLabel,
+		GeneratedAt:          time.Now().UTC().Format(time.RFC3339),
+		TopExpensiveSessions: topJSON,
+		ToolBreakdown:        toolJSON,
+		ModelMixDaily:        modelMixDaily,
+		Anomalies:            anomalies,
+	})
+}
+
+func computeCostAnomalies(sessions []storage.TopSessionRow) []analyticsAnomaly {
+	if len(sessions) < 3 {
+		return nil
+	}
+	var sum float64
+	for _, s := range sessions {
+		sum += s.CostUSD
+	}
+	mean := sum / float64(len(sessions))
+	var variance float64
+	for _, s := range sessions {
+		d := s.CostUSD - mean
+		variance += d * d
+	}
+	variance /= float64(len(sessions))
+	stddev := math.Sqrt(variance)
+	if stddev < 1e-9 {
+		return nil
+	}
+	var result []analyticsAnomaly
+	for _, s := range sessions {
+		z := (s.CostUSD - mean) / stddev
+		if z > 2 {
+			result = append(result, analyticsAnomaly{
+				SessionID: s.SessionID,
+				Reason:    fmt.Sprintf("cost > 2σ from mean (z=%.2f)", z),
+				CostUSD:   s.CostUSD,
+				Mean:      mean,
+				ZScore:    z,
+			})
+		}
+	}
+	return result
+}
+
+// handleExportReport serves /api/export-report?range=week as a self-contained HTML file.
+func (s *Server) handleExportReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	rangeLabel, from, to, err := s.exportRange(r.URL.Query().Get("range"))
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	topRows, _ := s.db.GetTopSessionsByCost(from, to, 10)
+	toolStats, _ := s.db.AllToolStats(from, to)
+	modelRows, _ := s.db.GetModelCostBreakdown(from, to)
+	totalCost, _ := s.db.GetCostBetween(from, to)
+	allSessions, _ := s.db.GetTopSessionsByCost(from, to, 500)
+	anomalies := computeCostAnomalies(allSessions)
+
+	now := time.Now()
+	filename := fmt.Sprintf("tokenmeter-report-%s-%s.html", rangeLabel, now.Format("2006-01-02"))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+
+	var buf bytes.Buffer
+	writeReportHTML(&buf, rangeLabel, now, totalCost, topRows, toolStats, modelRows, anomalies)
+	_, _ = w.Write(buf.Bytes())
+}
+
+func writeReportHTML(
+	w *bytes.Buffer,
+	rangeLabel string,
+	generatedAt time.Time,
+	totalCost float64,
+	topSessions []storage.TopSessionRow,
+	toolStats []storage.ToolStatRow,
+	modelRows []storage.ModelCostRow,
+	anomalies []analyticsAnomaly,
+) {
+	esc := html.EscapeString
+	fc := func(v float64) string {
+		if v >= 100 {
+			return fmt.Sprintf("$%.0f", v)
+		}
+		if v >= 1 {
+			return fmt.Sprintf("$%.2f", v)
+		}
+		return fmt.Sprintf("$%.4f", v)
+	}
+
+	w.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TokenMeter Report</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f0f;color:#e0e0e0;padding:24px}
+h1{font-size:20px;font-weight:700;margin-bottom:4px}
+.meta{font-size:12px;color:#888;margin-bottom:24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:16px}
+.card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:16px}
+.card h2{font-size:13px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:#666;font-weight:600;padding:4px 6px;border-bottom:1px solid #2a2a2a}
+td{padding:4px 6px;border-bottom:1px solid #1f1f1f;color:#ccc}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;background:#2a2a2a;border-radius:4px;padding:2px 6px;font-size:11px}
+.anomaly-item{padding:8px;border-left:3px solid #f59e0b;background:#1f1a0f;border-radius:0 4px 4px 0;margin-bottom:8px;font-size:12px}
+.anomaly-reason{color:#f59e0b;font-weight:600}
+.anomaly-sid{color:#888;font-size:11px;margin-top:2px}
+.total-cost{font-size:28px;font-weight:700;color:#4ade80;margin-bottom:2px}
+.period{font-size:12px;color:#888}
+.empty{color:#555;font-style:italic;font-size:12px;padding:8px 0}
+</style>
+</head>
+<body>
+`)
+	fmt.Fprintf(w, "<h1>TokenMeter Report</h1>\n")
+	fmt.Fprintf(w, `<div class="meta">Range: %s &nbsp;·&nbsp; Generated: %s</div>`+"\n",
+		esc(rangeLabel), generatedAt.Format("2006-01-02 15:04 UTC"))
+	fmt.Fprintf(w, `<div class="total-cost">%s</div><div class="period">Total cost for period</div>`+"\n",
+		fc(totalCost))
+
+	w.WriteString(`<div class="grid">`)
+
+	// Card 1: Top expensive sessions
+	w.WriteString(`<div class="card"><h2>Top 10 Expensive Sessions</h2>`)
+	if len(topSessions) == 0 {
+		w.WriteString(`<p class="empty">No sessions in range.</p>`)
+	} else {
+		w.WriteString(`<table><thead><tr><th>Session</th><th>Platform</th><th class="num">Cost</th></tr></thead><tbody>`)
+		for _, s := range topSessions {
+			name := s.GitBranch
+			if name == "" {
+				name = s.SessionID[:min(8, len(s.SessionID))]
+			}
+			fmt.Fprintf(w, "<tr><td>%s</td><td><span class=\"badge\">%s</span></td><td class=\"num\">%s</td></tr>\n",
+				esc(name), esc(s.Platform), fc(s.CostUSD))
+		}
+		w.WriteString(`</tbody></table>`)
+	}
+	w.WriteString(`</div>`)
+
+	// Card 2: Tool breakdown
+	w.WriteString(`<div class="card"><h2>Tool Breakdown</h2>`)
+	if len(toolStats) == 0 {
+		w.WriteString(`<p class="empty">No tool calls in range.</p>`)
+	} else {
+		w.WriteString(`<table><thead><tr><th>Tool</th><th class="num">Count</th><th class="num">Avg ms</th><th class="num">Fails</th></tr></thead><tbody>`)
+		for _, t := range toolStats {
+			fmt.Fprintf(w, "<tr><td>%s</td><td class=\"num\">%d</td><td class=\"num\">%d</td><td class=\"num\">%d</td></tr>\n",
+				esc(t.ToolName), t.Count, t.AvgMs, t.FailCount)
+		}
+		w.WriteString(`</tbody></table>`)
+	}
+	w.WriteString(`</div>`)
+
+	// Card 3: Model mix
+	w.WriteString(`<div class="card"><h2>Model Mix</h2>`)
+	if len(modelRows) == 0 {
+		w.WriteString(`<p class="empty">No token usage in range.</p>`)
+	} else {
+		w.WriteString(`<table><thead><tr><th>Model</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cost</th></tr></thead><tbody>`)
+		for _, m := range modelRows {
+			fmt.Fprintf(w, "<tr><td>%s</td><td class=\"num\">%d</td><td class=\"num\">%d</td><td class=\"num\">%s</td></tr>\n",
+				esc(m.Model), m.InputTokens, m.OutputTokens, fc(m.CostUSD))
+		}
+		w.WriteString(`</tbody></table>`)
+	}
+	w.WriteString(`</div>`)
+
+	// Card 4: Anomalies
+	w.WriteString(`<div class="card"><h2>Anomalies (z-score &gt; 2)</h2>`)
+	if len(anomalies) == 0 {
+		w.WriteString(`<p class="empty">No anomalies detected.</p>`)
+	} else {
+		for _, a := range anomalies {
+			fmt.Fprintf(w, `<div class="anomaly-item"><div class="anomaly-reason">%s</div><div class="anomaly-sid">Session: %s &nbsp;·&nbsp; Cost: %s &nbsp;·&nbsp; Mean: %s</div></div>`+"\n",
+				esc(a.Reason), esc(a.SessionID[:min(12, len(a.SessionID))]), fc(a.CostUSD), fc(a.Mean))
+		}
+	}
+	w.WriteString(`</div>`)
+
+	w.WriteString(`</div></body></html>`)
+}
+
