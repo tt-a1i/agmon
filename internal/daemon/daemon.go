@@ -184,6 +184,11 @@ func (d *Daemon) Start() error {
 		defer d.bgWG.Done()
 		d.budgetSweepLoop()
 	}()
+	d.bgWG.Add(1)
+	go func() {
+		defer d.bgWG.Done()
+		d.maintenanceLoop()
+	}()
 	return nil
 }
 
@@ -216,6 +221,21 @@ func (d *Daemon) budgetSweepLoop() {
 		case <-ticker.C:
 			if err := d.checkBudgetTransitions(context.Background()); err != nil {
 				log.Printf("budgetSweepLoop: %v", err)
+			}
+		}
+	}
+}
+
+func (d *Daemon) maintenanceLoop() {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.done:
+			return
+		case <-ticker.C:
+			if err := d.db.Analyze(); err != nil {
+				log.Printf("maintenanceLoop analyze: %v", err)
 			}
 		}
 	}

@@ -115,6 +115,11 @@ func main() {
 	switch os.Args[1] {
 	case "daemon":
 		runDaemon()
+	case "reload":
+		if err := runReload(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "emit":
 		runEmit()
 	case "setup":
@@ -151,6 +156,11 @@ func main() {
 		}
 	case "doctor":
 		if err := runDoctor(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	case "compact":
+		if err := runCompact(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -1110,6 +1120,7 @@ func printHelp() {
 Usage:
   tokenmeter                    Start TUI (auto-starts daemon)
   tokenmeter daemon             Start daemon only
+  tokenmeter reload             Reload daemon config via SIGHUP
   tokenmeter emit               Emit event from hook (reads stdin)
   tokenmeter setup              Configure Claude Code hooks
   tokenmeter uninstall          Remove hooks and stop daemon
@@ -1124,6 +1135,7 @@ Usage:
   tokenmeter search <query>     Search tools, results, and files
   tokenmeter budget <command>   Manage monthly budgets
   tokenmeter doctor [--json]    Run installation diagnostics
+  tokenmeter compact [--full]   Analyze or VACUUM the local database
   tokenmeter web [--port N]     Start web dashboard (default port: 8370)
   tokenmeter clean [days]       Remove sessions older than N days (default: 7)
   tokenmeter tag <id> [text]    Tag a session with a note (omit text to clear)
