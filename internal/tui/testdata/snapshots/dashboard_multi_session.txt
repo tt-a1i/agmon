@@ -1,0 +1,14 @@
+  Dashboard    Messages    Tool Calls    Stats  
+─────────────                                   
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Today  $4.86     In 780.0k Out 37.4k                                                                              │
+│                                                                                                                    │
+│          SESSION          STARTED         COST      IN        OUT                                                  │
+│   Claude tokenmeter/fe... 01/15 14:30     $2.86     500.0k    10.4k                                                │
+│   Codex  api/fix-bug      01/15 14:00     $0.80     80.0k     20.0k                                                │
+│   Claude web/refactor     01/15 12:30     $1.20     200.0k    5.0k                                                 │
+│                                                                                                                    │
+│  ▸ tokenmeter/feat-xyz    Ctx -    Status ● run                                                                    │
+│  /code/tokenmeter                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ t range  T tag:all  W workspace  A all  p plat:All  s sort:Recent  / filter  Tab view  j/k nav  c resume  r report  Enter msgs  q quit

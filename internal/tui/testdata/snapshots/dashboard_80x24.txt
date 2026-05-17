@@ -1,0 +1,12 @@
+  Dashboard    Messages    Tool Calls    Stats  
+─────────────                                   
+╭────────────────────────────────────────────────────────────────────────────╮
+│  Today  $0.42     In 50.0k Out 12.0k                                       │
+│                                                                            │
+│          SESSION          STARTED         COST      IN        OUT          │
+│   Claude tokenmeter/ma... 01/15 14:30     $0.42     50.0k     12.0k        │
+│                                                                            │
+│  ▸ tokenmeter/main    Ctx -    Status ● run                                │
+│  /code/tokenmeter                                                          │
+╰────────────────────────────────────────────────────────────────────────────╯
+ t range  T tag:all  W workspace  A all  p plat:All  s sort:Recent  / filter  Tab view  j/k nav  c resume  r report  Enter msgs  q quit

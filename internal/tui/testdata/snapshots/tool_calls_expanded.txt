@@ -1,0 +1,13 @@
+  Dashboard    Messages    Tool Calls    Stats  
+                         ──────────────         
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│   Session: tokenmeter/main (aabbccdd) │ Ctx: - │ -                                                                 │
+│                                                                                                                    │
+│   TIME     TOOL         TARGET                         DURATION  STATUS                                            │
+│   14:30:00 Read         internal/tui/model.go              0.2s  ✓                                                 │
+│     Params: internal/tui/model.go                                                                                  │
+│     Result: ok (420 lines)                                                                                         │
+│   14:30:01 Edit         internal/tui/view.go               0.1s  ✓                                                 │
+│                                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Tab view  [/] session  j/k nav  c resume  r report  Enter expand  / filter  S search  q quit

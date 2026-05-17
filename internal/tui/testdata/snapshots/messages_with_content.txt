@@ -1,0 +1,11 @@
+  Dashboard    Messages    Tool Calls    Stats  
+             ────────────                       
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│   Session: tokenmeter/main (aabbccdd) │ Ctx: - │ -                                                                 │
+│   2 messages                                                                                                       │
+│                                                                                                                    │
+│   14:30  > Add snapshot golden tests for the TUI                                                                   │
+│   14:31  > Now update the goldens and verify they pass                                                             │
+│                                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Tab view  [/] session  j/k nav  c resume  r report  Enter expand  / filter  S search  q quit

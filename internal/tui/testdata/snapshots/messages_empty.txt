@@ -1,0 +1,9 @@
+  Dashboard    Messages    Tool Calls    Stats  
+             ────────────                       
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│   Session: tokenmeter/main (aabbccdd) │ Ctx: - │ -                                                                 │
+│   0 messages                                                                                                       │
+│                                                                                                                    │
+│   No user messages found                                                                                           │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Tab view  [/] session  j/k nav  c resume  r report  Enter expand  / filter  S search  q quit

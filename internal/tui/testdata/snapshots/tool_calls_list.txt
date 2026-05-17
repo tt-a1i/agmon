@@ -1,0 +1,14 @@
+  Dashboard    Messages    Tool Calls    Stats  
+                         ──────────────         
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│   Session: tokenmeter/main (aabbccdd) │ Ctx: - │ -                                                                 │
+│                                                                                                                    │
+│   TIME     TOOL         TARGET                         DURATION  STATUS                                            │
+│   14:30:00 Read         internal/tui/model.go              0.2s  ✓                                                 │
+│   14:30:01 Edit         internal/tui/view.go               0.1s  ✓                                                 │
+│   14:30:02 Bash         go test ./...                       ...  ●                                                 │
+│   14:30:03 Grep         func NewModel                      0.0s  ✓                                                 │
+│   14:30:04 Write        snapshot_test.go                   0.1s  ✓                                                 │
+│                                                                                                                    │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Tab view  [/] session  j/k nav  c resume  r report  Enter expand  / filter  S search  q quit
