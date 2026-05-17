@@ -1,0 +1,35 @@
+# Auto-detect text & normalize EOL to LF
+* text=auto eol=lf
+
+# Force LF for source files
+*.go text eol=lf
+*.sh text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+
+# Binary types — no diff, no EOL conversion
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.db binary
+*.sqlite binary
+
+# Linguist hints for GitHub language detection
+internal/web/static/index.html linguist-detectable=true
+internal/web/static/sw.js linguist-detectable=true
+*.go linguist-language=Go
+testdata/* linguist-vendored
+*.svg linguist-vendored
