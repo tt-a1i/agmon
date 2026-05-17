@@ -154,6 +154,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "webhook":
+		if err := runWebhook(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "analyze":
 		if err := runAnalyze(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1154,6 +1159,7 @@ Usage:
   tokenmeter compare <a> <b>    Compare two sessions
   tokenmeter search <query>     Search tools, results, and files
   tokenmeter budget <command>   Manage monthly budgets
+  tokenmeter webhook <command>  Manage webhook endpoints
   tokenmeter analyze [--json]   Usage insights summary
   tokenmeter watch [session]    Live event stream from daemon
   tokenmeter backup [path]      Back up the local database

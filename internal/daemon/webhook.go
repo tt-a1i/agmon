@@ -16,8 +16,13 @@ import (
 )
 
 const (
-	webhookEventBudgetWarn = "budget_warn"
-	webhookEventBudgetOver = "budget_over"
+	webhookEventBudgetWarn       = "budget_warn"
+	webhookEventBudgetOver       = "budget_over"
+	webhookEventSessionHighCost  = "session_high_cost"
+	webhookEventToolFailureRate  = "tool_failure_rate"
+	webhookEventDaemonStarted    = "daemon_started"
+	webhookEventDaemonLostEvents = "daemon_lost_events"
+	webhookEventTest             = "webhook_test"
 
 	budgetStatusOK   = "ok"
 	budgetStatusWarn = "warn"
@@ -31,9 +36,30 @@ type WebhookConfig struct {
 }
 
 type EndpointConfig struct {
-	URL    string   `json:"url"`
-	Events []string `json:"events"`
-	Format string   `json:"format"`
+	URL        string            `json:"url"`
+	Events     []string          `json:"events"`
+	Format     string            `json:"format"`
+	Retry      RetryPolicy       `json:"retry"`
+	Thresholds WebhookThresholds `json:"thresholds"`
+}
+
+type RetryPolicy struct {
+	MaxAttempts           int `json:"max_attempts"`
+	InitialBackoffSeconds int `json:"initial_backoff_seconds"`
+}
+
+type WebhookThresholds struct {
+	SessionHighCostUSD float64 `json:"session_high_cost_usd"`
+	ToolFailureRatePct float64 `json:"tool_failure_rate_pct"`
+}
+
+type WebhookPayload struct {
+	Event     string                     `json:"event"`
+	Budget    *BudgetWebhookBudget       `json:"budget,omitempty"`
+	Session   *SessionWebhookPayload     `json:"session,omitempty"`
+	Tool      *ToolFailureWebhookPayload `json:"tool,omitempty"`
+	Daemon    *DaemonWebhookPayload      `json:"daemon,omitempty"`
+	Timestamp time.Time                  `json:"timestamp"`
 }
 
 type BudgetWebhookPayload struct {
@@ -49,6 +75,27 @@ type BudgetWebhookBudget struct {
 	Limit   float64 `json:"limit"`
 	Percent float64 `json:"percent"`
 	Status  string  `json:"status"`
+}
+
+type SessionWebhookPayload struct {
+	SessionID string  `json:"session_id"`
+	Platform  string  `json:"platform"`
+	Model     string  `json:"model"`
+	CostUSD   float64 `json:"cost_usd"`
+	Threshold float64 `json:"threshold_usd"`
+}
+
+type ToolFailureWebhookPayload struct {
+	ToolName       string  `json:"tool_name"`
+	CallCount      int     `json:"call_count"`
+	FailCount      int     `json:"fail_count"`
+	FailureRatePct float64 `json:"failure_rate_pct"`
+	ThresholdPct   float64 `json:"threshold_pct"`
+}
+
+type DaemonWebhookPayload struct {
+	Status                string `json:"status"`
+	DroppedShutdownEvents int64  `json:"dropped_shutdown_events,omitempty"`
 }
 
 func LoadWebhookConfig() (*WebhookConfig, error) {
@@ -68,7 +115,7 @@ func LoadWebhookConfig() (*WebhookConfig, error) {
 	return &cfg, nil
 }
 
-func PostWebhook(ctx context.Context, ep EndpointConfig, event string, payload BudgetWebhookPayload) error {
+func PostWebhook(ctx context.Context, ep EndpointConfig, event string, payload any) error {
 	if !endpointWantsEvent(ep, event) {
 		return nil
 	}
@@ -76,12 +123,9 @@ func PostWebhook(ctx context.Context, ep EndpointConfig, event string, payload B
 		return fmt.Errorf("webhook url is required")
 	}
 
-	payload.Event = event
-	if payload.Timestamp.IsZero() {
-		payload.Timestamp = time.Now().UTC()
-	}
+	normalized := normalizeWebhookPayload(event, payload)
 
-	body, err := webhookRequestBody(ep, payload)
+	body, err := webhookRequestBody(ep, normalized)
 	if err != nil {
 		return err
 	}
@@ -102,16 +146,67 @@ func PostWebhook(ctx context.Context, ep EndpointConfig, event string, payload B
 	return nil
 }
 
-func webhookRequestBody(ep EndpointConfig, payload BudgetWebhookPayload) ([]byte, error) {
+func webhookRequestBody(ep EndpointConfig, payload WebhookPayload) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(ep.Format)) {
 	case "", "json":
 		return json.Marshal(payload)
 	case "slack":
-		return json.Marshal(map[string]string{"text": budgetWebhookText(payload.Budget)})
+		return json.Marshal(map[string]string{"text": webhookText(payload)})
 	case "discord":
-		return json.Marshal(map[string]string{"content": budgetWebhookText(payload.Budget)})
+		return json.Marshal(map[string]string{"content": webhookText(payload)})
 	default:
 		return nil, fmt.Errorf("unsupported webhook format %q", ep.Format)
+	}
+}
+
+func normalizeWebhookPayload(event string, payload any) WebhookPayload {
+	var normalized WebhookPayload
+	switch p := payload.(type) {
+	case WebhookPayload:
+		normalized = p
+	case *WebhookPayload:
+		if p != nil {
+			normalized = *p
+		}
+	case BudgetWebhookPayload:
+		normalized = WebhookPayload{Budget: &p.Budget, Timestamp: p.Timestamp}
+		if p.Event != "" {
+			normalized.Event = p.Event
+		}
+	case *BudgetWebhookPayload:
+		if p != nil {
+			normalized = WebhookPayload{Budget: &p.Budget, Timestamp: p.Timestamp}
+			if p.Event != "" {
+				normalized.Event = p.Event
+			}
+		}
+	}
+	if normalized.Event == "" {
+		normalized.Event = event
+	}
+	if normalized.Timestamp.IsZero() {
+		normalized.Timestamp = time.Now().UTC()
+	}
+	return normalized
+}
+
+func webhookText(payload WebhookPayload) string {
+	switch {
+	case payload.Budget != nil:
+		return budgetWebhookText(*payload.Budget)
+	case payload.Session != nil:
+		return fmt.Sprintf("💸 TokenMeter: session '%s' cost $%.2f exceeded $%.2f",
+			payload.Session.SessionID, payload.Session.CostUSD, payload.Session.Threshold)
+	case payload.Tool != nil:
+		return fmt.Sprintf("⚠️ TokenMeter: tool '%s' failure rate %.0f%% (%d/%d recent calls)",
+			payload.Tool.ToolName, payload.Tool.FailureRatePct, payload.Tool.FailCount, payload.Tool.CallCount)
+	case payload.Daemon != nil && payload.Event == webhookEventDaemonLostEvents:
+		return fmt.Sprintf("⚠️ TokenMeter: daemon stopped after dropping %d shutdown events",
+			payload.Daemon.DroppedShutdownEvents)
+	case payload.Daemon != nil:
+		return fmt.Sprintf("TokenMeter: daemon %s", payload.Daemon.Status)
+	default:
+		return fmt.Sprintf("TokenMeter: %s", payload.Event)
 	}
 }
 
@@ -158,9 +253,9 @@ func budgetWebhookEventForTransition(previous, current string) string {
 	return ""
 }
 
-func budgetWebhookPayload(budget storage.BudgetRow, used, limit float64, percent float64, status string) BudgetWebhookPayload {
-	return BudgetWebhookPayload{
-		Budget: BudgetWebhookBudget{
+func budgetWebhookPayload(budget storage.BudgetRow, used, limit float64, percent float64, status string) WebhookPayload {
+	return WebhookPayload{
+		Budget: &BudgetWebhookBudget{
 			ID:      budget.ID,
 			Name:    budget.Name,
 			Used:    used,
@@ -172,14 +267,22 @@ func budgetWebhookPayload(budget storage.BudgetRow, used, limit float64, percent
 	}
 }
 
-func (d *Daemon) dispatchWebhookEvent(ctx context.Context, event string, payload BudgetWebhookPayload) {
+func (d *Daemon) dispatchWebhookEvent(ctx context.Context, event string, payload any, endpointOverrides ...[]EndpointConfig) {
 	endpoints := d.webhookEndpointsSnapshot()
+	if len(endpointOverrides) > 0 {
+		endpoints = endpointOverrides[0]
+	}
 	if len(endpoints) == 0 {
 		return
 	}
+	normalized := normalizeWebhookPayload(event, payload)
 	for _, ep := range endpoints {
 		ep := ep
 		if !endpointWantsEvent(ep, event) {
+			continue
+		}
+		if d.webhookRetryRunning.Load() {
+			d.enqueueWebhook(ctx, ep, event, normalized)
 			continue
 		}
 		go func() {
@@ -188,11 +291,25 @@ func (d *Daemon) dispatchWebhookEvent(ctx context.Context, event string, payload
 					log.Printf("webhook %s panic: %v", event, r)
 				}
 			}()
-			if err := PostWebhook(ctx, ep, event, payload); err != nil {
+			if err := PostWebhook(ctx, ep, event, normalized); err != nil {
 				log.Printf("webhook %s to %s failed: %v", event, ep.URL, err)
 				return
 			}
 			log.Printf("webhook %s to %s sent", event, ep.URL)
 		}()
+	}
+}
+
+func (d *Daemon) dispatchWebhookEventSync(ctx context.Context, event string, payload any) {
+	endpoints := d.webhookEndpointsSnapshot()
+	if len(endpoints) == 0 {
+		return
+	}
+	normalized := normalizeWebhookPayload(event, payload)
+	for _, ep := range endpoints {
+		if !endpointWantsEvent(ep, event) {
+			continue
+		}
+		d.deliverWebhookWithRetry(ctx, webhookDelivery{Endpoint: ep, Event: event, Payload: normalized}, nil)
 	}
 }

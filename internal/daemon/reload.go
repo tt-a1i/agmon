@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"log"
 
 	"github.com/tt-a1i/tokenmeter/internal/collector"
@@ -18,6 +19,9 @@ func (d *Daemon) ReloadConfig() {
 	}
 	d.setWebhookConfig(cfg)
 	log.Printf("config reloaded: %d webhook endpoints", endpointsCount(cfg))
+	d.dispatchWebhookEvent(context.Background(), webhookEventDaemonStarted, WebhookPayload{
+		Daemon: &DaemonWebhookPayload{Status: "reloaded"},
+	})
 }
 
 func endpointsCount(cfg *WebhookConfig) int {

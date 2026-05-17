@@ -16,25 +16,27 @@ import (
 )
 
 type Daemon struct {
-	db          *storage.DB
-	sockPath    string
-	socketLock  *socketLock
-	listener    net.Listener
-	subListener net.Listener
-	mu          sync.RWMutex
-	subs        []chan event.Event
-	remoteSubs  map[net.Conn]struct{}
-	clientConns map[net.Conn]struct{}
-	connWG      sync.WaitGroup
-	stopping    bool
-	done        chan struct{}
-	stopOnce    sync.Once
-	batchCh     chan event.Event // buffered channel for async event processing
-	batchDone   chan struct{}    // closed when batch consumer exits
-	bgWG        sync.WaitGroup   // background goroutines started in Start() (sweepers, etc.)
-	webhooks    *WebhookConfig
+	db           *storage.DB
+	sockPath     string
+	socketLock   *socketLock
+	listener     net.Listener
+	subListener  net.Listener
+	mu           sync.RWMutex
+	subs         []chan event.Event
+	remoteSubs   map[net.Conn]struct{}
+	clientConns  map[net.Conn]struct{}
+	connWG       sync.WaitGroup
+	stopping     bool
+	done         chan struct{}
+	stopOnce     sync.Once
+	batchCh      chan event.Event // buffered channel for async event processing
+	batchDone    chan struct{}    // closed when batch consumer exits
+	bgWG         sync.WaitGroup   // background goroutines started in Start() (sweepers, etc.)
+	webhooks     *WebhookConfig
+	webhookQueue chan webhookDelivery
 
-	budgetLastStatus map[int64]string
+	budgetLastStatus     map[int64]string
+	toolFailureLastAlert map[string]float64
 
 	// Observability counters. Atomic so callers/inspectors don't need the
 	// daemon mutex. Currently logged at Stop(); a future /metrics endpoint
@@ -42,18 +44,21 @@ type Daemon struct {
 	droppedBroadcasts   atomic.Int64 // local subscriber channel full
 	droppedShutdownEvts atomic.Int64 // ProcessExternalEventAsync after done close
 	duplicateToolStarts atomic.Int64 // EventToolCallStart hit existing call_id (Pre re-emit)
+	webhookRetryRunning atomic.Bool
 }
 
 func New(db *storage.DB, sockPath string) *Daemon {
 	return &Daemon{
-		db:               db,
-		sockPath:         sockPath,
-		remoteSubs:       make(map[net.Conn]struct{}),
-		clientConns:      make(map[net.Conn]struct{}),
-		done:             make(chan struct{}),
-		batchCh:          make(chan event.Event, 10000),
-		batchDone:        make(chan struct{}),
-		budgetLastStatus: make(map[int64]string),
+		db:                   db,
+		sockPath:             sockPath,
+		remoteSubs:           make(map[net.Conn]struct{}),
+		clientConns:          make(map[net.Conn]struct{}),
+		done:                 make(chan struct{}),
+		batchCh:              make(chan event.Event, 10000),
+		batchDone:            make(chan struct{}),
+		webhookQueue:         make(chan webhookDelivery, 1024),
+		budgetLastStatus:     make(map[int64]string),
+		toolFailureLastAlert: make(map[string]float64),
 	}
 }
 
@@ -174,6 +179,7 @@ func (d *Daemon) Start() error {
 	go d.acceptLoop()
 	go d.acceptSubscriberLoop()
 	go d.batchConsumer()
+	d.startWebhookRetryLoop()
 	d.bgWG.Add(1)
 	go func() {
 		defer d.bgWG.Done()
@@ -187,8 +193,16 @@ func (d *Daemon) Start() error {
 	d.bgWG.Add(1)
 	go func() {
 		defer d.bgWG.Done()
+		d.toolFailureSweepLoop()
+	}()
+	d.bgWG.Add(1)
+	go func() {
+		defer d.bgWG.Done()
 		d.maintenanceLoop()
 	}()
+	d.dispatchWebhookEvent(context.Background(), webhookEventDaemonStarted, WebhookPayload{
+		Daemon: &DaemonWebhookPayload{Status: "started"},
+	})
 	return nil
 }
 
@@ -221,6 +235,21 @@ func (d *Daemon) budgetSweepLoop() {
 		case <-ticker.C:
 			if err := d.checkBudgetTransitions(context.Background()); err != nil {
 				log.Printf("budgetSweepLoop: %v", err)
+			}
+		}
+	}
+}
+
+func (d *Daemon) toolFailureSweepLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.done:
+			return
+		case <-ticker.C:
+			if err := d.checkToolFailureRates(context.Background()); err != nil {
+				log.Printf("toolFailureSweepLoop: %v", err)
 			}
 		}
 	}
@@ -364,6 +393,11 @@ func (d *Daemon) Stop() {
 		if bcast, shut, dup := d.Stats(); bcast > 0 || shut > 0 || dup > 0 {
 			log.Printf("daemon stats: dropped_broadcasts=%d dropped_shutdown=%d duplicate_tool_starts=%d",
 				bcast, shut, dup)
+			if shut > 0 {
+				d.dispatchWebhookEventSync(context.Background(), webhookEventDaemonLostEvents, WebhookPayload{
+					Daemon: &DaemonWebhookPayload{Status: "lost_events", DroppedShutdownEvents: shut},
+				})
+			}
 		}
 
 		cleanupSocket(d.sockPath)
@@ -498,7 +532,11 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		if err := d.db.MarkPendingToolCallsInterrupted(ev.SessionID); err != nil {
 			return err
 		}
-		return d.db.EndSession(ev.SessionID, ev.Timestamp)
+		if err := d.db.EndSession(ev.SessionID, ev.Timestamp); err != nil {
+			return err
+		}
+		d.checkSessionHighCost(context.Background(), ev.SessionID)
+		return nil
 
 	case event.EventAgentStart:
 		return d.db.UpsertAgent(ev.AgentID, ev.SessionID, ev.Data.ParentAgentID, ev.Data.AgentRole, ev.Timestamp)
