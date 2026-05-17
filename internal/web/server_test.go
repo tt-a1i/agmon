@@ -460,6 +460,78 @@ func TestHandleEventsSubscribeError(t *testing.T) {
 	}
 }
 
+func TestHandleSearchBadQuery(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0")
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "missing", path: "/api/search"},
+		{name: "too short", path: "/api/search?q=x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			srv.handleSearch(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status: got %d, want 400. body: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleSearchReturnsHits(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	if err := db.UpsertSession("web-search-session", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.UpdateSessionMeta("web-search-session", "/Users/test/web-search-project", ""); err != nil {
+		t.Fatalf("update meta: %v", err)
+	}
+	if _, err := db.InsertToolCallStart("web-search-call", "agent", "web-search-session", "Bash", "run needle command", now); err != nil {
+		t.Fatalf("insert tool call: %v", err)
+	}
+	if err := db.InsertFileChange("web-search-session", "/tmp/needle-web.go", event.FileEdit, now.Add(time.Second)); err != nil {
+		t.Fatalf("insert file change: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=needle&limit=10", nil)
+	rec := httptest.NewRecorder()
+	srv.handleSearch(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", rec.Code, rec.Body.String())
+	}
+	var hits []storage.SearchHit
+	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
+		t.Fatalf("unmarshal hits: %v", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("hits len: got %d, want 2: %#v", len(hits), hits)
+	}
+	kinds := map[string]bool{}
+	for _, hit := range hits {
+		kinds[hit.Kind] = true
+		if hit.SessionID != "web-search-session" {
+			t.Fatalf("session id: got %q, want web-search-session", hit.SessionID)
+		}
+		if hit.SessionName != "web-search-project" {
+			t.Fatalf("session name: got %q, want web-search-project", hit.SessionName)
+		}
+		if !strings.Contains(strings.ToLower(hit.Excerpt), "needle") {
+			t.Fatalf("excerpt %q does not include query", hit.Excerpt)
+		}
+	}
+	if !kinds["tool_param"] || !kinds["file"] {
+		t.Fatalf("kinds: got %#v, want tool_param and file", kinds)
+	}
+}
+
 func TestHandleCompare(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()

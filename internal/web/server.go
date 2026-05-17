@@ -62,6 +62,7 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/export", s.handleExport)
 	mux.HandleFunc("/api/compare", s.handleCompare)
+	mux.HandleFunc("/api/search", s.handleSearch)
 	mux.HandleFunc("/api/budgets", s.handleBudgets)
 	mux.HandleFunc("/api/budgets/", s.handleBudgetByID)
 	mux.HandleFunc("/api/session/", s.handleSessionDetail)
@@ -734,6 +735,44 @@ type compareFileDiff struct {
 	AOnly  []string `json:"a_only"`
 	BOnly  []string `json:"b_only"`
 	Common []string `json:"common"`
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeAPIError(w, http.StatusBadRequest, "q required")
+		return
+	}
+	if len([]rune(query)) < 2 {
+		writeAPIError(w, http.StatusBadRequest, "query too short")
+		return
+	}
+
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		if n > 200 {
+			n = 200
+		}
+		limit = n
+	}
+
+	hits, err := s.db.SearchHits(query, limit)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	writeJSON(w, hits)
 }
 
 func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {

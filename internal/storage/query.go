@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -41,6 +42,15 @@ type SessionExportRow struct {
 	OutputTokens int     `json:"output_tokens"`
 	CacheTokens  int     `json:"cache_tokens"`
 	CostUSD      float64 `json:"cost_usd"`
+}
+
+type SearchHit struct {
+	SessionID   string    `json:"session_id"`
+	SessionName string    `json:"session_name"`
+	Platform    string    `json:"platform"`
+	Kind        string    `json:"kind"`
+	Excerpt     string    `json:"excerpt"`
+	Timestamp   time.Time `json:"timestamp"`
 }
 
 type AgentRow struct {
@@ -249,10 +259,129 @@ func exportSessionName(sessionID, gitBranch, cwd string) string {
 	if cwd != "" {
 		return cwd
 	}
+	return shortSessionID(sessionID)
+}
+
+func shortSessionID(sessionID string) string {
 	if len(sessionID) > 8 {
 		return sessionID[:8]
 	}
 	return sessionID
+}
+
+func searchSessionName(sessionID, gitBranch, cwd string) string {
+	if gitBranch != "" {
+		return gitBranch
+	}
+	if cwd != "" {
+		base := filepath.Base(cwd)
+		if base != "." && base != string(filepath.Separator) {
+			return base
+		}
+		return cwd
+	}
+	return shortSessionID(sessionID)
+}
+
+func (s *DB) SearchHits(query string, limit int) ([]SearchHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	likePattern := "%" + escapeLikePattern(query) + "%"
+	rows, err := s.db.Query(`
+		SELECT session_id, git_branch, cwd, platform, kind, body, timestamp
+		FROM (
+			SELECT tc.session_id,
+			       COALESCE(s.git_branch, '') AS git_branch,
+			       COALESCE(s.cwd, '') AS cwd,
+			       s.platform,
+			       'tool_param' AS kind,
+			       COALESCE(tc.params_summary, '') AS body,
+			       tc.start_time AS timestamp
+			FROM tool_calls tc
+			JOIN sessions s ON tc.session_id = s.session_id
+			WHERE COALESCE(tc.params_summary, '') LIKE ? ESCAPE '\'
+			UNION ALL
+			SELECT tc.session_id,
+			       COALESCE(s.git_branch, '') AS git_branch,
+			       COALESCE(s.cwd, '') AS cwd,
+			       s.platform,
+			       'tool_result' AS kind,
+			       COALESCE(tc.result_summary, '') AS body,
+			       COALESCE(tc.end_time, tc.start_time) AS timestamp
+			FROM tool_calls tc
+			JOIN sessions s ON tc.session_id = s.session_id
+			WHERE COALESCE(tc.result_summary, '') LIKE ? ESCAPE '\'
+			UNION ALL
+			SELECT fc.session_id,
+			       COALESCE(s.git_branch, '') AS git_branch,
+			       COALESCE(s.cwd, '') AS cwd,
+			       s.platform,
+			       'file' AS kind,
+			       fc.file_path AS body,
+			       fc.timestamp AS timestamp
+			FROM file_changes fc
+			JOIN sessions s ON fc.session_id = s.session_id
+			WHERE fc.file_path LIKE ? ESCAPE '\'
+		)
+		ORDER BY timestamp DESC
+		LIMIT ?
+	`, likePattern, likePattern, likePattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hits := make([]SearchHit, 0)
+	for rows.Next() {
+		var hit SearchHit
+		var gitBranch, cwd, body, ts string
+		if err := rows.Scan(&hit.SessionID, &gitBranch, &cwd, &hit.Platform, &hit.Kind, &body, &ts); err != nil {
+			return nil, err
+		}
+		hit.SessionName = searchSessionName(hit.SessionID, gitBranch, cwd)
+		hit.Excerpt = searchExcerpt(body, query)
+		hit.Timestamp = parseTime(ts)
+		hits = append(hits, hit)
+	}
+	return hits, rows.Err()
+}
+
+func searchExcerpt(text, query string) string {
+	text = strings.ReplaceAll(text, "\r", " ")
+	text = strings.ReplaceAll(text, "\n", " ")
+	lowerText := strings.ToLower(text)
+	lowerQuery := strings.ToLower(query)
+
+	idx := strings.Index(lowerText, lowerQuery)
+	if idx < 0 {
+		if len(text) > 80 {
+			return text[:80]
+		}
+		return text
+	}
+
+	start := idx - 30
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len(query) + 30
+	if end > len(text) {
+		end = len(text)
+	}
+	excerpt := text[start:end]
+	if len(excerpt) > 80 {
+		return excerpt[:80]
+	}
+	return excerpt
 }
 
 // GetSessionByIDPrefix looks up a session by exact ID or unique prefix, searching
