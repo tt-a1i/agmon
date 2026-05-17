@@ -1,4 +1,4 @@
-.PHONY: build install test lint clean
+.PHONY: build install test lint vet vuln ci coverage clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
 
@@ -12,8 +12,21 @@ install: build
 test:
 	go test -cover ./...
 
-lint:
+vet:
 	go vet ./...
+
+lint:
+	golangci-lint run --timeout=5m
+
+vuln:
+	govulncheck ./...
+
+ci: vet lint test
+	@echo "CI checks passed"
+
+coverage:
+	go test ./... -coverprofile=coverage.out -covermode=atomic -timeout=180s
+	go tool cover -func=coverage.out | tail -20
 
 clean:
 	rm -f tokenmeter

@@ -11,7 +11,24 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
   test:
+    name: Test
     strategy:
       fail-fast: false
       matrix:
@@ -44,7 +61,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./... -v
+        run: go test ./... -race -count=1 -timeout=180s
 
       - name: Build
         run: go build -o tokenmeter ./cmd/tokenmeter/
