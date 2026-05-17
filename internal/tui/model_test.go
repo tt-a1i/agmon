@@ -203,6 +203,109 @@ func TestViewDashboardRendersBudgetAndTagChips(t *testing.T) {
 	}
 }
 
+func TestRenderBudgetChipsEmpty(t *testing.T) {
+	m := Model{}
+
+	if got := m.renderBudgetChips(); got != "" {
+		t.Fatalf("empty budget chips should render nothing, got %q", got)
+	}
+}
+
+func TestRenderBudgetChipsStatus(t *testing.T) {
+	oldProfile := lipgloss.DefaultRenderer().ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(oldProfile)
+	})
+
+	m := Model{
+		budgetChips: []budgetChip{
+			{Name: "OK", Used: 10, Limit: 100, Percent: 10, Status: budgetStatusOK},
+			{Name: "Warn", Used: 85, Limit: 100, Percent: 85, Status: budgetStatusWarn},
+			{Name: "Over", Used: 120, Limit: 100, Percent: 120, Status: budgetStatusOver},
+		},
+	}
+
+	out := m.renderBudgetChips()
+	for _, want := range []string{"OK", "Warn", "Over", "●", "◐", "◯"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("budget chips missing %q:\n%s", want, out)
+		}
+	}
+	if budgetStatusDot(budgetStatusOK) == budgetStatusDot(budgetStatusWarn) ||
+		budgetStatusDot(budgetStatusWarn) == budgetStatusDot(budgetStatusOver) ||
+		budgetStatusDot(budgetStatusOK) == budgetStatusDot(budgetStatusOver) {
+		t.Fatalf("budget status dots should render with distinct styles: ok=%q warn=%q over=%q",
+			budgetStatusDot(budgetStatusOK), budgetStatusDot(budgetStatusWarn), budgetStatusDot(budgetStatusOver))
+	}
+}
+
+func TestRenderTagChipsExtractsUnique(t *testing.T) {
+	m := Model{
+		sessions: []storage.SessionRow{
+			{SessionID: "auth-1", Tag: "auth"},
+			{SessionID: "auth-2", Tag: "auth"},
+			{SessionID: "billing-1", Tag: "billing"},
+			{SessionID: "plain"},
+		},
+	}
+
+	out := m.renderTagChips()
+	if strings.Count(out, "auth") != 1 {
+		t.Fatalf("duplicate auth tag should render once:\n%s", out)
+	}
+	for _, want := range []string{"[all]", "[auth]", "[billing]", "[untagged]"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("tag chips missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTagFilterFiltersSessionList(t *testing.T) {
+	m := Model{
+		sessions: []storage.SessionRow{
+			{SessionID: "auth-1", Tag: "auth"},
+			{SessionID: "auth-2", Tag: "auth"},
+			{SessionID: "billing-1", Tag: "billing"},
+			{SessionID: "plain"},
+		},
+		tagFilter: "auth",
+	}
+	m.refreshFilteredViews()
+
+	filtered := m.filteredSessions()
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 auth sessions, got %#v", filtered)
+	}
+	for _, s := range filtered {
+		if s.Tag != "auth" {
+			t.Fatalf("non-auth session passed tag filter: %#v", filtered)
+		}
+	}
+}
+
+func TestTagFilterUntaggedShowsNoTagSessions(t *testing.T) {
+	m := Model{
+		sessions: []storage.SessionRow{
+			{SessionID: "auth-1", Tag: "auth"},
+			{SessionID: "plain-1"},
+			{SessionID: "plain-2"},
+		},
+		tagFilter: tagFilterUntagged,
+	}
+	m.refreshFilteredViews()
+
+	filtered := m.filteredSessions()
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 untagged sessions, got %#v", filtered)
+	}
+	for _, s := range filtered {
+		if s.Tag != "" {
+			t.Fatalf("tagged session passed untagged filter: %#v", filtered)
+		}
+	}
+}
+
 func TestModelRefreshLoadsBudgetChips(t *testing.T) {
 	db := testModelDB(t)
 	seedModelSession(t, db)
@@ -219,6 +322,24 @@ func TestModelRefreshLoadsBudgetChips(t *testing.T) {
 	chip := m.budgetChips[0]
 	if chip.Name != "Claude monthly" || chip.Limit != 100 || chip.Used <= 0 {
 		t.Fatalf("unexpected budget chip: %#v", chip)
+	}
+}
+
+func TestRefreshLoadsBudgets(t *testing.T) {
+	db := testModelDB(t)
+	seedModelSession(t, db)
+	if _, err := db.InsertBudget("All monthly", 50, ""); err != nil {
+		t.Fatalf("insert budget: %v", err)
+	}
+
+	m := NewModel(db, make(chan EventMsg, 1))
+	m.refresh()
+
+	if len(m.budgetChips) != 1 {
+		t.Fatalf("refresh should load budgets, got %#v", m.budgetChips)
+	}
+	if m.budgetChips[0].Name != "All monthly" || m.budgetChips[0].Limit != 50 {
+		t.Fatalf("unexpected budget chip: %#v", m.budgetChips[0])
 	}
 }
 
@@ -318,6 +439,25 @@ func TestViewMessagesRendersModelBreakdownForMultipleModels(t *testing.T) {
 	out = m.viewMessages(120)
 	if strings.Contains(out, "By Model:") {
 		t.Fatalf("single-model breakdown should not render:\n%s", out)
+	}
+}
+
+func TestRenderModelBreakdownSingleModelHidden(t *testing.T) {
+	m := Model{
+		width:  120,
+		height: 40,
+		sessions: []storage.SessionRow{
+			{SessionID: "session-1", Platform: "claude", CWD: "/tmp/project", StartTime: time.Now()},
+		},
+		modelBreakdown: []storage.ModelCostRow{
+			{Model: "claude-sonnet-4-6", InputTokens: 150000, OutputTokens: 50000, CostUSD: 1.20},
+		},
+	}
+	m.refreshFilteredViews()
+
+	out := m.viewMessages(120)
+	if strings.Contains(out, "By Model:") || strings.Contains(out, "claude-sonnet-4-6") {
+		t.Fatalf("single-model breakdown should be hidden:\n%s", out)
 	}
 }
 

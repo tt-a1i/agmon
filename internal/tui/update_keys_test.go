@@ -319,6 +319,115 @@ func TestUpdateUpperSGlobalSearchAndEnterOpensHit(t *testing.T) {
 	}
 }
 
+func TestUpdateSEntersSearchModeInDetail(t *testing.T) {
+	m, _ := modelHarness(t)
+	m.activeTab = tabMessages
+
+	m = sendKey(m, keyRunes('S'))
+
+	if !m.searchMode {
+		t.Fatal("S in detail view should enter search prompt mode")
+	}
+	if m.searchText != "" || m.searchHits != nil || m.searchSelected != 0 {
+		t.Fatalf("search state should be reset on entry: text=%q hits=%#v selected=%d", m.searchText, m.searchHits, m.searchSelected)
+	}
+}
+
+func TestUpdateSearchModeEnterTriggersDBSearch(t *testing.T) {
+	m, db := modelHarness(t)
+	now := time.Now().UTC()
+	if err := db.UpsertSession("search-edit-session", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if _, err := db.InsertToolCallStart("search-edit-call", "", "search-edit-session", "Edit", "Edit file auth.go", now); err != nil {
+		t.Fatalf("insert tool call: %v", err)
+	}
+	m.activeTab = tabMessages
+	m = sendKey(m, keyRunes('S'))
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Edit")})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.searchMode {
+		t.Fatal("Enter should leave search prompt mode")
+	}
+	if m.searchText != "Edit" {
+		t.Fatalf("searchText = %q, want Edit", m.searchText)
+	}
+	if len(m.searchHits) == 0 {
+		t.Fatal("expected DB search to populate searchHits")
+	}
+	if m.searchHits[0].SessionID != "search-edit-session" {
+		t.Fatalf("first hit = %#v, want search-edit-session", m.searchHits[0])
+	}
+}
+
+func TestUpdateSearchModeEscClosesPopup(t *testing.T) {
+	m, _ := modelHarness(t)
+	m.activeTab = tabMessages
+	m = sendKey(m, keyRunes('S'))
+	m.searchText = "Edit"
+
+	m = sendKey(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.searchMode || m.searchText != "" || m.searchHits != nil || m.searchErr != "" {
+		t.Fatalf("Esc should close and reset search: mode=%v text=%q hits=%#v err=%q", m.searchMode, m.searchText, m.searchHits, m.searchErr)
+	}
+}
+
+func TestUpdateSearchPopupJKNavigatesResults(t *testing.T) {
+	m, _ := modelHarness(t)
+	m.activeTab = tabMessages
+	m.searchHits = []storage.SearchHit{
+		{SessionID: "sess-A"},
+		{SessionID: "sess-B"},
+		{SessionID: "sess-C"},
+	}
+	m.searchSelected = 0
+
+	m = sendKey(m, keyRunes('j'))
+	if m.searchSelected != 1 {
+		t.Fatalf("j should move to next search result, got %d", m.searchSelected)
+	}
+	m = sendKey(m, keyRunes('j'))
+	m = sendKey(m, keyRunes('j'))
+	if m.searchSelected != 2 {
+		t.Fatalf("j should stop at last search result, got %d", m.searchSelected)
+	}
+	m = sendKey(m, keyRunes('k'))
+	if m.searchSelected != 1 {
+		t.Fatalf("k should move to previous search result, got %d", m.searchSelected)
+	}
+}
+
+func TestUpdateSearchPopupEnterJumpsToSession(t *testing.T) {
+	m, _ := modelHarness(t)
+	m.activeTab = tabToolCalls
+	m.selectedSession = 0
+	m.searchHits = []storage.SearchHit{
+		{SessionID: "sess-B"},
+	}
+	m.searchSelected = 0
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("Enter on search result should request detail refresh")
+	}
+	if m.activeTab != tabMessages {
+		t.Fatalf("activeTab = %d, want messages", m.activeTab)
+	}
+	if m.selectedSession != 1 || m.sessions[m.selectedSession].SessionID != "sess-B" {
+		t.Fatalf("selected session = %d (%s), want sess-B", m.selectedSession, m.sessions[m.selectedSession].SessionID)
+	}
+	if m.searchHits != nil || m.searchMode {
+		t.Fatalf("search popup should close after jump: mode=%v hits=%#v", m.searchMode, m.searchHits)
+	}
+}
+
 func TestUpdateEnterOnMessagesTogglesExpansion(t *testing.T) {
 	m, _ := modelHarness(t)
 	m.activeTab = tabMessages
