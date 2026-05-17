@@ -1,0 +1,17 @@
+.git
+.github
+.hive
+.idea
+.vscode
+.DS_Store
+coverage.out
+coverage_summary.txt
+*.test
+*.prof
+dist/
+tokenmeter
+tokenmeter.exe
+docs/
+AGENTS.md
+GEMINI.md
+CLAUDE.md
