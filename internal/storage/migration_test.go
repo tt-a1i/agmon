@@ -448,13 +448,13 @@ func TestMigrateColumnDefaultsApplied(t *testing.T) {
 
 	// Read back and verify all added columns carry their declared defaults.
 	type defaults struct {
-		cwd                     string
-		gitBranch               string
-		tag                     string
-		model                   string
-		latestContextTokens     int
-		latestTokenTime         string
-		totalCacheReadTokens    int
+		cwd                      string
+		gitBranch                string
+		tag                      string
+		model                    string
+		latestContextTokens      int
+		latestTokenTime          string
+		totalCacheReadTokens     int
 		totalCacheCreationTokens int
 	}
 	var d defaults

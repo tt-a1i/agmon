@@ -33,13 +33,13 @@ import (
 //	    }
 //	}
 type SSEBuffer struct {
-	window  time.Duration
-	mu      sync.Mutex
-	latest  map[string]event.Event   // session_id → latest coalesced event
-	queue   []event.Event            // non-coalesced events, preserved in order
-	out     chan []event.Event
-	done    chan struct{}
-	once    sync.Once
+	window time.Duration
+	mu     sync.Mutex
+	latest map[string]event.Event // session_id → latest coalesced event
+	queue  []event.Event          // non-coalesced events, preserved in order
+	out    chan []event.Event
+	done   chan struct{}
+	once   sync.Once
 }
 
 // NewSSEBuffer creates a buffer with the given coalescing window. A 50 ms

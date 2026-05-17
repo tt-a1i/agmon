@@ -17,7 +17,7 @@ func TestWebHandleSessionsNoMemLeak(t *testing.T) {
 	db := testDB(t)
 	srv := NewServer(db, "0")
 
-	// Seed a few sessions so JSON serialisation exercises real paths.
+	// Seed a few sessions so JSON serialization exercises real paths.
 	now := time.Now()
 	for i := range 5 {
 		id := "ml-session-" + string(rune('a'+i))

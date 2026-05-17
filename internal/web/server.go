@@ -1939,4 +1939,3 @@ td{padding:4px 6px;border-bottom:1px solid #1f1f1f;color:#ccc}
 
 	w.WriteString(`</div></body></html>`)
 }
-

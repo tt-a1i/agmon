@@ -216,4 +216,3 @@ func FuzzModelEnterAndEsc(f *testing.F) {
 		_ = m.View()
 	})
 }
-

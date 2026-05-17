@@ -7,10 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/tt-a1i/tokenmeter/internal/storage"
 	"time"
 
+	"github.com/tt-a1i/tokenmeter/internal/storage"
 	"github.com/tt-a1i/tokenmeter/internal/testutil"
 )
 

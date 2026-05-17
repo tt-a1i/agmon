@@ -46,7 +46,7 @@ func TestMemLeakCheckRespectsThreshold(t *testing.T) {
 		tiny = append(tiny, 1) // ~100 bytes total after 100 rounds
 	}, testutil.MemLeakOpts{
 		Rounds:     100,
-		PercentMax: 100.0,  // allow 100% growth
+		PercentMax: 100.0,   // allow 100% growth
 		BytesMax:   5 << 20, // 5 MiB absolute floor
 	})
 	_ = tiny

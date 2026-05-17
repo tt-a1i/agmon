@@ -231,4 +231,3 @@ func TestOpenHandlesMagicBytesOnly(t *testing.T) {
 	t.Log("magic+junk opened without error (SQLite recovered random page layout)")
 	db.Close()
 }
-

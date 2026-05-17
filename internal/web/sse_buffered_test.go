@@ -13,23 +13,6 @@ import (
 	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
-// sseLines reads SSE data lines from a response body into a channel.
-// Stops when it encounters a read error (e.g. server closes connection).
-func sseLines(resp *http.Response, out chan<- string, done <-chan struct{}) {
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "data: ") {
-			select {
-			case out <- strings.TrimPrefix(line, "data: "):
-			case <-done:
-				return
-			}
-		}
-	}
-	close(out)
-}
-
 // TestSSEHandlerBuffersTokenUsage verifies that a burst of token_usage events
 // is coalesced by SSEBuffer before reaching the SSE client. 50 events sent in
 // rapid succession should produce fewer than 10 SSE data frames.
@@ -228,7 +211,7 @@ func TestSSEHandlerFlushesOnDisconnect(t *testing.T) {
 }
 
 // TestSSEHandlerCleanupOnContextCancel is a race-detector exercise: confirms
-// that creating an SSEBuffer, adding events, then cancelling the request
+// that creating an SSEBuffer, adding events, then canceling the request
 // context does not trigger the race detector or leave goroutines running.
 func TestSSEHandlerCleanupOnContextCancel(t *testing.T) {
 	db := testDB(t)

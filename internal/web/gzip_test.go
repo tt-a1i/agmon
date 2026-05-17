@@ -28,12 +28,6 @@ func largeJSONHandler(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(items)
 }
 
-// smallJSONHandler writes a response under typical 1 KB threshold.
-func smallJSONHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"ok":true}`))
-}
-
 // TestGzipMiddlewareCompressesResponse verifies that when the client sends
 // Accept-Encoding: gzip the middleware sets Content-Encoding: gzip and the
 // response body decompresses to the original payload.

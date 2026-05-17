@@ -48,7 +48,7 @@ func TestDaemonStartStopNoLeak(t *testing.T) {
 	if err := d.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	// Let background loops (sweepers, budget, webhook retry) initialise.
+	// Let background loops (sweepers, budget, webhook retry) initialize.
 	time.Sleep(50 * time.Millisecond)
 	d.Stop()
 }

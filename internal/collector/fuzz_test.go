@@ -158,6 +158,6 @@ func FuzzParseTimestamp(f *testing.F) {
 			t.Skip()
 		}
 		// Must not panic
-		parseTimestamp(s)
+		_, _ = parseTimestamp(s)
 	})
 }

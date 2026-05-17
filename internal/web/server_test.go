@@ -2013,7 +2013,7 @@ func TestAnalyticsCompareReturnsBothPeriods(t *testing.T) {
 	if pp.ToolBreakdown == nil {
 		t.Error("previous_period missing tool_breakdown")
 	}
-	if pp.ModelMixDaily == nil || len(pp.ModelMixDaily) == 0 {
+	if len(pp.ModelMixDaily) == 0 {
 		t.Error("previous_period missing model_mix_daily")
 	}
 	// Anomalies may be nil for sparse data — not checked.
