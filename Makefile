@@ -1,4 +1,4 @@
-.PHONY: build install test lint vet vuln ci coverage clean
+.PHONY: build install test lint vet vuln ci coverage clean flaky race
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
 
@@ -30,3 +30,9 @@ coverage:
 
 clean:
 	rm -f tokenmeter
+
+flaky:
+	ROUNDS=20 bash scripts/find_flaky.sh
+
+race:
+	go test ./... -race -count=5 -timeout=120s

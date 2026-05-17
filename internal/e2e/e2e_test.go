@@ -43,7 +43,7 @@ func TestE2EDaemonEmitFlow(t *testing.T) {
 			GitBranch: "main",
 		},
 	})
-	emitEvent(t, rig.sockPath, tokenEvent("usage-"+sessionID, sessionID, "agent-flow", 0.42, now.Add(10*time.Millisecond)))
+	emitEvent(t, rig.sockPath, tokenEvent("usage-"+sessionID, sessionID, "agent-flow", 0.42, now))
 	waitForSessionCost(t, rig.db, sessionID, 0.42, 2*time.Second)
 
 	baseURL := startTestWebServer(t, rig.db, rig.sockPath)
