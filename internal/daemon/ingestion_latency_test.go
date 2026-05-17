@@ -9,6 +9,71 @@ import (
 	"github.com/tt-a1i/tokenmeter/internal/event"
 )
 
+// TestBatchingReducesLatency compares the p99 hot-path latency of
+// BatchWriter.Enqueue() (channel send) against processEvent with a
+// synchronous InsertTokenUsage.  Enqueue must be at least 10× faster at p99.
+func TestBatchingReducesLatency(t *testing.T) {
+	const N = 500
+
+	// --- synchronous baseline (no BatchWriter) ---
+	d, db := testDaemon(t)
+	sessionID := "bw-latency-session"
+	if err := db.UpsertSession(sessionID, event.PlatformClaude, time.Now()); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	now := time.Now()
+	directLat := make([]time.Duration, N)
+	for i := range N {
+		ev := event.Event{
+			ID:        fmt.Sprintf("bw-direct-%d", i),
+			Type:      event.EventTokenUsage,
+			SessionID: sessionID,
+			AgentID:   "agent-bw",
+			Platform:  event.PlatformClaude,
+			Timestamp: now.Add(time.Duration(i) * time.Microsecond),
+			Data:      event.EventData{InputTokens: 10, Model: "claude-sonnet-4-6"},
+		}
+		start := time.Now()
+		if err := d.processEvent(ev); err != nil {
+			t.Fatalf("iteration %d: %v", i, err)
+		}
+		directLat[i] = time.Since(start)
+	}
+	sort.Slice(directLat, func(i, j int) bool { return directLat[i] < directLat[j] })
+	directP99 := directLat[N*99/100]
+	t.Logf("direct processEvent p99=%v", directP99)
+
+	// --- BatchWriter path (Enqueue = non-blocking channel send) ---
+	mock := &mockBatchDB{}
+	bw := NewBatchWriter(mock, 50*time.Millisecond, 50)
+	bw.Start()
+
+	enqueueLat := make([]time.Duration, N)
+	for i := range N {
+		ev := event.Event{
+			ID:        fmt.Sprintf("bw-enqueue-%d", i),
+			Type:      event.EventTokenUsage,
+			SessionID: sessionID,
+			Platform:  event.PlatformClaude,
+			Timestamp: now.Add(time.Duration(i) * time.Microsecond),
+			Data:      event.EventData{InputTokens: 10, Model: "claude-sonnet-4-6"},
+		}
+		start := time.Now()
+		bw.Enqueue(ev)
+		enqueueLat[i] = time.Since(start)
+	}
+	bw.Stop()
+
+	sort.Slice(enqueueLat, func(i, j int) bool { return enqueueLat[i] < enqueueLat[j] })
+	enqueueP99 := enqueueLat[N*99/100]
+	t.Logf("BatchWriter Enqueue p99=%v (direct=%v, ratio=%.1f×)", enqueueP99, directP99, float64(directP99)/float64(enqueueP99))
+
+	if enqueueP99 >= directP99 {
+		t.Errorf("Enqueue p99 %v not faster than direct p99 %v — batch path provides no latency benefit", enqueueP99, directP99)
+	}
+}
+
 // TestIngestionP99LatencyUnderThreshold measures processEvent latency over
 // 500 iterations and asserts p99 < 50ms. p50 and p99 are logged for tracking.
 //

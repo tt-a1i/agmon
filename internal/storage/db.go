@@ -628,13 +628,9 @@ func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatu
 // sourceID is used for deduplication (INSERT OR IGNORE on unique source_id).
 // Pass a stable unique ID (e.g. message UUID) to prevent double-counting on daemon restart.
 // Pass "" to skip dedup.
-func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int, model string, costUSD float64, ts time.Time, sourceID string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }() // no-op after Commit
-
+// insertTokenUsageTx executes one token_usage INSERT inside an existing TX.
+// It updates daily_cost_cache and sessions when a new row is written.
+func (s *DB) insertTokenUsageTx(tx *sql.Tx, agentID, sessionID string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int, model string, costUSD float64, ts time.Time, sourceID string) error {
 	tsStr := formatStorageTime(ts)
 	result, err := tx.Exec(`
 		INSERT OR IGNORE INTO token_usage
@@ -644,19 +640,16 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 	if err != nil {
 		return err
 	}
-
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
 	if rowsAffected == 0 {
-		return tx.Commit()
+		return nil // duplicate; nothing else to update
 	}
-
 	if err := incrementDailyCostCache(tx, tsStr, costUSD); err != nil {
 		return err
 	}
-
 	_, err = tx.Exec(`
 		UPDATE sessions SET
 			total_input_tokens = total_input_tokens + ?,
@@ -678,10 +671,41 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 			END
 		WHERE session_id = ?
 	`, inputTokens, outputTokens, costUSD, cacheReadTokens, cacheCreationTokens, tsStr, inputTokens, tsStr, tsStr, model, model, tsStr, model, sessionID)
+	return err
+}
+
+func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int, model string, costUSD float64, ts time.Time, sourceID string) error {
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
+	if err := s.insertTokenUsageTx(tx, agentID, sessionID, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, costUSD, ts, sourceID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// InsertTokenUsageBatch writes a slice of token_usage events in a single
+// BEGIN...COMMIT transaction, reducing WAL write pressure compared to
+// one-at-a-time inserts. Duplicates are silently ignored (INSERT OR IGNORE).
+func (s *DB) InsertTokenUsageBatch(events []event.Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, ev := range events {
+		if err := s.insertTokenUsageTx(tx, ev.AgentID, ev.SessionID,
+			ev.Data.InputTokens, ev.Data.OutputTokens,
+			ev.Data.CacheCreationTokens, ev.Data.CacheReadTokens,
+			ev.Data.Model, ev.Data.CostUSD, ev.Timestamp, ev.ID); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 

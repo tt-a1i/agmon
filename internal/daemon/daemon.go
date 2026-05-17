@@ -35,6 +35,8 @@ type Daemon struct {
 	webhooks     *WebhookConfig
 	webhookQueue chan webhookDelivery
 
+	batchWriter *BatchWriter // nil until Start(); token_usage fast-path
+
 	budgetLastStatus     map[int64]string
 	toolFailureLastAlert map[string]float64
 
@@ -191,6 +193,9 @@ func (d *Daemon) Start() error {
 
 	// Repair token_usage rows that have empty model (Codex turn_context ordering issue).
 	d.repairEmptyTokenModels()
+
+	d.batchWriter = NewBatchWriter(d.db, 50*time.Millisecond, 50)
+	d.batchWriter.Start()
 
 	go d.acceptLoop()
 	go d.acceptSubscriberLoop()
@@ -435,7 +440,10 @@ func (d *Daemon) Stop() {
 		}
 		d.mu.Unlock()
 		d.connWG.Wait()
-		<-d.batchDone // wait for batch consumer to drain
+		<-d.batchDone // wait for batch consumer to drain (may enqueue to batchWriter)
+		if d.batchWriter != nil {
+			d.batchWriter.Stop() // drain batchWriter queue and final flush
+		}
 		d.bgWG.Wait() // wait for background loops (sweepers) so they don't outlive db
 
 		// Surface observability counters once at shutdown so operators see if
@@ -618,6 +626,11 @@ func (d *Daemon) processEvent(ev event.Event) error {
 		return nil
 
 	case event.EventTokenUsage:
+		if d.batchWriter != nil {
+			d.batchWriter.Enqueue(ev)
+			return nil
+		}
+		// Fallback synchronous path (used when batchWriter is nil, e.g. in unit tests).
 		if ev.Data.GitBranch != "" || ev.Data.CWD != "" {
 			if err := d.db.FillSessionMeta(ev.SessionID, ev.Data.CWD, ev.Data.GitBranch); err != nil {
 				log.Printf("fill session meta %s: %v", ev.SessionID, err)
