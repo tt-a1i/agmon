@@ -424,6 +424,47 @@ tr:hover td{background:var(--bg-hover)}
 .kbd-close{margin-top:16px;width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
 .kbd-close:hover{background:var(--border);color:var(--text-strong)}
 
+/* Settings panel — same shell as kbd-modal but wider with form sections. */
+.settings-btn{background:0;border:0;width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;color:var(--text-muted);transition:background .1s,color .1s}
+.settings-btn:hover{background:var(--bg3);color:var(--text-strong)}
+.settings-modal{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;z-index:100;place-items:center}
+.settings-modal.show{display:grid}
+.settings-box{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px 28px;max-width:480px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.15);animation:fadeUp .15s ease}
+.settings-box h3{font-size:15px;font-weight:700;color:var(--text-strong);margin-bottom:16px}
+.settings-section{margin-bottom:18px}
+.settings-section h4{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px}
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;gap:12px}
+.settings-row label{font-size:12px;color:var(--text);flex:1}
+.settings-radio{display:inline-flex;gap:4px;flex-shrink:0}
+.settings-radio button{background:0;border:1px solid var(--border);border-radius:5px;padding:4px 10px;font:inherit;font-size:11px;font-weight:500;color:var(--text-muted);cursor:pointer;transition:all .1s}
+.settings-radio button:hover{color:var(--text);border-color:var(--text-faint)}
+.settings-radio button.on{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
+.settings-check{appearance:none;width:18px;height:18px;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer;position:relative;flex-shrink:0;transition:all .1s}
+.settings-check:hover{border-color:var(--text-faint)}
+.settings-check:checked{background:var(--accent);border-color:var(--accent)}
+.settings-check:checked::after{content:'✓';position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;line-height:1}
+.settings-footer{display:flex;gap:8px;margin-top:16px;border-top:1px solid var(--border-light);padding-top:14px}
+.settings-reset{flex:1;background:0;border:1px solid var(--border);border-radius:6px;padding:7px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
+.settings-reset:hover{color:var(--red);border-color:color-mix(in srgb,var(--red) 50%,transparent)}
+.settings-close{flex:1;background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:6px;padding:7px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:filter .1s}
+.settings-close:hover{filter:brightness(1.08)}
+
+/* Compact mode tightens row padding so more sessions fit per screen. */
+.compact .sr{padding:6px 12px;gap:8px}
+.compact .sr-name{font-size:12px}
+.compact .sr-meta{font-size:10px;gap:6px}
+.compact .sr-cost{font-size:13px}
+
+/* CWD column — render in sr-meta, hidden when user toggles off. */
+.sr-cwd{font-family:monospace;font-size:10px;color:var(--text-faint);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.hide-cwd .sr-cwd{display:none}
+
+/* Settings modal on phones: full-screen overlay so radios + checkboxes
+   have room to breathe. */
+@media(max-width:640px){
+  .settings-box{max-width:none;width:100%;height:100%;max-height:100vh;border-radius:0;border:0;padding:20px}
+}
+
 /* Skeleton */
 @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
 .skel{border-radius:8px;background:linear-gradient(90deg,var(--bg3) 25%,var(--border-light) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s ease-in-out infinite}
@@ -456,6 +497,7 @@ tr:hover td{background:var(--bg-hover)}
       <button class="rb" data-r="all">All</button>
     </div>
     <span class="updated" id="updated"></span>
+    <button class="settings-btn" id="settingsBtn" onclick="document.getElementById('settingsModal').classList.add('show')" title="Settings" aria-label="Settings">⚙</button>
     <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
   </div>
 </nav>
@@ -559,6 +601,32 @@ tr:hover td{background:var(--bg-hover)}
     <button class="kbd-close" onclick="$('kbdModal').classList.remove('show')">Close</button>
   </div>
 </div>
+<div class="settings-modal" id="settingsModal" onclick="this.classList.remove('show')">
+  <div class="settings-box" onclick="event.stopPropagation()">
+    <h3>Settings</h3>
+    <div class="settings-section">
+      <h4>Appearance</h4>
+      <div class="settings-row"><label>Theme</label><div class="settings-radio" data-pref="theme">
+        <button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button>
+      </div></div>
+      <div class="settings-row"><label>Default time range</label><div class="settings-radio" data-pref="range">
+        <button data-v="today">Today</button><button data-v="week">Week</button><button data-v="month">Month</button><button data-v="all">All</button>
+      </div></div>
+      <div class="settings-row"><label for="prefCompact">Compact mode (more rows per screen)</label><input type="checkbox" class="settings-check" id="prefCompact" data-pref="compact"></div>
+    </div>
+    <div class="settings-section">
+      <h4>Data</h4>
+      <div class="settings-row"><label>Slow polling backstop (SSE fallback rate)</label><div class="settings-radio" data-pref="poll">
+        <button data-v="30">30s</button><button data-v="60">60s</button><button data-v="120">2m</button><button data-v="0">Off</button>
+      </div></div>
+      <div class="settings-row"><label for="prefShowCwd">Show project path (cwd) in session list</label><input type="checkbox" class="settings-check" id="prefShowCwd" data-pref="showCwd"></div>
+    </div>
+    <div class="settings-footer">
+      <button class="settings-reset" onclick="resetPreferences()">Reset to defaults</button>
+      <button class="settings-close" onclick="$('settingsModal').classList.remove('show')">Done</button>
+    </div>
+  </div>
+</div>
 <div class="scroll-top" id="scrollTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</div>
 <div class="toast" id="toast"></div>
 </div>
@@ -566,24 +634,62 @@ tr:hover td{background:var(--bg-hover)}
 const COLORS=['#4f46e5','#06b6d4','#22c55e','#eab308','#ef4444','#f97316','#ec4899','#14b8a6'];
 const $=id=>document.getElementById(id);
 
-// Theme
-function toggleTheme(){
-  const isDark=document.documentElement.getAttribute('data-theme')==='dark';
-  document.documentElement.setAttribute('data-theme',isDark?'':'dark');
-  localStorage.setItem('tokenmeter-theme',isDark?'light':'dark');
-  $('themeBtn').textContent=isDark?'🌙':'☀️';
-  // Redraw chart with new colors
+// Preferences — all persist to localStorage under 'tokenmeter-<key>'.
+const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1'};
+function getPref(k){const v=localStorage.getItem('tokenmeter-'+k);return v==null?PREFS_DEFAULTS[k]:v}
+function setPref(k,v){localStorage.setItem('tokenmeter-'+k,v);applyPreferences()}
+
+// Theme respects 'auto' by following prefers-color-scheme.
+function setTheme(mode){
+  const isDark=mode==='dark'||(mode==='auto'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches);
+  document.documentElement.setAttribute('data-theme',isDark?'dark':'');
+  const btn=$('themeBtn');if(btn)btn.textContent=isDark?'☀️':'🌙';
   if(typeof renderChart==='function'&&lastCostDays)renderChart(lastCostDays);
 }
-// Init theme: localStorage > system preference
-(function(){
-  const saved=localStorage.getItem('tokenmeter-theme');
-  const prefersDark=window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches;
-  const isDark=saved?saved==='dark':prefersDark;
-  if(isDark){document.documentElement.setAttribute('data-theme','dark');$('themeBtn').textContent='☀️'}
-})();
+// Legacy toggle button: cycle light ↔ dark (skips auto so a click is always
+// a deterministic visible change). Setting persists.
+function toggleTheme(){
+  const cur=document.documentElement.getAttribute('data-theme')==='dark';
+  setPref('theme',cur?'light':'dark');
+}
+
+function applyPreferences(){
+  setTheme(getPref('theme'));
+  document.body.classList.toggle('compact',getPref('compact')==='1');
+  document.body.classList.toggle('hide-cwd',getPref('showCwd')!=='1');
+  // Restart slow-poll backstop with current interval. 0 = disabled.
+  if(slowPoll){clearInterval(slowPoll);slowPoll=null}
+  const sec=parseInt(getPref('poll'),10);
+  if(sec>0&&typeof refreshActiveView==='function')slowPoll=setInterval(refreshActiveView,sec*1000);
+  // Update modal UI (radios + checkboxes) to match current values.
+  document.querySelectorAll('.settings-radio').forEach(g=>{
+    const k=g.dataset.pref,v=getPref(k);
+    g.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  });
+  document.querySelectorAll('.settings-check').forEach(c=>{c.checked=getPref(c.dataset.pref)==='1'});
+}
+function resetPreferences(){
+  Object.keys(PREFS_DEFAULTS).forEach(k=>localStorage.removeItem('tokenmeter-'+k));
+  // Range button row also reflects the reset so subsequent loads honor it.
+  range=PREFS_DEFAULTS.range;document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r===range));
+  applyPreferences();
+  if(typeof refresh==='function')refresh();
+}
+
+// Wire up modal controls. Radios use button click + data-v; checkboxes use
+// change. Range change also re-fetches dashboard data so the chart matches.
+document.addEventListener('click',e=>{
+  const btn=e.target.closest('.settings-radio button');
+  if(!btn)return;
+  const k=btn.parentElement.dataset.pref;setPref(k,btn.dataset.v);
+  if(k==='range'){range=btn.dataset.v;document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r===range));if(typeof refresh==='function')refresh()}
+});
+document.addEventListener('change',e=>{
+  const c=e.target.closest('.settings-check');
+  if(!c)return;setPref(c.dataset.pref,c.checked?'1':'0');
+});
 let lastCostDays=null;
-let range=localStorage.getItem('tokenmeter-range')||'week',sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null,tagFilter=null;
+let range=getPref('range'),sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null,tagFilter=null;
 document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r===range));
 
 const fc=v=>v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4);
@@ -800,7 +906,8 @@ function renderSessions(sessions){
     const durS=dur>0?(dur>=60?Math.floor(dur/60)+'h '+dur%60+'m':dur+'m'):(s.status==='active'?'running':'');
     const tokS=ft(s.input_tokens+s.output_tokens);
     const barW=(s.cost_usd/maxC*100).toFixed(1);
-    return`<div class="sr" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><div class="sr-arr">›</div></div>`
+    const cwdShort=s.cwd?s.cwd.split('/').slice(-2).join('/'):'';
+    return`<div class="sr" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><div class="sr-arr">›</div></div>`
   }).join('');
 }
 $('sMore').onclick=()=>{sLim+=30;renderSessions(allS)};
@@ -1122,7 +1229,7 @@ function scheduleDetailRefresh(id){if(!id||detailSid!==id)return;clearTimeout(de
 function scheduleSessionSummary(id){if(!id)return;clearTimeout(summaryTimers[id]);summaryTimers[id]=setTimeout(()=>{delete summaryTimers[id];refreshSessionSummary(id)},400)}
 function startFallbackPolling(){if(fallbackPoll)return;refreshActiveView();fallbackPoll=setInterval(refreshActiveView,5000)}
 function stopFallbackPolling(){if(!fallbackPoll)return;clearInterval(fallbackPoll);fallbackPoll=null}
-function startSlowPolling(){if(!slowPoll)slowPoll=setInterval(refreshActiveView,30000)}
+function startSlowPolling(){if(slowPoll)return;const sec=parseInt(getPref('poll'),10);if(sec>0)slowPoll=setInterval(refreshActiveView,sec*1000)}
 function handleRealtimeEvent(ev){
   switch(ev.type){
     case 'session_start':
@@ -1212,6 +1319,7 @@ function handleRoute(){
 }
 window.addEventListener('hashchange',handleRoute);
 
+applyPreferences();
 refresh();connectEvents();
 
 // PWA: register the service worker so the dashboard works offline and can be
