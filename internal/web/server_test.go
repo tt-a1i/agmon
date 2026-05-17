@@ -1049,6 +1049,66 @@ func TestHandleMetricsEscapesLabels(t *testing.T) {
 	}
 }
 
+func TestHandleHealthAllOk(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	var resp healthResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal health: %v", err)
+	}
+	if resp.Status != "healthy" || resp.Checks.DB.Status != "ok" || resp.Checks.Daemon.Status != "ok" {
+		t.Fatalf("health response = %#v", resp)
+	}
+}
+
+func TestHandleHealthDBClosed(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0")
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want 503. body: %s", w.Code, w.Body.String())
+	}
+	var resp healthResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal health: %v", err)
+	}
+	if resp.Status != "unhealthy" || !strings.HasPrefix(resp.Checks.DB.Status, "error:") {
+		t.Fatalf("health response = %#v", resp)
+	}
+}
+
+func TestHandleHealthIncludesVersion(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0", WithBuildVersion("health-test-version"))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+
+	var resp healthResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal health: %v", err)
+	}
+	if resp.Version != "health-test-version" {
+		t.Fatalf("version = %q, want health-test-version", resp.Version)
+	}
+}
+
 func TestHandleProjection(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().Add(-time.Hour)

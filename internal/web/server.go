@@ -33,6 +33,7 @@ type Server struct {
 	eventHeartbeat  time.Duration
 	metricsProvider MetricsProvider
 	subscribeRemote func(string) (<-chan event.Event, func(), error)
+	startedAt       time.Time
 	srv             *http.Server // built in NewServer so Shutdown is race-free vs Start
 }
 
@@ -76,6 +77,7 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 		buildVersion:    "dev",
 		eventHeartbeat:  30 * time.Second,
 		subscribeRemote: daemon.SubscribeRemote,
+		startedAt:       time.Now(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -95,6 +97,7 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux.HandleFunc("/api/budgets", s.handleBudgets)
 	mux.HandleFunc("/api/budgets/", s.handleBudgetByID)
 	mux.HandleFunc("/api/session/", s.handleSessionDetail)
+	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	s.srv = &http.Server{
@@ -636,6 +639,74 @@ func (s *Server) handleProjection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, projection)
+}
+
+type healthResponse struct {
+	Status        string       `json:"status"`
+	UptimeSeconds int64        `json:"uptime_seconds"`
+	Checks        healthChecks `json:"checks"`
+	Version       string       `json:"version"`
+}
+
+type healthChecks struct {
+	DB     healthCheck `json:"db"`
+	Daemon healthCheck `json:"daemon"`
+}
+
+type healthCheck struct {
+	Status    string  `json:"status"`
+	LatencyMS float64 `json:"latency_ms,omitempty"`
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	dbCheck := s.healthDBCheck()
+	daemonCheck := s.healthDaemonCheck()
+	status := "healthy"
+	code := http.StatusOK
+	if dbCheck.Status != "ok" || daemonCheck.Status != "ok" {
+		status = "unhealthy"
+		code = http.StatusServiceUnavailable
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(healthResponse{
+		Status:        status,
+		UptimeSeconds: int64(time.Since(s.startedAt).Seconds()),
+		Checks: healthChecks{
+			DB:     dbCheck,
+			Daemon: daemonCheck,
+		},
+		Version: s.buildVersion,
+	})
+}
+
+func (s *Server) healthDBCheck() healthCheck {
+	start := time.Now()
+	if _, err := s.db.GetVisibleSessionCount(); err != nil {
+		return healthCheck{Status: "error: " + err.Error(), LatencyMS: float64(time.Since(start).Microseconds()) / 1000}
+	}
+	return healthCheck{Status: "ok", LatencyMS: float64(time.Since(start).Microseconds()) / 1000}
+}
+
+func (s *Server) healthDaemonCheck() healthCheck {
+	if s.metricsProvider != nil {
+		s.metricsProvider.DaemonStats()
+		return healthCheck{Status: "ok"}
+	}
+	if s.eventSockPath != "" {
+		if running, _ := daemon.IsRunning(); running {
+			return healthCheck{Status: "ok"}
+		}
+		return healthCheck{Status: "unreachable"}
+	}
+	return healthCheck{Status: "ok"}
 }
 
 // handleMetrics emits Prometheus text exposition metrics. Metric names use the
