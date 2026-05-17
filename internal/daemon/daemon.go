@@ -704,6 +704,6 @@ func writeRemoteEvent(conn net.Conn, ev event.Event) error {
 	if err := conn.SetWriteDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
 		return err
 	}
-	defer conn.SetWriteDeadline(time.Time{})
+	defer func() { _ = conn.SetWriteDeadline(time.Time{}) }() // reset deadline after write
 	return json.NewEncoder(conn).Encode(ev)
 }

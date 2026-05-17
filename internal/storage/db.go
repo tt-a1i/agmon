@@ -345,7 +345,7 @@ func (s *DB) rebuildDailyCostCache() error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
 	if err := rebuildDailyCostCache(tx); err != nil {
 		return err
 	}
@@ -590,7 +590,7 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	tsStr := formatStorageTime(ts)
 	result, err := tx.Exec(`
@@ -653,7 +653,7 @@ func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	// Delete related records first (SQLite FK not enforced by default).
 	for _, q := range []string{

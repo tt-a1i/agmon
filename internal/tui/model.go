@@ -414,14 +414,14 @@ func splashTickCmd() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Splash screen: any key dismisses, ticks animate
 	if m.splash {
-		switch msg.(type) {
+		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			m.splash = false
+			_ = msg
 			return m, tea.Batch(refreshCmd(), tickCmd(), listenEvents(m.eventCh))
 		case tea.WindowSizeMsg:
-			wmsg := msg.(tea.WindowSizeMsg)
-			m.width = wmsg.Width
-			m.height = wmsg.Height
+			m.width = msg.Width
+			m.height = msg.Height
 			return m, nil
 		case splashTickMsg:
 			m.splashTick++

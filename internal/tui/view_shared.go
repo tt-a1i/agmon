@@ -124,19 +124,6 @@ func sessionHeader(s storage.SessionRow) string {
 	return strings.Join(parts, sep)
 }
 
-func contextColorize(latest int, model, text string) string {
-	window := contextWindowForModel(model)
-	pct := float64(latest) / float64(window) * 100
-	switch {
-	case pct >= 80:
-		return contextDangerStyle.Render(text)
-	case pct >= 50:
-		return contextWarnStyle.Render(text)
-	default:
-		return contextOkStyle.Render(text)
-	}
-}
-
 func contextPercent(latest int, model string) string {
 	if latest == 0 {
 		return mutedStyle.Render("-")

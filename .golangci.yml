@@ -30,5 +30,5 @@ issues:
     - path: cmd/tokenmeter/main\.go
       linters:
         - errcheck
-  max-issues-per-linter: 50
-  max-same-issues: 10
+  max-issues-per-linter: 0
+  max-same-issues: 0

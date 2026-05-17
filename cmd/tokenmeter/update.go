@@ -272,8 +272,8 @@ func replaceBinary(target string, newBin []byte) error {
 			return fmt.Errorf("move old binary: %w", err)
 		}
 		if err := os.Rename(tmpPath, target); err != nil {
-			// Try to restore the old binary.
-			os.Rename(oldPath, target)
+			// Try to restore the old binary; best-effort.
+			_ = os.Rename(oldPath, target)
 			os.Remove(tmpPath)
 			return fmt.Errorf("replace binary: %w", err)
 		}

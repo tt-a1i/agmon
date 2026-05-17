@@ -2,7 +2,6 @@ package storage
 
 import (
 	"path/filepath"
-	"sort"
 	"time"
 )
 
@@ -304,18 +303,4 @@ func analysisSessionName(row TopSessionRow) string {
 		return row.SessionID[:8]
 	}
 	return row.SessionID
-}
-
-func sortedExtensionCounts(counts map[string]int) []FileEditCount {
-	result := make([]FileEditCount, 0, len(counts))
-	for ext, count := range counts {
-		result = append(result, FileEditCount{Path: ext, Count: count})
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Count == result[j].Count {
-			return result[i].Path < result[j].Path
-		}
-		return result[i].Count > result[j].Count
-	})
-	return result
 }

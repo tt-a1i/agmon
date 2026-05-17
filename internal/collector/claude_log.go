@@ -225,7 +225,7 @@ func ParseClaudeFileEvents(path, sessionID string) []event.Event {
 }
 
 // processClaudeFileCollect parses a Claude JSONL file without touching watcher state.
-func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGitBranch string, cancelled func() bool) claudeFileResult {
+func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGitBranch string, canceled func() bool) claudeFileResult {
 	result := claudeFileResult{path: path, offset: startOffset, sessionID: sessionID, gitBranch: prevGitBranch}
 
 	info, err := os.Stat(path)
@@ -253,7 +253,7 @@ func processClaudeFileCollect(path, sessionID string, startOffset int64, prevGit
 	linesRead := 0
 
 	for {
-		if linesRead%100 == 0 && cancelled != nil && cancelled() {
+		if linesRead%100 == 0 && canceled != nil && canceled() {
 			break
 		}
 		linesRead++

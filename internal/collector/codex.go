@@ -297,7 +297,7 @@ func (w *CodexWatcher) fullDiscover() bool {
 
 // processCodexFileCollect parses a Codex JSONL file without touching watcher state.
 // Returns collected events and updated per-session metadata.
-func processCodexFileCollect(path string, size, startOffset int64, prevModel, prevCWD string, cancelled func() bool) codexFileResult {
+func processCodexFileCollect(path string, size, startOffset int64, prevModel, prevCWD string, canceled func() bool) codexFileResult {
 	result := codexFileResult{path: path, offset: startOffset}
 
 	f, err := os.Open(path)
@@ -307,7 +307,9 @@ func processCodexFileCollect(path string, size, startOffset int64, prevModel, pr
 	defer f.Close()
 
 	if startOffset > 0 {
-		f.Seek(startOffset, 0)
+		if _, err := f.Seek(startOffset, 0); err != nil {
+			return result
+		}
 	}
 
 	sessionID := extractSessionID(filepath.Base(path))
@@ -321,7 +323,7 @@ func processCodexFileCollect(path string, size, startOffset int64, prevModel, pr
 	linesRead := 0
 
 	for {
-		if linesRead%100 == 0 && cancelled != nil && cancelled() {
+		if linesRead%100 == 0 && canceled != nil && canceled() {
 			break
 		}
 		linesRead++
@@ -357,9 +359,7 @@ func processCodexFileCollect(path string, size, startOffset int64, prevModel, pr
 						}
 					}
 
-					for _, ev := range parseCodexEntryWithContext(raw, sessionID, result.model, result.cwd) {
-						result.events = append(result.events, ev)
-					}
+					result.events = append(result.events, parseCodexEntryWithContext(raw, sessionID, result.model, result.cwd)...)
 
 					ts, tsOk := parseTimestamp(raw.Timestamp)
 					if ok && payload.Type == "function_call_output" {
@@ -549,7 +549,9 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 	defer f.Close()
 
 	if offset > 0 {
-		f.Seek(offset, 0)
+		if _, err := f.Seek(offset, 0); err != nil {
+			return
+		}
 	}
 
 	// Extract session ID from filename: rollout-...-<uuid>.jsonl
@@ -592,9 +594,7 @@ func (w *CodexWatcher) processFile(path string, size int64) {
 						}
 					}
 
-					for _, ev := range parseCodexEntryWithContext(raw, sessionID, w.sessionModels[sessionID], w.sessionCWDs[sessionID]) {
-						bufferedEvents = append(bufferedEvents, ev)
-					}
+					bufferedEvents = append(bufferedEvents, parseCodexEntryWithContext(raw, sessionID, w.sessionModels[sessionID], w.sessionCWDs[sessionID])...)
 
 					ts, tsOk := parseTimestamp(raw.Timestamp)
 					if ok && payload.Type == "function_call_output" {

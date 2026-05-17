@@ -139,7 +139,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func writeAPIError(w http.ResponseWriter, status int, publicMessage string) {
@@ -1017,10 +1017,6 @@ func (s *Server) findBudget(id int64) (storage.BudgetRow, bool, error) {
 		}
 	}
 	return storage.BudgetRow{}, false, nil
-}
-
-func (s *Server) writeBudget(w http.ResponseWriter, budget storage.BudgetRow) {
-	s.writeBudgetWithStatus(w, budget, http.StatusOK)
 }
 
 func (s *Server) writeBudgetWithStatus(w http.ResponseWriter, budget storage.BudgetRow, status int) {

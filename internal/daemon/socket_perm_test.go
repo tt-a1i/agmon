@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -16,10 +15,6 @@ import (
 // TestSocketChmodToOwnerOnly verifies the listening socket is mode 0600 so
 // other local users cannot connect and inject fake events.
 func TestSocketChmodToOwnerOnly(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix socket only")
-	}
-
 	// macOS limits unix socket paths to ~104 bytes; t.TempDir() under
 	// /var/folders/... is already that long. Use a short /tmp path instead.
 	dir := t.TempDir()
