@@ -108,11 +108,9 @@ func (d *Daemon) broadcast(ev event.Event) {
 	d.mu.RUnlock()
 
 	for _, ch := range localSubs {
-		select {
-		case ch <- ev:
-		default:
-			// Subscriber buffer (256) is full — drop rather than stall the
-			// daemon. Tracked so we can surface "your UI is too slow" later.
+		if !trySendEvent(ch, ev) {
+			// Channel full or closed — drop rather than stall the daemon.
+			// Tracked so we can surface "your UI is too slow" later.
 			d.droppedBroadcasts.Add(1)
 		}
 	}
@@ -120,6 +118,24 @@ func (d *Daemon) broadcast(ev event.Event) {
 		if err := writeRemoteEvent(conn, ev); err != nil {
 			d.removeRemoteSub(conn)
 		}
+	}
+}
+
+// trySendEvent sends ev to ch non-blocking. Returns false if the channel's
+// buffer is full OR if the channel has been closed (which would otherwise
+// panic with "send on closed channel"). Callers must not close subscriber
+// channels, but this guard prevents a caller bug from crashing the daemon.
+func trySendEvent(ch chan event.Event, ev event.Event) (sent bool) {
+	defer func() {
+		if recover() != nil {
+			sent = false // ch was closed — treat as dropped
+		}
+	}()
+	select {
+	case ch <- ev:
+		return true
+	default:
+		return false
 	}
 }
 
