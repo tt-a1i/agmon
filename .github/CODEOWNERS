@@ -1,0 +1,8 @@
+# Default fallback — every file requires review from tt-a1i
+*                    @tt-a1i
+
+# Critical paths
+/.github/            @tt-a1i
+/internal/storage/   @tt-a1i
+/internal/daemon/    @tt-a1i
+/internal/web/       @tt-a1i

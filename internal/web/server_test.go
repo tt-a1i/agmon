@@ -1246,6 +1246,46 @@ func TestStaticIndexHasColorSchemeMedia(t *testing.T) {
 	}
 }
 
+// ─── Performance tests: verify index.html perf features ──────────────────────
+
+func TestStaticIndexHasVirtualScroll(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "renderSessionListVirtual") {
+		t.Error("index.html missing renderSessionListVirtual function")
+	}
+	if !strings.Contains(body, "VS_THRESHOLD") {
+		t.Error("index.html missing VS_THRESHOLD constant")
+	}
+}
+
+func TestStaticIndexHasDebounce(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "function debounce") {
+		t.Error("index.html missing function debounce")
+	}
+}
+
+func TestStaticIndexHasIdleCallback(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "requestIdleCallback") {
+		t.Error("index.html missing requestIdleCallback usage")
+	}
+}
+
+func TestStaticIndexHasCSSContainment(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "contain:layout style paint") && !strings.Contains(body, "contain: layout style paint") {
+		t.Error("index.html missing CSS containment (contain: layout style paint)")
+	}
+}
+
+func TestStaticIndexHasPerfHud(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "perf-hud") {
+		t.Error("index.html missing perf-hud element")
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestHandleProjection(t *testing.T) {

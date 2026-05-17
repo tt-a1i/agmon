@@ -289,7 +289,7 @@ body.hide-workspace .workspace-bar{display:none}
 .sr-status.ended{background:var(--bg3);color:var(--text-muted)}
 
 /* Session row hover enhancement */
-.sr{display:flex;align-items:center;padding:11px 14px;gap:12px;border-bottom:1px solid var(--border-light);cursor:pointer;transition:all .12s;border-radius:0}
+.sr{display:flex;align-items:center;padding:11px 14px;gap:12px;border-bottom:1px solid var(--border-light);cursor:pointer;transition:all .12s;border-radius:0;contain:layout style paint}
 .sr:hover{background:var(--bg);padding-left:18px}
 .sr:last-child{border-bottom:0}
 
@@ -896,6 +896,7 @@ body.hide-workspace .workspace-bar{display:none}
   <span>📡 Offline · showing cached data</span>
   <button onclick="window.location.reload()">Retry</button>
 </div>
+<div id="perf-hud" aria-hidden="true" style="display:none;position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,.8);color:#0f0;font:11px/1.6 monospace;padding:8px 10px;border-radius:6px;z-index:9998;min-width:96px;pointer-events:none"></div>
 <div id="toast-container" role="region" aria-live="polite" aria-label="Notifications"></div>
 <div class="toast" id="toast"></div>
 </div>
@@ -1338,20 +1339,87 @@ function renderSessions(sessions){
   const daily=(lastCosts&&lastCosts.daily_costs)||[];
   const trendSpark=daily.length>1?buildSrSparkSVG(daily.map(d=>d.Cost||0)):'';
   const anomalies=anomalySessionIDs(filtered);
-  el.innerHTML=filtered.slice(0,sLim).map(s=>{
-    const sc=s.status==='active'?'active':s.status==='stale'?'stale':'ended';
-    const dur=s.end_time?Math.round((new Date(s.end_time)-new Date(s.start_time))/60000):0;
-    const durS=dur>0?(dur>=60?Math.floor(dur/60)+'h '+dur%60+'m':dur+'m'):(s.status==='active'?'running':'');
-    const tokS=ft(s.input_tokens+s.output_tokens);
-    const barW=(s.cost_usd/maxC*100).toFixed(1);
-    const cwdShort=s.cwd?s.cwd.split('/').slice(-2).join('/'):'';
-    const selCls=(typeof compareSet!=='undefined'&&compareSet.has(s.session_id))?' selected':'';
-    const isAnomaly=anomalies.has(s.session_id);
-    const anomalyIcon=isAnomaly?'<span class="sr-anom" title="Unusually high cost">⚡</span>':'';
-    return`<div class="sr${selCls}${isAnomaly?' anomaly':''}" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${anomalyIcon}${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><span class="sr-spark" style="color:var(--text-faint)">${trendSpark}</span><div class="sr-arr">›</div></div>`
-  }).join('');
+  if(filtered.length>VS_THRESHOLD){
+    // Virtual scroll mode: tear down the "Show more" approach and hand off
+    btn.style.display='none';
+    // Reset any inline height from a previous virtual render before layout
+    el.style.height='';el.style.position='';
+    // Use rIC so layout is stable before we read getBoundingClientRect
+    (window.requestIdleCallback||setTimeout)(()=>{
+      renderSessionListVirtual(filtered,el,maxC,trendSpark,anomalies);
+    },{timeout:200});
+    return;
+  }
+  // Normal (small list) mode — clean up any old virtual scroll handler
+  if(_vsCleanup){_vsCleanup();_vsCleanup=null}
+  el.style.height='';el.style.position='';
+  el.innerHTML=filtered.slice(0,sLim).map(s=>buildSrRowHtml(s,maxC,trendSpark,anomalies)).join('');
 }
 $('sMore').onclick=()=>{sLim+=30;renderSessions(allS)};
+
+// === Performance: debounce utility ===
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}}
+
+// === Performance: virtual scroll for session list ===
+// Activated only when filtered sessions > VS_THRESHOLD; otherwise uses the
+// existing sLim + "Show more" approach so small lists are unaffected.
+const VS_THRESHOLD=100;
+const VS_ROW_H=57; // px — approximate rendered height of one .sr row
+
+// Build a single .sr row's HTML given contextual data
+function buildSrRowHtml(s,maxC,trendSpark,anomalies){
+  const sc=s.status==='active'?'active':s.status==='stale'?'stale':'ended';
+  const dur=s.end_time?Math.round((new Date(s.end_time)-new Date(s.start_time))/60000):0;
+  const durS=dur>0?(dur>=60?Math.floor(dur/60)+'h '+dur%60+'m':dur+'m'):(s.status==='active'?'running':'');
+  const tokS=ft(s.input_tokens+s.output_tokens);
+  const barW=(s.cost_usd/maxC*100).toFixed(1);
+  const cwdShort=s.cwd?s.cwd.split('/').slice(-2).join('/'):'';
+  const selCls=(typeof compareSet!=='undefined'&&compareSet.has(s.session_id))?' selected':'';
+  const isAnomaly=anomalies.has(s.session_id);
+  const anomalyIcon=isAnomaly?'<span class="sr-anom" title="Unusually high cost">⚡</span>':'';
+  return`<div class="sr${selCls}${isAnomaly?' anomaly':''}" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${anomalyIcon}${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><span class="sr-spark" style="color:var(--text-faint)">${trendSpark}</span><div class="sr-arr">›</div></div>`;
+}
+
+let _vsCleanup=null; // current virtual scroll cleanup function
+
+function renderSessionListVirtual(sessions,el,maxC,trendSpark,anomalies){
+  const total=sessions.length;
+  const rowH=VS_ROW_H;
+  const ROW_BUFFER=5;
+  // Tear down any previous virtual scroll listener
+  if(_vsCleanup){_vsCleanup();_vsCleanup=null}
+  // Make the container a fixed-height relatively-positioned block
+  el.style.height=(total*rowH)+'px';
+  el.style.position='relative';
+  // Cache the list's document-top offset once (stable until next full render)
+  const listDocTop=el.getBoundingClientRect().top+window.scrollY;
+
+  function renderWindow(){
+    const scrollY=window.scrollY||window.pageYOffset||0;
+    const pastTop=Math.max(0,scrollY-listDocTop);
+    const viewH=window.innerHeight;
+    const startIdx=Math.max(0,Math.floor(pastTop/rowH)-ROW_BUFFER);
+    const endIdx=Math.min(total,Math.ceil((pastTop+viewH)/rowH)+ROW_BUFFER);
+    // Efficiently update: remove nodes outside range, add nodes inside range
+    // Simple approach: remove all children and re-insert the window
+    // (cheap because window is small, ~10-20 nodes)
+    while(el.firstChild)el.removeChild(el.firstChild);
+    const frag=document.createDocumentFragment();
+    for(let i=startIdx;i<endIdx;i++){
+      const wrapper=document.createElement('div');
+      wrapper.style.cssText='position:absolute;top:'+(i*rowH)+'px;left:0;right:0';
+      wrapper.innerHTML=buildSrRowHtml(sessions[i],maxC,trendSpark,anomalies);
+      frag.appendChild(wrapper);
+    }
+    el.appendChild(frag);
+  }
+
+  const scrollHandler=()=>renderWindow();
+  window.addEventListener('scroll',scrollHandler,{passive:true});
+  _vsCleanup=()=>window.removeEventListener('scroll',scrollHandler);
+  renderWindow();
+}
+
 let searchTimer=null,searchSeq=0,searchBlurTimer=null;
 function closeSearchDropdown(){searchSeq++;const d=$('searchDropdown');if(d){d.hidden=true;d.innerHTML=''}clearTimeout(searchBlurTimer)}
 function showSearchState(msg){const d=$('searchDropdown');if(!d)return;d.innerHTML=`<div class="search-state">${escHtml(msg)}</div>`;d.hidden=false}
@@ -1392,7 +1460,8 @@ function scheduleGlobalSearch(){
   if(q.length<2){closeSearchDropdown();return}
   searchTimer=setTimeout(runGlobalSearch,500);
 }
-$('sessSearch').oninput=e=>{searchQ=e.target.value.trim();sLim=20;renderSessions(allS);scheduleGlobalSearch()};
+const _debouncedRenderSessions=debounce(()=>renderSessions(allS),200);
+$('sessSearch').oninput=e=>{searchQ=e.target.value.trim();sLim=20;_debouncedRenderSessions();scheduleGlobalSearch()};
 $('sessSearch').onkeydown=e=>{
   if(e.key==='Enter'){e.preventDefault();runGlobalSearch()}
   if(e.key==='Escape'&&!$('searchDropdown').hidden){e.preventDefault();e.stopPropagation();closeSearchDropdown()}
@@ -1707,7 +1776,7 @@ function applyDashboardData(stats,costs,sessions,projection,catalog){
 
   renderSessions(sessions);renderChart(costs.daily_costs);renderModels(costs.models);renderTools(stats.top_tools);
   // Sparklines in metric cards
-  if(costs.daily_costs&&costs.daily_costs.length>1){drawSparkline('sparkCost',costs.daily_costs.map(d=>d.Cost))}
+  if(costs.daily_costs&&costs.daily_costs.length>1){const sparkData=costs.daily_costs.map(d=>d.Cost);(window.requestIdleCallback||setTimeout)(()=>drawSparkline('sparkCost',sparkData),{timeout:500})}
 }
 
 async function fetchSessionsWithWorkspace(){
@@ -2144,6 +2213,40 @@ if('serviceWorker' in navigator){
 updateOfflineBadge();
 window.addEventListener('offline',()=>{showOfflineBadge();toast('Offline — showing cached data')});
 window.addEventListener('online',()=>{hideOfflineBadge();toast('Back online');refreshActiveView()});
+
+// === Performance HUD (Ctrl+Shift+P to toggle, dev-only overlay) ===
+(function initPerfHud(){
+  const hud=$('perf-hud');if(!hud)return;
+  let hudVisible=false,frameCount=0,lastTs=performance.now(),lastEventTs=performance.now();
+  let cachedHits=0,totalFetches=0;
+  // Track cache hits via XMLHttpRequest / fetch patching
+  const _origFetch=window.fetch;
+  window.fetch=function(...args){
+    totalFetches++;
+    lastEventTs=performance.now();
+    return _origFetch.apply(this,args).then(r=>{
+      if(r.headers.get('X-TokenMeter-Cache')==='hit')cachedHits++;
+      return r;
+    });
+  };
+  let rafId=null;
+  function rafLoop(ts){
+    frameCount++;
+    const elapsed=ts-lastTs;
+    if(elapsed>=1000){
+      const fps=Math.round(frameCount*1000/elapsed);
+      const lag=Math.round(ts-lastEventTs);
+      hud.textContent=`fps: ${fps}\nlag: ${Math.min(lag,9999)}ms\ncache: ${cachedHits}/${totalFetches}`;
+      frameCount=0;lastTs=ts;
+    }
+    rafId=requestAnimationFrame(rafLoop);
+  }
+  function show(){hudVisible=true;hud.style.display='block';rafId=requestAnimationFrame(rafLoop)}
+  function hide(){hudVisible=false;hud.style.display='none';if(rafId){cancelAnimationFrame(rafId);rafId=null}}
+  document.addEventListener('keydown',e=>{
+    if(e.ctrlKey&&e.shiftKey&&e.key==='P'){e.preventDefault();hudVisible?hide():show()}
+  });
+})();
 
 // === A11y: Toast notification system ===
 function showToast(message,type='info',timeoutMs=5000){
