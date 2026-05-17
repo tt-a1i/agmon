@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -1363,6 +1364,77 @@ func TestStaticIndexHasReducedMotionSkeleton(t *testing.T) {
 	}
 }
 
+func TestStaticIndexHasChartCanvases(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, id := range []string{"chart-cost-trend", "chart-tool-donut", "chart-model-bar"} {
+		if !strings.Contains(body, id) {
+			t.Errorf("index.html missing canvas id %q", id)
+		}
+	}
+}
+
+func TestStaticIndexHasDrawFunctions(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, fn := range []string{"drawCostTrendChart", "drawToolDonutChart", "drawModelBarChart", "renderInteractiveCharts"} {
+		if !strings.Contains(body, fn) {
+			t.Errorf("index.html missing chart function %q", fn)
+		}
+	}
+	if !strings.Contains(body, "icSetupCanvas") {
+		t.Error("index.html missing icSetupCanvas (DPR retina helper)")
+	}
+}
+
+func TestStaticIndexHasChartA11yLabels(t *testing.T) {
+	body := getStaticIndex(t)
+	// Each chart canvas must have role="img" and aria-label
+	for _, label := range []string{
+		`aria-label="Daily cost trend for the last 30 days"`,
+		`aria-label="Tool usage distribution donut chart"`,
+		`aria-label="Model token usage breakdown`,
+	} {
+		if !strings.Contains(body, label) {
+			t.Errorf("index.html missing aria-label: %s", label)
+		}
+	}
+	if !strings.Contains(body, `role="img"`) {
+		t.Error("index.html missing role=\"img\" on canvas elements")
+	}
+}
+
+func TestStaticIndexHasChartSRFallback(t *testing.T) {
+	body := getStaticIndex(t)
+	// Each chart must have a visually-hidden <table> for screen readers
+	for _, caption := range []string{
+		"Daily cost data",
+		"Tool usage distribution",
+		"Model token usage",
+	} {
+		if !strings.Contains(body, caption) {
+			t.Errorf("index.html missing SR-only table caption %q", caption)
+		}
+	}
+	if !strings.Contains(body, "<caption>") {
+		t.Error("index.html missing <caption> elements in SR fallback tables")
+	}
+}
+
+func TestStaticIndexHasChartReducedMotion(t *testing.T) {
+	body := getStaticIndex(t)
+	// renderInteractiveCharts must reference prefers-reduced-motion
+	if !strings.Contains(body, "prefers-reduced-motion") {
+		t.Error("index.html missing prefers-reduced-motion reference")
+	}
+	// The chart toggle pref must exist
+	if !strings.Contains(body, "showCharts") {
+		t.Error("index.html missing showCharts preference")
+	}
+	// DPR scaling must be present (retina support)
+	if !strings.Contains(body, "devicePixelRatio") {
+		t.Error("index.html missing devicePixelRatio (retina DPR handling)")
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestHandleProjection(t *testing.T) {
@@ -1392,5 +1464,171 @@ func TestHandleProjection(t *testing.T) {
 	}
 	if p.UsedSoFar <= 0 || p.ProjectedTotal <= 0 {
 		t.Fatalf("projection should include cost values, got %#v", p)
+	}
+}
+
+// ── Analytics endpoint tests ──────────────────────────────────────────────────
+
+func seedAnalyticsData(t *testing.T, db *storage.DB) {
+	t.Helper()
+	now := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		sid := fmt.Sprintf("analytics-sess-%d", i)
+		if err := db.UpsertSession(sid, event.PlatformClaude, now); err != nil {
+			t.Fatalf("upsert session: %v", err)
+		}
+		cost := float64(i+1) * 0.5
+		if err := db.InsertTokenUsage("agent1", sid, 1000*(i+1), 500*(i+1), 0, 0,
+			"claude-sonnet-4-6", cost, now, fmt.Sprintf("src-analytics-%d", i)); err != nil {
+			t.Fatalf("insert tokens: %v", err)
+		}
+	}
+}
+
+func TestAnalyticsEndpointReturnsValidJSON(t *testing.T) {
+	db := testDB(t)
+	seedAnalyticsData(t, db)
+	srv := NewServer(db, "0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/analytics?range=week", nil)
+	w := httptest.NewRecorder()
+	srv.handleAnalytics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("content-type: got %q, want application/json", ct)
+	}
+
+	var resp analyticsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal analytics: %v", err)
+	}
+	if resp.Range == "" {
+		t.Error("analytics: range field is empty")
+	}
+	if resp.GeneratedAt == "" {
+		t.Error("analytics: generated_at field is empty")
+	}
+	// top_expensive_sessions, tool_breakdown, model_mix_daily, anomalies must be present
+	// (can be empty slices when DB has no data in older ranges)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+	for _, key := range []string{"top_expensive_sessions", "tool_breakdown", "model_mix_daily", "anomalies"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("analytics response missing key %q", key)
+		}
+	}
+}
+
+func TestAnalyticsRespectsRangePeriods(t *testing.T) {
+	db := testDB(t)
+	seedAnalyticsData(t, db)
+	srv := NewServer(db, "0")
+
+	for _, rangeParam := range []string{"today", "week", "month", "all"} {
+		t.Run(rangeParam, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/analytics?range="+rangeParam, nil)
+			w := httptest.NewRecorder()
+			srv.handleAnalytics(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("range=%s: status %d, body: %s", rangeParam, w.Code, w.Body.String())
+			}
+			var resp analyticsResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("range=%s: unmarshal: %v", rangeParam, err)
+			}
+			if resp.Range == "" {
+				t.Errorf("range=%s: empty range in response", rangeParam)
+			}
+		})
+	}
+}
+
+func TestExportReportReturnsHTML(t *testing.T) {
+	db := testDB(t)
+	seedAnalyticsData(t, db)
+	srv := NewServer(db, "0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/export-report?range=week", nil)
+	w := httptest.NewRecorder()
+	srv.handleExportReport(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type: got %q, want text/html", ct)
+	}
+	body := w.Body.String()
+	if !strings.HasPrefix(strings.TrimSpace(body), "<!DOCTYPE html") {
+		t.Error("export-report body should start with <!DOCTYPE html")
+	}
+	// Self-contained: must have inline data (no external script src)
+	if !strings.Contains(body, "<table") {
+		t.Error("export-report HTML missing <table> — analytics cards not rendered")
+	}
+}
+
+func TestExportReportFileNameHeader(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/export-report?range=week", nil)
+	w := httptest.NewRecorder()
+	srv.handleExportReport(w, req)
+
+	cd := w.Header().Get("Content-Disposition")
+	if !strings.Contains(cd, "attachment") {
+		t.Errorf("Content-Disposition missing 'attachment': got %q", cd)
+	}
+	if !strings.Contains(cd, "filename=") {
+		t.Errorf("Content-Disposition missing 'filename=': got %q", cd)
+	}
+	if !strings.Contains(cd, ".html") {
+		t.Errorf("Content-Disposition filename should end in .html: got %q", cd)
+	}
+}
+
+func TestStaticIndexHasAnalyticsView(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="analytics-view"`) {
+		t.Error(`index.html missing section id="analytics-view"`)
+	}
+	if !strings.Contains(body, "analytics-grid") {
+		t.Error("index.html missing .analytics-grid container")
+	}
+	if !strings.Contains(body, "analytics-card") {
+		t.Error("index.html missing .analytics-card elements")
+	}
+}
+
+func TestStaticIndexHasExportReportButton(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="export-report"`) {
+		t.Error(`index.html missing button id="export-report"`)
+	}
+	if !strings.Contains(body, "doExportReport") {
+		t.Error("index.html missing doExportReport JS function")
+	}
+}
+
+func TestAnalyticsAuthRequired(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0", WithAuthToken("secret"))
+
+	for _, path := range []string{"/api/analytics", "/api/export-report"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			srv.srv.Handler.ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("%s without token: got %d, want 401", path, w.Code)
+			}
+		})
 	}
 }

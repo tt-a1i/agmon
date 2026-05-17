@@ -699,6 +699,38 @@ body.hide-workspace .workspace-bar{display:none}
 /* Pull-to-refresh progress bar */
 #ptr-bar{position:fixed;top:0;left:0;right:0;height:3px;background:var(--accent);transform:scaleX(0);transform-origin:left;z-index:200;display:none;transition:transform .15s}
 #ptr-bar.active{display:block}
+/* Interactive Charts */
+.ic-charts-section{margin-bottom:24px}
+.ic-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:14px}
+@media(max-width:768px){.ic-grid{grid-template-columns:1fr}}
+.ic-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 14px 8px;position:relative}
+.ic-card-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+.ic-card-title{font-size:11px;font-weight:700;color:var(--text-strong);text-transform:uppercase;letter-spacing:.5px}
+.ic-canvas-wrap{position:relative;height:180px;border-radius:6px;overflow:hidden}
+.ic-canvas-wrap canvas{display:block;width:100%;height:100%}
+.ic-tooltip{position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text-strong);font-weight:600;pointer-events:none;opacity:0;transition:opacity .1s;box-shadow:var(--card-shadow);z-index:5;white-space:nowrap;max-width:220px}
+.ic-donut-wrap{display:flex;align-items:center;justify-content:center}
+.ic-donut-center{position:absolute;text-align:center;pointer-events:none;top:50%;left:50%;transform:translate(-50%,-50%)}
+.ic-donut-total{font-size:18px;font-weight:700;color:var(--text-strong);display:block}
+.ic-donut-label{font-size:10px;color:var(--text-muted)}
+.ic-legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:6px}
+.ic-legend-row{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-muted)}
+.ic-legend-swatch{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.hide-ic-charts .ic-charts-section{display:none}
+/* Analytics panel */
+.export-report-btn,.analytics-nav-btn{background:none;border:none;cursor:pointer;font-size:16px;padding:4px 6px;opacity:.7;transition:opacity .1s}
+.export-report-btn:hover,.analytics-nav-btn:hover{opacity:1}
+#analytics-view{padding:16px;max-width:1200px;margin:0 auto}
+.analytics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:16px}
+.analytics-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px}
+.analytics-card h3{font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+.analytics-card table{width:100%;border-collapse:collapse;font-size:12px}
+.analytics-card th{text-align:left;color:var(--text-faint);font-weight:600;padding:3px 6px;border-bottom:1px solid var(--border)}
+.analytics-card td{padding:3px 6px;border-bottom:1px solid var(--border);color:var(--text)}
+.analytics-card .num{text-align:right;font-variant-numeric:tabular-nums}
+.analytics-anomaly-item{padding:8px;border-left:3px solid #f59e0b;background:rgba(245,158,11,.08);border-radius:0 4px 4px 0;margin-bottom:6px;font-size:12px}
+.analytics-anomaly-reason{color:#f59e0b;font-weight:600}
+.analytics-anomaly-sid{color:var(--text-muted);font-size:11px;margin-top:2px}
 </style>
 </head>
 <body>
@@ -720,6 +752,8 @@ body.hide-workspace .workspace-bar{display:none}
     </div>
     <span class="updated" id="updated"></span>
     <button class="export-btn" id="exportBtn" onclick="toggleExportPop()" title="Export data" aria-label="Export">📥</button>
+    <button class="export-report-btn" id="export-report" onclick="doExportReport()" title="Export dashboard report as HTML" aria-label="Export dashboard report as HTML">📤</button>
+    <button class="analytics-nav-btn" id="analyticsNavBtn" onclick="toggleAnalyticsView()" title="Analytics panel" aria-label="Analytics">📊</button>
     <button class="settings-btn" id="settingsBtn" onclick="openSettingsModal()" title="Settings" aria-label="Settings">⚙</button>
     <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
   </div>
@@ -764,6 +798,64 @@ body.hide-workspace .workspace-bar{display:none}
   </div>
 
   <div class="plats" id="plats"></div>
+
+  <!-- Interactive Charts section (appended — do not move existing content above) -->
+  <section class="ic-charts-section" aria-label="Interactive charts">
+    <div class="ic-grid">
+      <!-- 1. Daily cost trend (line chart) -->
+      <div class="ic-card">
+        <div class="ic-card-head">
+          <span class="ic-card-title">Daily Cost — Last 30 Days</span>
+          <span id="ic-cost-avg" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+        <div class="ic-canvas-wrap" id="ic-cost-wrap">
+          <canvas id="chart-cost-trend" role="img" aria-label="Daily cost trend for the last 30 days"></canvas>
+          <div class="ic-tooltip" id="ic-cost-tip"></div>
+        </div>
+        <table class="sr-only">
+          <caption>Daily cost data (last 30 days)</caption>
+          <thead><tr><th scope="col">Date</th><th scope="col">Cost (USD)</th></tr></thead>
+          <tbody id="ic-cost-tbody"></tbody>
+        </table>
+      </div>
+      <!-- 2. Top tools donut chart -->
+      <div class="ic-card">
+        <div class="ic-card-head">
+          <span class="ic-card-title">Top Tools</span>
+          <span id="ic-donut-sub" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+        <div class="ic-canvas-wrap ic-donut-wrap" id="ic-donut-wrap">
+          <canvas id="chart-tool-donut" role="img" aria-label="Tool usage distribution donut chart"></canvas>
+          <div class="ic-donut-center" id="ic-donut-center">
+            <span class="ic-donut-total" id="ic-donut-total">—</span>
+            <span class="ic-donut-label">calls</span>
+          </div>
+          <div class="ic-tooltip" id="ic-donut-tip"></div>
+        </div>
+        <table class="sr-only">
+          <caption>Tool usage distribution</caption>
+          <thead><tr><th scope="col">Tool</th><th scope="col">Calls</th><th scope="col">Percentage</th></tr></thead>
+          <tbody id="ic-donut-tbody"></tbody>
+        </table>
+      </div>
+      <!-- 3. Model mix horizontal bar chart -->
+      <div class="ic-card">
+        <div class="ic-card-head">
+          <span class="ic-card-title">Model Mix</span>
+        </div>
+        <div class="ic-canvas-wrap" id="ic-model-wrap">
+          <canvas id="chart-model-bar" role="img" aria-label="Model token usage breakdown by input and output"></canvas>
+          <div class="ic-tooltip" id="ic-model-tip"></div>
+        </div>
+        <div class="ic-legend" id="ic-model-legend"></div>
+        <table class="sr-only">
+          <caption>Model token usage by type</caption>
+          <thead><tr><th scope="col">Model</th><th scope="col">Input Tokens</th><th scope="col">Output Tokens</th></tr></thead>
+          <tbody id="ic-model-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
   <div class="sess-wrap">
     <div class="compare-bar" id="compareBar"></div>
@@ -826,6 +918,42 @@ body.hide-workspace .workspace-bar{display:none}
   </div>
   <div id="cmpBody"></div>
 </div>
+
+<section id="analytics-view" aria-label="Analytics panel" hidden>
+  <div class="detail-nav">
+    <div class="back" onclick="closeAnalyticsView()">← Back</div>
+    <div style="font-size:13px;font-weight:600">Analytics</div>
+  </div>
+  <div class="analytics-loading" id="analyticsLoading" style="padding:32px;text-align:center;color:var(--text-muted)">Loading analytics…</div>
+  <div class="analytics-grid" id="analyticsGrid" style="display:none">
+    <div class="analytics-card" id="ac-top">
+      <h3>Top 10 Expensive Sessions</h3>
+      <table aria-label="Top expensive sessions">
+        <thead><tr><th>Session</th><th>Platform</th><th style="text-align:right">Cost</th></tr></thead>
+        <tbody id="ac-top-body"></tbody>
+      </table>
+    </div>
+    <div class="analytics-card" id="ac-tools">
+      <h3>Tool Breakdown</h3>
+      <table aria-label="Tool call breakdown">
+        <thead><tr><th>Tool</th><th style="text-align:right">Count</th><th style="text-align:right">Avg ms</th><th style="text-align:right">Fails</th></tr></thead>
+        <tbody id="ac-tools-body"></tbody>
+      </table>
+    </div>
+    <div class="analytics-card" id="ac-models">
+      <h3>Model Mix</h3>
+      <table aria-label="Model cost breakdown">
+        <thead><tr><th>Model</th><th style="text-align:right">Input</th><th style="text-align:right">Output</th><th style="text-align:right">Cost</th></tr></thead>
+        <tbody id="ac-models-body"></tbody>
+      </table>
+    </div>
+    <div class="analytics-card" id="ac-anomalies">
+      <h3>Anomaly Highlights</h3>
+      <ul id="ac-anomalies-list" aria-label="Detected anomalies" style="list-style:none"></ul>
+      <p id="ac-anomalies-empty" style="color:var(--text-muted);font-size:12px" hidden>No anomalies detected.</p>
+    </div>
+  </div>
+</section>
 </main>
 
 <div class="export-pop" id="exportPop">
@@ -886,6 +1014,7 @@ body.hide-workspace .workspace-bar{display:none}
       <div class="settings-row"><label for="prefShowProjection">Show projection card</label><input type="checkbox" class="settings-check" id="prefShowProjection" data-pref="showProjection"></div>
       <div class="settings-row"><label for="prefShowWorkspace">Show workspace chips bar</label><input type="checkbox" class="settings-check" id="prefShowWorkspace" data-pref="showWorkspace"></div>
       <div class="settings-row"><label for="prefHighlightAnomalies">Highlight unusual cost sessions</label><input type="checkbox" class="settings-check" id="prefHighlightAnomalies" data-pref="highlightAnomalies"></div>
+      <div class="settings-row"><label for="prefShowCharts">Show interactive charts (cost trend, top tools, model mix)</label><input type="checkbox" class="settings-check" id="prefShowCharts" data-pref="showCharts"></div>
     </div>
     <div class="settings-section">
       <h4>Budgets</h4>
@@ -943,7 +1072,7 @@ const COLORS=['#4f46e5','#06b6d4','#22c55e','#eab308','#ef4444','#f97316','#ec48
 const $=id=>document.getElementById(id);
 
 // Preferences — all persist to localStorage under 'tokenmeter-<key>'.
-const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1',showSpark:'1',showProjection:'1',showWorkspace:'1',highlightAnomalies:'1'};
+const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1',showSpark:'1',showProjection:'1',showWorkspace:'1',highlightAnomalies:'1',showCharts:'1'};
 function getPref(k){const v=localStorage.getItem('tokenmeter-'+k);return v==null?PREFS_DEFAULTS[k]:v}
 function setPref(k,v){localStorage.setItem('tokenmeter-'+k,v);applyPreferences()}
 
@@ -968,6 +1097,7 @@ function applyPreferences(){
   document.body.classList.toggle('hide-spark',getPref('showSpark')!=='1');
   document.body.classList.toggle('hide-projection',getPref('showProjection')!=='1');
   document.body.classList.toggle('hide-workspace',getPref('showWorkspace')!=='1');
+  document.body.classList.toggle('hide-ic-charts',getPref('showCharts')!=='1');
   // Restart slow-poll backstop with current interval. 0 = disabled.
   if(slowPoll){clearInterval(slowPoll);slowPoll=null}
   const sec=parseInt(getPref('poll'),10);
@@ -1825,6 +1955,7 @@ function applyDashboardData(stats,costs,sessions,projection,catalog){
   }
 
   renderSessions(sessions);renderChart(costs.daily_costs);renderModels(costs.models);renderTools(stats.top_tools);
+  renderInteractiveCharts(costs.daily_costs,stats.top_tools,costs.models);
   // Sparklines in metric cards
   if(costs.daily_costs&&costs.daily_costs.length>1){const sparkData=costs.daily_costs.map(d=>d.Cost);(window.requestIdleCallback||setTimeout)(()=>drawSparkline('sparkCost',sparkData),{timeout:500})}
 }
@@ -2441,6 +2572,138 @@ function toggleHamburger(btn){
   btn.setAttribute('aria-expanded',open?'true':'false');
 }
 
+// === Interactive Charts (vanilla Canvas, no external libs) ===
+var _icCostPts=null,_icDonutSegs=null;
+var IC_COLORS=['#4f46e5','#06b6d4','#22c55e','#f97316','#ec4899','#8b5cf6'];
+function icCssVar(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function icSetupCanvas(canvas,wrap){
+  var dpr=window.devicePixelRatio||1,r=wrap.getBoundingClientRect(),W=r.width,H=r.height;
+  canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  var ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
+  return{ctx:ctx,W:W,H:H};
+}
+function drawCostTrendChart(days){
+  var canvas=$('chart-cost-trend'),wrap=$('ic-cost-wrap');
+  if(!canvas||!wrap||!days||!days.length)return;
+  var _r=icSetupCanvas(canvas,wrap),ctx=_r.ctx,W=_r.W,H=_r.H;
+  var lc=icCssVar('--chart-line')||'#4f46e5',fc2=icCssVar('--chart-fill')||'rgba(79,70,229,.1)';
+  var gc=icCssVar('--chart-grid')||'#e5e7eb',tc=icCssVar('--text-muted')||'#9ca3af';
+  var bc=icCssVar('--bg2')||'#fff';
+  var pad={t:14,b:22,l:8,r:8},cw=W-pad.l-pad.r,ch=H-pad.t-pad.b;
+  var mxV=Math.max(days.reduce(function(m,d){return Math.max(m,d.Cost)},0),.01)*1.1;
+  var gx=function(i){return pad.l+(i/(days.length-1||1))*cw};
+  var gy=function(v){return pad.t+ch-(v/mxV)*ch};
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle=gc;ctx.lineWidth=1;ctx.setLineDash([]);
+  [0,.33,.67,1].forEach(function(f){var y=pad.t+ch*f;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke()});
+  var pts=days.map(function(d,i){return{x:gx(i),y:gy(d.Cost),c:d.Cost,dt:d.Date}});
+  _icCostPts=pts;
+  ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+  for(var ii=1;ii<pts.length;ii++){var pp=pts[ii-1],qq=pts[ii];ctx.bezierCurveTo(pp.x+(qq.x-pp.x)*.4,pp.y,pp.x+(qq.x-pp.x)*.6,qq.y,qq.x,qq.y)}
+  ctx.lineTo(pts[pts.length-1].x,pad.t+ch);ctx.lineTo(pts[0].x,pad.t+ch);ctx.closePath();
+  var ag=ctx.createLinearGradient(0,0,0,H);ag.addColorStop(0,fc2);ag.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=ag;ctx.fill();
+  ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+  for(var ii=1;ii<pts.length;ii++){var pp=pts[ii-1],qq=pts[ii];ctx.bezierCurveTo(pp.x+(qq.x-pp.x)*.4,pp.y,pp.x+(qq.x-pp.x)*.6,qq.y,qq.x,qq.y)}
+  ctx.strokeStyle=lc;ctx.lineWidth=2;ctx.lineCap='round';ctx.stroke();
+  pts.forEach(function(p){ctx.beginPath();ctx.arc(p.x,p.y,3,0,Math.PI*2);ctx.fillStyle=lc;ctx.fill();ctx.strokeStyle=bc;ctx.lineWidth=1.5;ctx.stroke()});
+  var step=Math.max(1,Math.round(days.length/6));
+  ctx.fillStyle=tc;ctx.font='10px system-ui,sans-serif';ctx.textAlign='center';
+  for(var ii=0;ii<days.length;ii+=step){var dt2=new Date(days[ii].Date+'T12:00:00');ctx.fillText(dt2.toLocaleDateString('en',{month:'short',day:'numeric'}),gx(ii),H-4)}
+  var avg=days.reduce(function(s,d){return s+d.Cost},0)/days.length;
+  var avgEl=$('ic-cost-avg');if(avgEl)avgEl.textContent='avg '+fc(avg)+'/day';
+  var tbody=$('ic-cost-tbody');
+  if(tbody)tbody.innerHTML=days.map(function(d){return'<tr><td>'+escHtml(d.Date)+'</td><td>$'+d.Cost.toFixed(4)+'</td></tr>'}).join('');
+  var tip=$('ic-cost-tip');
+  wrap.onmousemove=function(e){
+    if(!tip||!_icCostPts)return;
+    var r2=wrap.getBoundingClientRect(),mx2=e.clientX-r2.left,ci=0,md=Infinity;
+    _icCostPts.forEach(function(p,i){var d=Math.abs(p.x-mx2);if(d<md){md=d;ci=i}});
+    if(md>60){tip.style.opacity='0';return}
+    var p=_icCostPts[ci],label=new Date(p.dt+'T12:00:00').toLocaleDateString('en',{weekday:'short',month:'short',day:'numeric'});
+    tip.innerHTML='<div style="font-size:10px;color:var(--text-muted)">'+escHtml(label)+'</div>'+fc(p.c);
+    tip.style.opacity='1';tip.style.left=Math.max(4,Math.min(p.x-50,W-120))+'px';tip.style.top='4px';
+  };
+  wrap.onmouseleave=function(){if(tip)tip.style.opacity='0'};
+}
+function drawToolDonutChart(tools){
+  var canvas=$('chart-tool-donut'),wrap=$('ic-donut-wrap');
+  if(!canvas||!wrap||!tools||!tools.length)return;
+  var _r=icSetupCanvas(canvas,wrap),ctx=_r.ctx,W=_r.W,H=_r.H;
+  var segs=tools.slice(0,4).map(function(t,i){return{name:t.ToolName,count:t.Count,color:IC_COLORS[i%IC_COLORS.length]}});
+  var oc=tools.slice(4).reduce(function(s,t){return s+t.Count},0);
+  if(oc>0)segs.push({name:'Other',count:oc,color:'#71717a'});
+  var total=segs.reduce(function(s,g){return s+g.count},0)||1;
+  _icDonutSegs=segs;
+  var cx=W/2,cy=H/2,r2=Math.min(W,H)*0.4,ir=r2*0.55,start=-Math.PI/2;
+  ctx.clearRect(0,0,W,H);
+  var bgFill=icCssVar('--bg2')||'#fff';
+  segs.forEach(function(seg){
+    var sw=(seg.count/total)*Math.PI*2;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r2,start,start+sw);ctx.closePath();ctx.fillStyle=seg.color;ctx.fill();
+    start+=sw;
+  });
+  ctx.beginPath();ctx.arc(cx,cy,ir,0,Math.PI*2);ctx.fillStyle=bgFill;ctx.fill();
+  var totEl=$('ic-donut-total');if(totEl)totEl.textContent=total>=1000?(total/1000).toFixed(1)+'k':String(total);
+  var subEl=$('ic-donut-sub');if(subEl)subEl.textContent=tools.length+' tools';
+  var tbody=$('ic-donut-tbody');
+  if(tbody)tbody.innerHTML=segs.map(function(s){return'<tr><td>'+escHtml(s.name)+'</td><td>'+s.count+'</td><td>'+(s.count/total*100).toFixed(1)+'%</td></tr>'}).join('');
+  var tip=$('ic-donut-tip');
+  wrap.onmousemove=function(e){
+    if(!tip||!_icDonutSegs)return;
+    var r3=wrap.getBoundingClientRect(),mx2=e.clientX-r3.left-cx,my2=e.clientY-r3.top-cy;
+    var dist=Math.sqrt(mx2*mx2+my2*my2);
+    if(dist<ir||dist>r2){tip.style.opacity='0';return}
+    var angle=Math.atan2(my2,mx2)+Math.PI/2,norm=((angle%(Math.PI*2))+Math.PI*2)%(Math.PI*2);
+    var acc=0,hit=null;
+    _icDonutSegs.forEach(function(s){var sw=(s.count/total)*Math.PI*2;if(!hit&&norm>=acc&&norm<acc+sw)hit=s;acc+=sw});
+    if(!hit){tip.style.opacity='0';return}
+    tip.innerHTML='<span style="color:'+hit.color+'">■</span> '+escHtml(hit.name)+' · '+hit.count+' ('+(hit.count/total*100).toFixed(1)+'%)';
+    tip.style.opacity='1';tip.style.left='4px';tip.style.top='4px';
+  };
+  wrap.onmouseleave=function(){if(tip)tip.style.opacity='0'};
+}
+function drawModelBarChart(models){
+  var canvas=$('chart-model-bar'),wrap=$('ic-model-wrap');
+  if(!canvas||!wrap||!models||!models.length)return;
+  var _r=icSetupCanvas(canvas,wrap),ctx=_r.ctx,W=_r.W,H=_r.H;
+  var tc=icCssVar('--text-muted')||'#9ca3af',CI='#4f46e5',CO='#06b6d4';
+  var rows=models.slice(0,7),ROW_H=Math.min(24,Math.floor((H-8)/rows.length));
+  var LW=90,BW=W-LW-36,mxT=rows.reduce(function(m,r){return Math.max(m,(r.InputTokens||0)+(r.OutputTokens||0))},1);
+  ctx.clearRect(0,0,W,H);ctx.font='10px system-ui,sans-serif';
+  rows.forEach(function(m,i){
+    var y=4+i*ROW_H,inT=m.InputTokens||0,outT=m.OutputTokens||0;
+    var iW=Math.max((inT/mxT)*BW,0),oW=Math.max((outT/mxT)*BW,0);
+    ctx.fillStyle=tc;ctx.textAlign='left';
+    ctx.fillText((m.Model||'unknown').replace(/^claude-/,'').replace(/^openai-/,'').substring(0,14),0,y+ROW_H*0.72);
+    if(iW>0){ctx.fillStyle=CI;ctx.fillRect(LW,y+2,iW,ROW_H-5)}
+    if(oW>0){ctx.fillStyle=CO;ctx.fillRect(LW+iW,y+2,oW,ROW_H-5)}
+    ctx.fillStyle=tc;ctx.textAlign='right';
+    var tot=inT+outT,tl=tot>=1e6?(tot/1e6).toFixed(1)+'M':tot>=1e3?(tot/1e3).toFixed(0)+'k':String(tot);
+    ctx.fillText(tl,W,y+ROW_H*0.72);
+  });
+  var legend=$('ic-model-legend');
+  if(legend)legend.innerHTML=[{color:CI,label:'Input'},{color:CO,label:'Output'}].map(function(l){
+    return'<div class="ic-legend-row"><div class="ic-legend-swatch" style="background:'+l.color+'"></div>'+escHtml(l.label)+'</div>'
+  }).join('');
+  var tbody=$('ic-model-tbody');
+  if(tbody)tbody.innerHTML=rows.map(function(m){
+    return'<tr><td>'+escHtml(m.Model||'unknown')+'</td><td>'+ft(m.InputTokens||0)+'</td><td>'+ft(m.OutputTokens||0)+'</td></tr>'
+  }).join('');
+}
+function renderInteractiveCharts(days,tools,models){
+  if(getPref('showCharts')!=='1')return;
+  // Respect prefers-reduced-motion: skip rIC deferral and draw synchronously.
+  var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var draw=function(){
+    if(days&&days.length)drawCostTrendChart(days.slice(-30));
+    if(tools&&tools.length)drawToolDonutChart(tools);
+    if(models&&models.length)drawModelBarChart(models);
+  };
+  if(reduced){draw()}else{(window.requestIdleCallback||setTimeout)(draw,{timeout:400})}
+}
+
 // === A11y: global error handlers ===
 window.addEventListener('error',function(e){
   console.error('Global error:',e.error||e.message);
@@ -2493,6 +2756,105 @@ window.addEventListener('unhandledrejection',function(e){
     var next=dx<0?btns[idx+1]:btns[idx-1];
     if(next)next.click();
   },{passive:true});
+})();
+
+// === Analytics panel ===
+(function(){
+var analyticsVisible=false;
+var lastAnalyticsRange=null;
+
+function fc(v){return v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4)}
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+window.toggleAnalyticsView=function(){
+  if(analyticsVisible){closeAnalyticsView();return}
+  var av=document.getElementById('analytics-view');
+  var ov=document.getElementById('overview');
+  var det=document.getElementById('detail');
+  var cmp=document.getElementById('cmpView');
+  if(ov)ov.style.display='none';
+  if(det)det.classList.remove('show');
+  if(cmp)cmp.classList.remove('show');
+  av.hidden=false;
+  analyticsVisible=true;
+  document.getElementById('analyticsNavBtn').classList.add('on');
+  loadAnalytics();
+};
+
+window.closeAnalyticsView=function(){
+  var av=document.getElementById('analytics-view');
+  av.hidden=true;
+  analyticsVisible=false;
+  document.getElementById('analyticsNavBtn').classList.remove('on');
+  var ov=document.getElementById('overview');
+  if(ov)ov.style.display='';
+};
+
+async function loadAnalytics(){
+  var r=typeof range!=='undefined'?range:'week';
+  if(r===lastAnalyticsRange)return;
+  var loading=document.getElementById('analyticsLoading');
+  var grid=document.getElementById('analyticsGrid');
+  loading.style.display='';grid.style.display='none';
+  try{
+    var data=await api('/api/analytics?range='+encodeURIComponent(r));
+    lastAnalyticsRange=r;
+    renderAnalytics(data);
+    loading.style.display='none';grid.style.display='';
+  }catch(e){
+    loading.textContent='Failed to load analytics: '+(e&&e.message||e);
+  }
+}
+
+function renderAnalytics(d){
+  // Card 1: top expensive sessions
+  var tbody=document.getElementById('ac-top-body');
+  tbody.innerHTML='';
+  (d.top_expensive_sessions||[]).forEach(function(s){
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>'+esc(s.git_branch||s.id.slice(0,8))+'</td><td><span class="badge">'+esc(s.platform)+'</span></td><td class="num">'+fc(s.cost_usd)+'</td>';
+    tbody.appendChild(tr);
+  });
+  if(!tbody.children.length){tbody.innerHTML='<tr><td colspan="3" style="color:var(--text-muted);text-align:center">No sessions in range</td></tr>'}
+
+  // Card 2: tool breakdown
+  var ttbody=document.getElementById('ac-tools-body');
+  ttbody.innerHTML='';
+  (d.tool_breakdown||[]).slice(0,15).forEach(function(t){
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>'+esc(t.tool)+'</td><td class="num">'+t.count+'</td><td class="num">'+t.avg_duration_ms+'</td><td class="num">'+t.fail_count+'</td>';
+    ttbody.appendChild(tr);
+  });
+  if(!ttbody.children.length){ttbody.innerHTML='<tr><td colspan="4" style="color:var(--text-muted);text-align:center">No tool calls in range</td></tr>'}
+
+  // Card 3: model mix
+  var mtbody=document.getElementById('ac-models-body');
+  mtbody.innerHTML='';
+  var models=(d.model_mix_daily&&d.model_mix_daily[0]&&d.model_mix_daily[0].models)||[];
+  models.forEach(function(m){
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>'+esc(m.model)+'</td><td class="num">'+((m.input_tokens||0).toLocaleString())+'</td><td class="num">'+((m.output_tokens||0).toLocaleString())+'</td><td class="num">'+fc(m.cost_usd)+'</td>';
+    mtbody.appendChild(tr);
+  });
+  if(!mtbody.children.length){mtbody.innerHTML='<tr><td colspan="4" style="color:var(--text-muted);text-align:center">No token usage in range</td></tr>'}
+
+  // Card 4: anomalies
+  var ul=document.getElementById('ac-anomalies-list');
+  var emp=document.getElementById('ac-anomalies-empty');
+  ul.innerHTML='';
+  var anomalies=d.anomalies||[];
+  if(anomalies.length===0){emp.hidden=false}else{emp.hidden=true;anomalies.forEach(function(a){
+    var li=document.createElement('li');
+    li.className='analytics-anomaly-item';
+    li.innerHTML='<div class="analytics-anomaly-reason">'+esc(a.reason)+'</div><div class="analytics-anomaly-sid">'+esc(a.session_id.slice(0,12))+' · '+fc(a.cost_usd)+'</div>';
+    ul.appendChild(li);
+  })}
+}
+
+window.doExportReport=function(){
+  var r=typeof range!=='undefined'?range:'week';
+  window.location='/api/export-report?range='+encodeURIComponent(r);
+};
 })();
 </script>
 </body>
