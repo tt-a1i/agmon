@@ -124,6 +124,11 @@ func main() {
 		runEmit()
 	case "setup":
 		runSetup()
+	case "init":
+		if err := runInit(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "uninstall":
 		runUninstall()
 	case "status":
@@ -1158,6 +1163,7 @@ Usage:
   tokenmeter reload             Reload daemon config via SIGHUP
   tokenmeter emit               Emit event from hook (reads stdin)
   tokenmeter setup              Configure Claude Code hooks
+  tokenmeter init               Interactive setup wizard
   tokenmeter uninstall          Remove hooks and stop daemon
   tokenmeter status             Show active sessions summary
   tokenmeter report [session]   Detailed session report
