@@ -179,6 +179,12 @@ func (s *DB) migrate() error {
 			timestamp     TEXT NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS daily_cost_cache (
+			day      TEXT NOT NULL,
+			cost_usd REAL NOT NULL,
+			PRIMARY KEY (day)
+		);
+
 			CREATE TABLE IF NOT EXISTS file_changes (
 				id          INTEGER PRIMARY KEY AUTOINCREMENT,
 				session_id  TEXT NOT NULL REFERENCES sessions(session_id),
@@ -203,6 +209,7 @@ func (s *DB) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_tool_calls_start ON tool_calls(start_time);
 		CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id);
 		CREATE INDEX IF NOT EXISTS idx_token_usage_ts ON token_usage(timestamp);
+		CREATE INDEX IF NOT EXISTS idx_daily_cost_day ON daily_cost_cache(day);
 		CREATE INDEX IF NOT EXISTS idx_file_changes_session ON file_changes(session_id);
 		CREATE INDEX IF NOT EXISTS idx_file_changes_ts ON file_changes(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_budgets_platform ON budgets(platform);
@@ -264,7 +271,67 @@ func (s *DB) migrate() error {
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_file_changes_source
 		ON file_changes(session_id, source_id) WHERE source_id != ''
 	`)
+	if err != nil {
+		return err
+	}
+	return s.backfillDailyCostCacheIfEmpty()
+}
+
+type dailyCostCacheExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func incrementDailyCostCache(exec dailyCostCacheExecer, timestamp string, costUSD float64) error {
+	_, err := exec.Exec(`
+		INSERT INTO daily_cost_cache (day, cost_usd)
+		VALUES (DATE(?, 'localtime'), ?)
+		ON CONFLICT(day) DO UPDATE SET cost_usd = cost_usd + excluded.cost_usd
+	`, timestamp, costUSD)
 	return err
+}
+
+func rebuildDailyCostCache(exec dailyCostCacheExecer) error {
+	if _, err := exec.Exec(`DELETE FROM daily_cost_cache`); err != nil {
+		return err
+	}
+	_, err := exec.Exec(`
+		INSERT INTO daily_cost_cache (day, cost_usd)
+		SELECT DATE(timestamp, 'localtime') AS day, SUM(cost_usd)
+		FROM token_usage
+		GROUP BY day
+	`)
+	return err
+}
+
+func (s *DB) backfillDailyCostCacheIfEmpty() error {
+	var cacheRows int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM daily_cost_cache`).Scan(&cacheRows); err != nil {
+		return err
+	}
+	if cacheRows > 0 {
+		return nil
+	}
+
+	var tokenRows int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM token_usage`).Scan(&tokenRows); err != nil {
+		return err
+	}
+	if tokenRows == 0 {
+		return nil
+	}
+	return rebuildDailyCostCache(s.db)
+}
+
+func (s *DB) rebuildDailyCostCache() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := rebuildDailyCostCache(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *DB) normalizeTimeColumns() error {
@@ -509,6 +576,10 @@ func (s *DB) InsertTokenUsage(agentID, sessionID string, inputTokens, outputToke
 		return tx.Commit()
 	}
 
+	if err := incrementDailyCostCache(tx, tsStr, costUSD); err != nil {
+		return err
+	}
+
 	_, err = tx.Exec(`
 		UPDATE sessions SET
 			total_input_tokens = total_input_tokens + ?,
@@ -567,6 +638,10 @@ func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
 		return 0, err
 	}
 	n, _ := result.RowsAffected()
+
+	if err := rebuildDailyCostCache(tx); err != nil {
+		return 0, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit: %w", err)
@@ -636,7 +711,16 @@ func (s *DB) BackfillEmptyTokenModel(sessionID, model string, inputPricePerM, ou
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		if err := s.rebuildDailyCostCache(); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 // BackfillRecentCodexTokenModel updates the latest Codex token row at or just
@@ -671,7 +755,16 @@ func (s *DB) BackfillRecentCodexTokenModel(sessionID, model string, contextTime 
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		if err := s.rebuildDailyCostCache(); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 // ListEmptyModelSessions returns sessions that have token_usage rows with empty model,

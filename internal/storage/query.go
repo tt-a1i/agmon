@@ -618,6 +618,11 @@ func startOfToday() time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 }
 
+func localDayStart(t time.Time) time.Time {
+	local := t.In(time.Local)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.Local)
+}
+
 // ModelCostRow holds cost data for a single model.
 type ModelCostRow struct {
 	Model        string
@@ -697,16 +702,19 @@ func (s *DB) GetTopSessionsByCost(from, to time.Time, limit int) ([]TopSessionRo
 // Results are ordered oldest-first, with zero-filled gaps.
 //
 // Bucketing is in the daemon-host local time zone so a UTC+8 user's
-// "Today" matches calendar-local midnight (not UTC midnight). The stored
-// timestamps remain UTC strings; SQL converts at query time via SQLite's
-// 'localtime' modifier.
+// "Today" matches calendar-local midnight (not UTC midnight). daily_cost_cache
+// stores local-day totals; boundary-day adjustments preserve exact [from, to)
+// behavior when callers pass non-midnight times.
 func (s *DB) GetDailyCostsBetween(from, to time.Time) ([]DailyCost, error) {
+	startDay := localDayStart(from)
+	endDay := localDayStart(to)
+
 	rows, err := s.db.Query(`
-		SELECT DATE(timestamp, 'localtime') as day, SUM(cost_usd) as cost
-		FROM token_usage
-		WHERE timestamp >= ? AND timestamp < ?
-		GROUP BY day ORDER BY day ASC
-	`, formatQueryTime(from.UTC()), formatQueryTime(to.UTC()))
+		SELECT day, cost_usd
+		FROM daily_cost_cache
+		WHERE day >= ? AND day <= ?
+		ORDER BY day ASC
+	`, startDay.Format("2006-01-02"), endDay.Format("2006-01-02"))
 	if err != nil {
 		return nil, err
 	}
@@ -725,12 +733,17 @@ func (s *DB) GetDailyCostsBetween(from, to time.Time) ([]DailyCost, error) {
 		return nil, err
 	}
 
-	// Zero-fill in local time so the iteration keys align with the SQL
-	// 'localtime' DATE() output.
-	fromLocal := from.In(time.Local)
-	toLocal := to.In(time.Local)
-	startDay := time.Date(fromLocal.Year(), fromLocal.Month(), fromLocal.Day(), 0, 0, 0, 0, time.Local)
-	endDay := time.Date(toLocal.Year(), toLocal.Month(), toLocal.Day(), 0, 0, 0, 0, time.Local)
+	if from.After(startDay) {
+		if err := s.subtractDailyCostRange(costMap, startDay, from); err != nil {
+			return nil, err
+		}
+	}
+	endExclusive := endDay.AddDate(0, 0, 1)
+	if to.Before(endExclusive) {
+		if err := s.subtractDailyCostRange(costMap, to, endExclusive); err != nil {
+			return nil, err
+		}
+	}
 
 	// Iterate inclusive of endDay so the partial current day (where `to` is
 	// "now" before midnight) still appears in the chart with whatever cost
@@ -742,6 +755,32 @@ func (s *DB) GetDailyCostsBetween(from, to time.Time) ([]DailyCost, error) {
 		result = append(result, DailyCost{Date: key, Cost: costMap[key]})
 	}
 	return result, nil
+}
+
+func (s *DB) subtractDailyCostRange(costMap map[string]float64, from, to time.Time) error {
+	if !to.After(from) {
+		return nil
+	}
+	rows, err := s.db.Query(`
+		SELECT DATE(timestamp, 'localtime') as day, SUM(cost_usd) as cost
+		FROM token_usage
+		WHERE timestamp >= ? AND timestamp < ?
+		GROUP BY day
+	`, formatQueryTime(from), formatQueryTime(to))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var day string
+		var cost float64
+		if err := rows.Scan(&day, &cost); err != nil {
+			return err
+		}
+		costMap[day] -= cost
+	}
+	return rows.Err()
 }
 
 // AllToolStats returns aggregated tool stats across all sessions in a time range.
