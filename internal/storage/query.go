@@ -818,12 +818,71 @@ func (s *DB) GetCostSince(since *time.Time) (float64, error) {
 
 // GetCostBetween returns total cost between two times.
 func (s *DB) GetCostBetween(from, to time.Time) (float64, error) {
+	if !to.After(from) {
+		return 0, nil
+	}
+
+	fromDay := localDayStart(from)
+	toDay := localDayStart(to)
+	cacheEnd := toDay
+	if !isLocalDayStart(to) {
+		cacheEnd = toDay.AddDate(0, 0, 1)
+	}
+
+	cost, err := s.getDailyCostCacheSum(fromDay, cacheEnd)
+	if err != nil {
+		return 0, err
+	}
+
+	if from.After(fromDay) {
+		beforeFrom, err := s.getCostBetweenFromTokenUsage(fromDay, from)
+		if err != nil {
+			return 0, err
+		}
+		cost -= beforeFrom
+	}
+
+	if !isLocalDayStart(to) {
+		afterTo, err := s.getCostBetweenFromTokenUsage(to, toDay.AddDate(0, 0, 1))
+		if err != nil {
+			return 0, err
+		}
+		cost -= afterTo
+	}
+
+	return cost, nil
+}
+
+func (s *DB) getDailyCostCacheSum(fromDay, toDay time.Time) (float64, error) {
+	if !toDay.After(fromDay) {
+		return 0, nil
+	}
+	var cost float64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(cost_usd), 0)
+		FROM daily_cost_cache WHERE day >= ? AND day < ?
+	`, fromDay.Format("2006-01-02"), toDay.Format("2006-01-02")).Scan(&cost)
+	return cost, err
+}
+
+func (s *DB) getCostBetweenFromTokenUsage(from, to time.Time) (float64, error) {
+	if !to.After(from) {
+		return 0, nil
+	}
 	var cost float64
 	err := s.db.QueryRow(`
 		SELECT COALESCE(SUM(cost_usd), 0)
 		FROM token_usage WHERE timestamp >= ? AND timestamp < ?
 	`, formatQueryTime(from), formatQueryTime(to)).Scan(&cost)
 	return cost, err
+}
+
+func isLocalDayStart(t time.Time) bool {
+	local := t.In(time.Local)
+	return local.Hour() == 0 &&
+		local.Minute() == 0 &&
+		local.Second() == 0 &&
+		local.Nanosecond() == 0
 }
 
 func (s *DB) GetCostBetweenForPlatform(from, to time.Time, platform string) (float64, error) {
@@ -878,7 +937,7 @@ func (s *DB) GetMonthCostProjection(now time.Time) (CostProjection, error) {
 
 func (s *DB) GetTodayCost() (float64, error) {
 	t := startOfToday()
-	return s.GetCostSince(&t)
+	return s.GetCostBetween(t, time.Now())
 }
 
 // startOfToday returns the start of "today" in the daemon host's local
