@@ -1578,6 +1578,69 @@ func TestStaticIndexHasKbdGroups(t *testing.T) {
 	}
 }
 
+func TestStaticIndexHasThemePicker(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `applyTheme`) && !strings.Contains(body, `window.setTheme`) {
+		t.Error("index.html missing upgraded theme function (applyTheme or window.setTheme)")
+	}
+	for _, v := range []string{"high-contrast", "custom"} {
+		needle := `data-v="` + v + `"`
+		if !strings.Contains(body, needle) {
+			t.Errorf("index.html missing theme radio button data-v=%q", v)
+		}
+	}
+}
+
+func TestStaticIndexHasHighContrastTheme(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `data-theme="high-contrast"`) {
+		t.Error("index.html missing [data-theme=\"high-contrast\"] CSS block")
+	}
+}
+
+func TestStaticIndexHasCustomAccentInput(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `type="color"`) {
+		t.Error("index.html missing accent color input (type=\"color\")")
+	}
+	if !strings.Contains(body, `accentColorInput`) {
+		t.Error("index.html missing id accentColorInput")
+	}
+}
+
+func TestStaticIndexHasAutoThemeListener(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `prefers-color-scheme`) {
+		t.Error("index.html missing prefers-color-scheme media query reference")
+	}
+	if !strings.Contains(body, `matchMedia`) {
+		t.Error("index.html missing matchMedia call for auto theme listener")
+	}
+}
+
+func TestStaticIndexHasNotifyFunction(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `function notify`) {
+		t.Error("index.html missing notify function")
+	}
+	if !strings.Contains(body, `maybeNotifyOffline`) {
+		t.Error("index.html missing maybeNotifyOffline function")
+	}
+}
+
+func TestStaticIndexHasNotificationPermissionFlow(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `Notification.requestPermission`) {
+		t.Error("index.html missing Notification.requestPermission call")
+	}
+	if !strings.Contains(body, `tokenmeter-notifications`) {
+		t.Error("index.html missing tokenmeter-notifications localStorage key")
+	}
+	if !strings.Contains(body, `handleNotificationToggle`) {
+		t.Error("index.html missing handleNotificationToggle function")
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestHandleProjection(t *testing.T) {

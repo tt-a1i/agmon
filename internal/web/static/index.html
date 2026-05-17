@@ -39,6 +39,20 @@
   --code-bg:rgba(255,255,255,.06);--pre-bg:rgba(0,0,0,.2);--pre-border:#27272a;
   --sr-active-bg:rgba(99,102,241,.1);
 }
+[data-theme="high-contrast"]{
+  --bg:#000;--bg2:#111;--bg3:#1a1a1a;--bg-hover:#0d0d0d;
+  --text:#e8e8e8;--text-strong:#fff;--text-muted:#aaa;--text-faint:#555;
+  --border:#555;--border-light:#333;--border-hover:#888;
+  --accent:#ff0;--accent-bg:rgba(255,255,0,.12);--accent-border:rgba(255,255,0,.5);
+  --card-shadow:0 2px 8px rgba(0,0,0,.5);
+  --nav-bg:#000;--nav-border:#555;
+  --badge-claude-bg:rgba(255,165,0,.15);--badge-claude:#ffa500;--badge-codex-bg:rgba(0,255,0,.12);--badge-codex:#0f0;
+  --green:#0f0;--green-bg:rgba(0,255,0,.1);--amber:#ff0;--red:#f44;--red-bg:rgba(255,68,68,.12);
+  --cyan:#0ff;--chart-bg:#111;--chart-grid:#333;--chart-line:#ff0;--chart-fill:rgba(255,255,0,.12);
+  --msg-alt:rgba(255,255,255,.04);--msg-fade:#111;
+  --code-bg:#1a1a1a;--pre-bg:#0d0d0d;--pre-border:#555;
+  --sr-active-bg:rgba(255,255,0,.12);
+}
 body{font-family:'Inter',system-ui,sans-serif;font-feature-settings:'cv01','ss03';background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;line-height:1.5;font-size:14px;scroll-behavior:smooth;transition:background .2s,color .2s}
 ::selection{background:rgba(79,70,229,.2)}
 .page{max-width:1040px;margin:0 auto;padding:20px 28px 80px}
@@ -1142,8 +1156,9 @@ body.hide-workspace .workspace-bar{display:none}
     <div class="settings-section">
       <h4>Appearance</h4>
       <div class="settings-row"><label>Theme</label><div class="settings-radio" data-pref="theme">
-        <button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button>
+        <button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button><button data-v="high-contrast">High-contrast</button><button data-v="custom">Custom</button>
       </div></div>
+      <div class="settings-row" id="accentColorRow" hidden><label for="accentColorInput">Accent color</label><input type="color" id="accentColorInput" value="#4f46e5" oninput="applyAccentColor(this.value)" aria-label="Custom accent color"></div>
       <div class="settings-row"><label>Default time range</label><div class="settings-radio" data-pref="range">
         <button data-v="today">Today</button><button data-v="week">Week</button><button data-v="month">Month</button><button data-v="all">All</button>
       </div></div>
@@ -1178,6 +1193,10 @@ body.hide-workspace .workspace-bar{display:none}
         </div>
       </div>
       <button class="budget-add" id="budgetAddBtn" onclick="openBudgetForm()">+ Add budget</button>
+    </div>
+    <div class="settings-section">
+      <h4>Notifications</h4>
+      <div class="settings-row"><label for="prefNotifications">Allow browser notifications for budget alerts and anomalies</label><input type="checkbox" id="prefNotifications" onchange="handleNotificationToggle(this)"></div>
     </div>
     <div class="settings-footer">
       <button class="settings-reset" onclick="resetPreferences()">Reset to defaults</button>
@@ -3384,6 +3403,144 @@ document.addEventListener('keydown', function(e) {
 });
 
 initOnboarding();
+
+// === Theme Picker upgrade ===
+// Override setTheme to support high-contrast and custom accent themes.
+window.setTheme = function(mode) {
+  var root = document.documentElement;
+  if (mode === 'high-contrast') {
+    root.setAttribute('data-theme', 'high-contrast');
+  } else if (mode === 'custom') {
+    root.setAttribute('data-theme', '');
+    var accent = localStorage.getItem('tokenmeter-accent-color') || '#4f46e5';
+    root.style.setProperty('--accent', accent);
+  } else if (mode === 'auto') {
+    var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches;
+    root.setAttribute('data-theme', dark ? 'dark' : '');
+    root.style.removeProperty('--accent');
+  } else {
+    root.setAttribute('data-theme', mode === 'dark' ? 'dark' : '');
+    root.style.removeProperty('--accent');
+  }
+  if (mode !== 'custom') root.style.removeProperty('--accent');
+  var isDark = root.getAttribute('data-theme') === 'dark';
+  var btn = document.getElementById('themeBtn');
+  if (btn) {
+    if (mode === 'high-contrast') btn.textContent = '◐';
+    else btn.textContent = isDark ? '☀️' : '🌙';
+  }
+  if (typeof renderChart === 'function' && typeof lastCostDays !== 'undefined' && lastCostDays) renderChart(lastCostDays);
+  var accentRow = document.getElementById('accentColorRow');
+  if (accentRow) accentRow.hidden = mode !== 'custom';
+};
+
+// Cycle: light → dark → auto → high-contrast → light (skip custom)
+window.toggleTheme = function() {
+  var themes = ['light', 'dark', 'auto', 'high-contrast'];
+  var cur = getPref('theme');
+  var idx = themes.indexOf(cur);
+  var next = themes[(idx + 1) % themes.length];
+  setPref('theme', next);
+};
+
+// Listen for OS-level color-scheme changes when in auto mode.
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+    if (getPref('theme') === 'auto') window.setTheme('auto');
+  });
+}
+
+// Apply accent color for custom theme.
+window.applyAccentColor = function(color) {
+  localStorage.setItem('tokenmeter-accent-color', color);
+  if (getPref('theme') === 'custom') {
+    document.documentElement.style.setProperty('--accent', color);
+  }
+};
+
+// Override applyPreferences to sync new controls.
+var _origApplyPrefs = applyPreferences;
+window.applyPreferences = function() {
+  _origApplyPrefs();
+  var accentRow = document.getElementById('accentColorRow');
+  if (accentRow) accentRow.hidden = getPref('theme') !== 'custom';
+  var accentInput = document.getElementById('accentColorInput');
+  if (accentInput) accentInput.value = localStorage.getItem('tokenmeter-accent-color') || '#4f46e5';
+  var notifCb = document.getElementById('prefNotifications');
+  if (notifCb) notifCb.checked = localStorage.getItem('tokenmeter-notifications') === 'on';
+};
+
+// Re-apply theme now so high-contrast / custom modes work on page load.
+window.setTheme(getPref('theme'));
+
+// === Browser Notifications ===
+function notify(title, body, tag) {
+  if (localStorage.getItem('tokenmeter-notifications') !== 'on') return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  try {
+    new Notification(title, { body: body, tag: tag, icon: '/icon-192.svg', silent: false });
+  } catch(e) {
+    console.warn('notify failed:', e);
+  }
+}
+
+var _lastOfflineNotif = 0;
+function maybeNotifyOffline() {
+  if (Date.now() - _lastOfflineNotif < 30000) return;
+  _lastOfflineNotif = Date.now();
+  notify('TokenMeter daemon offline', 'Dashboard cannot reach daemon. Check tokenmeter daemon status.', 'daemon-offline');
+}
+
+// Hook offline badge to also fire a notification.
+var _origShowOfflineBadge = window.showOfflineBadge || function(){};
+window.showOfflineBadge = function() {
+  _origShowOfflineBadge();
+  maybeNotifyOffline();
+};
+
+// Hook handleRealtimeEvent to fire notifications for budget_alert / anomaly.
+var _origHandleRealtime = window.handleRealtimeEvent || function(){};
+window.handleRealtimeEvent = function(ev) {
+  _origHandleRealtime(ev);
+  if (ev && ev.type === 'budget_alert' && ev.threshold >= 0.8) {
+    notify('Budget threshold reached',
+      (ev.percent || '') + '% of ' + (ev.period || '') + ' budget ($' + (ev.spent || 0) + '/$' + (ev.limit || 0) + ')',
+      'budget-' + (ev.budget_id || 'default'));
+  }
+  if (ev && ev.type === 'anomaly') {
+    notify('Cost anomaly detected',
+      'Session ' + (ev.session_id || '') + ' cost $' + (ev.cost || 0) + (ev.z ? ' (z-score ' + ev.z + ')' : ''),
+      'anomaly-' + (ev.session_id || 'unknown'));
+  }
+};
+
+// Notification permission opt-in flow.
+window.handleNotificationToggle = function(cb) {
+  if (!cb.checked) {
+    localStorage.removeItem('tokenmeter-notifications');
+    return;
+  }
+  if (typeof Notification === 'undefined') {
+    if (typeof showToast === 'function') showToast('Browser notifications are not supported in this browser.', 'warning');
+    cb.checked = false;
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    localStorage.setItem('tokenmeter-notifications', 'on');
+    return;
+  }
+  Notification.requestPermission().then(function(result) {
+    if (result === 'granted') {
+      localStorage.setItem('tokenmeter-notifications', 'on');
+    } else {
+      localStorage.removeItem('tokenmeter-notifications');
+      if (typeof showToast === 'function') {
+        showToast('Notification permission denied. To enable, go to browser site settings and allow notifications for this page.', 'warning', 8000);
+      }
+      cb.checked = false;
+    }
+  });
+};
 </script>
 
 <div id="onboarding" role="dialog" aria-modal="true" aria-labelledby="ob-title" hidden tabindex="-1">
