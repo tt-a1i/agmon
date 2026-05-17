@@ -200,6 +200,11 @@ func (d *Daemon) Start() error {
 		defer d.bgWG.Done()
 		d.maintenanceLoop()
 	}()
+	d.bgWG.Add(1)
+	go func() {
+		defer d.bgWG.Done()
+		d.autoBackupLoop()
+	}()
 	d.dispatchWebhookEvent(context.Background(), webhookEventDaemonStarted, WebhookPayload{
 		Daemon: &DaemonWebhookPayload{Status: "started"},
 	})
