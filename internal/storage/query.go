@@ -760,6 +760,37 @@ type ModelCostRow struct {
 	CostUSD      float64
 }
 
+// GetSessionModelBreakdown returns per-model cost aggregation for a single
+// session. Mirrors GetModelCostBreakdown but scopes by session_id instead of
+// a time range — used by handleSessionDetail to show "By model" in the
+// session view when a session spans multiple models (e.g. user switched
+// model mid-conversation).
+func (s *DB) GetSessionModelBreakdown(sessionID string) ([]ModelCostRow, error) {
+	rows, err := s.db.Query(`
+		SELECT COALESCE(NULLIF(model, ''), 'unknown') as m,
+		       SUM(input_tokens),
+		       SUM(output_tokens),
+		       SUM(cost_usd)
+		FROM token_usage
+		WHERE session_id = ?
+		GROUP BY m ORDER BY SUM(cost_usd) DESC
+	`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ModelCostRow
+	for rows.Next() {
+		var r ModelCostRow
+		if err := rows.Scan(&r.Model, &r.InputTokens, &r.OutputTokens, &r.CostUSD); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 // GetModelCostBreakdown returns per-model cost aggregation in a time range.
 func (s *DB) GetModelCostBreakdown(from, to time.Time) ([]ModelCostRow, error) {
 	rows, err := s.db.Query(`

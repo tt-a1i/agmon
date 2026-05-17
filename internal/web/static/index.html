@@ -126,9 +126,22 @@ tr:hover td{background:var(--bg-hover)}
 /* Sessions */
 .sess-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 18px;transition:box-shadow .15s}
 .sess-wrap:hover{box-shadow:var(--card-shadow)}
-.sess-search{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px 12px;font:inherit;font-size:13px;color:var(--text-strong);outline:none;margin-bottom:12px;transition:border-color .15s;background:var(--bg)}
+.search-shell{position:relative;margin-bottom:12px}
+.sess-search{width:100%;border:1px solid var(--border);border-radius:6px;padding:8px 12px;font:inherit;font-size:13px;color:var(--text-strong);outline:none;transition:border-color .15s;background:var(--bg)}
 .sess-search:focus{border-color:var(--accent);background:var(--bg2)}
 .sess-search::placeholder{color:var(--text-faint)}
+.search-dropdown{position:absolute;top:calc(100% + 4px);left:0;width:100%;max-height:400px;overflow-y:auto;background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:var(--card-shadow);z-index:70}
+.search-dropdown[hidden]{display:none}
+.search-hit{display:grid;grid-template-columns:24px 1fr;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-light);cursor:pointer;transition:background .1s}
+.search-hit:last-child{border-bottom:0}
+.search-hit:hover{background:var(--bg-hover)}
+.search-hit-icon{font-size:14px;line-height:1.5;text-align:center}
+.search-hit-body{min-width:0}
+.search-hit-meta{font-size:11px;color:var(--text-muted);display:flex;gap:6px;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-hit-session{font-weight:650;color:var(--text-strong);overflow:hidden;text-overflow:ellipsis}
+.search-hit-excerpt{font-size:12px;color:var(--text);line-height:1.45;margin-top:2px;word-break:break-word}
+.search-hit-excerpt mark{background:rgba(234,179,8,.25);color:var(--text-strong);border-radius:2px;padding:0 1px}
+.search-state{padding:12px;color:var(--text-muted);font-size:12px;text-align:center}
 .sess-list{border:1px solid var(--border-light);border-radius:8px;overflow:hidden}
 .sr{display:flex;align-items:center;padding:12px 16px;gap:12px;border-bottom:1px solid var(--border-light);cursor:pointer;transition:background .1s}
 .sr:last-child{border-bottom:0}
@@ -403,6 +416,7 @@ tr:hover td{background:var(--bg-hover)}
   .session-controls{align-items:stretch}
   .session-controls .seg{width:100%}
   .session-controls .seg button{flex:1}
+  .search-dropdown{position:fixed;top:60px;left:0;right:0;width:auto;max-height:calc(100vh - 72px);border-left:0;border-right:0;border-radius:0;z-index:90}
   .skel-metrics{grid-template-columns:repeat(2,1fr);gap:8px}
 }
 
@@ -501,6 +515,27 @@ tr:hover td{background:var(--bg-hover)}
 .budget-add{width:100%;background:0;border:1px dashed var(--border);border-radius:6px;padding:7px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
 .budget-add:hover{color:var(--text);border-color:var(--text-faint)}
 
+/* Detail "By model" card — appears in session detail above the tabs when
+   the session spans multiple models. Mimics the main dashboard model-bar
+   visual but condensed for the narrower detail context. */
+.d-models{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:16px}
+.d-models-head{font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px}
+.d-models-bar{display:flex;height:4px;border-radius:2px;overflow:hidden;gap:2px;margin-bottom:8px}
+.d-models-rows{display:flex;flex-direction:column;gap:4px}
+.d-model-row{display:flex;align-items:center;gap:8px;font-size:11px}
+.d-model-swatch{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.d-model-name{flex:1;color:var(--text-strong);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.d-model-tok{color:var(--text-muted);font-variant-numeric:tabular-nums}
+.d-model-cost{color:var(--text-strong);font-weight:600;font-variant-numeric:tabular-nums;min-width:48px;text-align:right}
+
+/* Global cost-trend sparkline embedded per session row. The line itself
+   is identical across rows (shared global trend) — it's a quick visual
+   anchor for "is overall spend climbing?" without each row paying for an
+   independent canvas. .hide-spark drops the column entirely. */
+.sr-spark{flex-shrink:0;width:80px;height:20px;opacity:.7;margin-left:8px}
+.sr-spark svg{display:block;width:100%;height:100%}
+.hide-spark .sr-spark{display:none}
+
 /* CWD column — render in sr-meta, hidden when user toggles off. */
 .sr-cwd{font-family:monospace;font-size:10px;color:var(--text-faint);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
 .hide-cwd .sr-cwd{display:none}
@@ -588,7 +623,10 @@ tr:hover td{background:var(--bg-hover)}
   <div class="sess-wrap">
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-title">📋 Sessions</span><span class="section-sub" id="sCnt"></span></div>
     <div id="dayFilter"></div>
-    <input class="sess-search" id="sessSearch" placeholder="Search by name, model, tag..." autocomplete="off">
+    <div class="search-shell">
+      <input class="sess-search" id="sessSearch" placeholder="Filter sessions or search all tool calls..." autocomplete="off">
+      <div class="search-dropdown" id="searchDropdown" hidden></div>
+    </div>
     <div class="tag-chips" id="tagChips"></div>
     <div class="session-controls">
       <div class="seg" id="sessionPlatform">
@@ -616,6 +654,7 @@ tr:hover td{background:var(--bg-hover)}
   <div class="dh" id="dHeader"></div>
   <div id="tokenSection"></div>
   <div class="qstats" id="dQStats"></div>
+  <div id="dModels"></div>
   <div class="tabs" id="dTabs">
     <button class="tab on" data-tab="msgs">Conversation <span class="cnt" id="cntMsg">0</span></button>
     <button class="tab" data-tab="tools">Tools <span class="cnt" id="cntTool">0</span></button>
@@ -667,6 +706,7 @@ tr:hover td{background:var(--bg-hover)}
         <button data-v="30">30s</button><button data-v="60">60s</button><button data-v="120">2m</button><button data-v="0">Off</button>
       </div></div>
       <div class="settings-row"><label for="prefShowCwd">Show project path (cwd) in session list</label><input type="checkbox" class="settings-check" id="prefShowCwd" data-pref="showCwd"></div>
+      <div class="settings-row"><label for="prefShowSpark">Show cost-trend sparkline on session rows</label><input type="checkbox" class="settings-check" id="prefShowSpark" data-pref="showSpark"></div>
     </div>
     <div class="settings-section">
       <h4>Budgets</h4>
@@ -700,7 +740,7 @@ const COLORS=['#4f46e5','#06b6d4','#22c55e','#eab308','#ef4444','#f97316','#ec48
 const $=id=>document.getElementById(id);
 
 // Preferences — all persist to localStorage under 'tokenmeter-<key>'.
-const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1'};
+const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1',showSpark:'1'};
 function getPref(k){const v=localStorage.getItem('tokenmeter-'+k);return v==null?PREFS_DEFAULTS[k]:v}
 function setPref(k,v){localStorage.setItem('tokenmeter-'+k,v);applyPreferences()}
 
@@ -722,6 +762,7 @@ function applyPreferences(){
   setTheme(getPref('theme'));
   document.body.classList.toggle('compact',getPref('compact')==='1');
   document.body.classList.toggle('hide-cwd',getPref('showCwd')!=='1');
+  document.body.classList.toggle('hide-spark',getPref('showSpark')!=='1');
   // Restart slow-poll backstop with current interval. 0 = disabled.
   if(slowPoll){clearInterval(slowPoll);slowPoll=null}
   const sec=parseInt(getPref('poll'),10);
@@ -785,6 +826,8 @@ function safeModelLabel(model){return escHtml(String(model||'').replace('claude-
 function jsString(s){return JSON.stringify(String(s??''))}
 const TOOL_ICONS={Read:'📖',Edit:'✏️',Write:'📝',Bash:'⚡',Grep:'🔍',Glob:'📁',Agent:'🤖',WebFetch:'🌐',WebSearch:'🔎',NotebookEdit:'📓',LSP:'🔗',TaskCreate:'✅',TaskUpdate:'☑️'};
 function toolIcon(name){return TOOL_ICONS[name]||'⚙️'}
+const SEARCH_KIND_ICONS={tool_param:'🔧',tool_result:'📤',file:'📁'};
+function searchKindIcon(kind){return SEARCH_KIND_ICONS[kind]||'🔎'}
 function renderMd(s){let h=escHtml(s);h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');h=h.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');return h}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
 
@@ -906,6 +949,43 @@ function renderModels(models){
   tbody.innerHTML=models.map((m,i)=>{const pct=(m.CostUSD/total*100).toFixed(0);return`<tr><td><span style="display:inline-block;width:6px;height:6px;border-radius:2px;background:${COLORS[i%COLORS.length]};margin-right:6px"></span>${escHtml(m.Model||'unknown')}</td><td class="text-right text-muted">${ft(m.InputTokens+m.OutputTokens)}</td><td class="text-right"><span class="text-bold">${fc(m.CostUSD)}</span> <span style="font-size:10px;color:var(--text-muted)">${pct}%</span></td></tr>`}).join('');
 }
 
+// Detail "By model" — renders into #dModels. Hidden when a session has
+// only one model (or none), since the single-model case is already
+// shown in the detail header's Model field.
+function renderDetailModels(models){
+  const el=$('dModels');if(!el)return;
+  if(!models||models.length<2){el.innerHTML='';return}
+  const total=models.reduce((a,m)=>a+(m.cost_usd||0),0)||1;
+  const bar=models.map((m,i)=>{
+    const pct=((m.cost_usd||0)/total*100).toFixed(1);
+    return `<div style="flex:${pct};background:${COLORS[i%COLORS.length]}"></div>`;
+  }).join('');
+  const rows=models.map((m,i)=>{
+    const tok=(m.input_tokens||0)+(m.output_tokens||0);
+    const pct=((m.cost_usd||0)/total*100).toFixed(0);
+    return `<div class="d-model-row"><span class="d-model-swatch" style="background:${COLORS[i%COLORS.length]}"></span><span class="d-model-name">${escHtml(m.model||'unknown')}</span><span class="d-model-tok">${ft(tok)} tok</span><span class="d-model-cost">${fc(m.cost_usd||0)} · ${pct}%</span></div>`;
+  }).join('');
+  el.innerHTML=`<div class="d-models"><div class="d-models-head">By model</div><div class="d-models-bar">${bar}</div><div class="d-models-rows">${rows}</div></div>`;
+}
+
+// Build an inline SVG sparkline for a session row. Reuses dailyCosts
+// (the global 7-day trend) so all rows share the same line — this is
+// cheap to render N times and provides a quick "is global spend
+// climbing?" visual cue without a per-session API call.
+function buildSrSparkSVG(values,color){
+  if(!values||values.length<2)return '';
+  const W=80,H=20;
+  const mx=Math.max.apply(null,values.concat([0.01])),mn=Math.min.apply(null,values.concat([0]));
+  const range=mx-mn||1;
+  const pts=values.map((v,i)=>{
+    const x=(i/(values.length-1))*W;
+    const y=H-1-((v-mn)/range)*(H-2);
+    return x.toFixed(1)+','+y.toFixed(1);
+  }).join(' ');
+  const lastY=H-1-((values[values.length-1]-mn)/range)*(H-2);
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color||'currentColor'}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${W-1}" cy="${lastY.toFixed(1)}" r="1.5" fill="${color||'currentColor'}"/></svg>`;
+}
+
 // Tools
 function renderTools(tools){
   const el=$('tList'),tot=$('tTot');
@@ -965,6 +1045,10 @@ function renderSessions(sessions){
   if(!filtered.length){el.innerHTML='<div class="empty">'+(searchQ||sessionPlatform!=='all'||dayFilter?'No matching sessions':'No sessions yet')+'</div>';cnt.textContent=allS.length+' total';btn.style.display='none';return}
   cnt.textContent=(filtered.length===allS.length?allS.length:filtered.length+'/'+allS.length)+' total';btn.style.display=filtered.length>sLim?'block':'none';
   const maxC=Math.max(...filtered.map(s=>s.cost_usd),.01);
+  // Global 7-day trend sparkline reused per row. Computed once: SVG string
+  // is small (<200 bytes) and identical across rows.
+  const daily=(lastCosts&&lastCosts.daily_costs)||[];
+  const trendSpark=daily.length>1?buildSrSparkSVG(daily.map(d=>d.Cost||0)):'';
   el.innerHTML=filtered.slice(0,sLim).map(s=>{
     const sc=s.status==='active'?'active':s.status==='stale'?'stale':'ended';
     const dur=s.end_time?Math.round((new Date(s.end_time)-new Date(s.start_time))/60000):0;
@@ -972,11 +1056,58 @@ function renderSessions(sessions){
     const tokS=ft(s.input_tokens+s.output_tokens);
     const barW=(s.cost_usd/maxC*100).toFixed(1);
     const cwdShort=s.cwd?s.cwd.split('/').slice(-2).join('/'):'';
-    return`<div class="sr" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><div class="sr-arr">›</div></div>`
+    return`<div class="sr" data-sid="${escAttr(s.session_id)}"><div class="sr-dot ${sc}"></div><div class="sr-info"><div class="sr-name">${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span> <span class="sr-status ${sc}">${sc}</span></div><div class="sr-meta"><span>${ftime(s.start_time)}</span>${durS?'<span>'+escHtml(durS)+'</span>':''}${s.model?'<span>'+safeModelLabel(s.model)+'</span>':''}<span>${tokS} tok</span>${cwdShort?'<span class="sr-cwd" title="'+escAttr(s.cwd)+'">'+escHtml(cwdShort)+'</span>':''}${s.tag?'<span style="color:var(--accent)">'+escHtml(s.tag)+'</span>':''}</div></div><div class="sr-right"><div class="sr-cost ${cc(s.cost_usd)}">${fc(s.cost_usd)}</div><div class="sr-bar"><div class="sr-bar-fill" style="width:${barW}%"></div></div></div><span class="sr-spark" style="color:var(--text-faint)">${trendSpark}</span><div class="sr-arr">›</div></div>`
   }).join('');
 }
 $('sMore').onclick=()=>{sLim+=30;renderSessions(allS)};
-$('sessSearch').oninput=e=>{searchQ=e.target.value.trim();sLim=20;renderSessions(allS)};
+let searchTimer=null,searchSeq=0,searchBlurTimer=null;
+function closeSearchDropdown(){searchSeq++;const d=$('searchDropdown');if(d){d.hidden=true;d.innerHTML=''}clearTimeout(searchBlurTimer)}
+function showSearchState(msg){const d=$('searchDropdown');if(!d)return;d.innerHTML=`<div class="search-state">${escHtml(msg)}</div>`;d.hidden=false}
+function escRegExp(s){return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
+function markSearchText(text,q){
+  const safe=escHtml(text),needle=escHtml(q.trim());
+  if(!needle)return safe;
+  return safe.replace(new RegExp(escRegExp(needle),'ig'),m=>`<mark>${m}</mark>`);
+}
+function renderSearchHits(hits,q){
+  const d=$('searchDropdown');if(!d)return;
+  if(!hits||!hits.length){showSearchState('No matches across tool calls / file changes.');return}
+  d.innerHTML=hits.map(h=>{
+    const kind=String(h.kind||''),time=h.timestamp?ftime(h.timestamp):'';
+    return `<div class="search-hit" data-sid="${escAttr(h.session_id)}"><div class="search-hit-icon">${searchKindIcon(kind)}</div><div class="search-hit-body"><div class="search-hit-meta"><span class="search-hit-session">${escHtml(h.session_name||h.session_id)}</span><span>·</span><span>${escHtml(kind.replace('_',' '))}</span>${time?'<span>·</span><span>'+escHtml(time)+'</span>':''}</div><div class="search-hit-excerpt">${markSearchText(h.excerpt||'',q)}</div></div></div>`;
+  }).join('');
+  d.hidden=false;
+}
+async function runGlobalSearch(){
+  const input=$('sessSearch'),q=(input&&input.value||'').trim();
+  clearTimeout(searchTimer);
+  if(q.length<2){closeSearchDropdown();return}
+  const seq=++searchSeq;
+  showSearchState('Searching...');
+  try{
+    const hits=await api('/api/search?q='+encodeURIComponent(q));
+    if(seq!==searchSeq)return;
+    renderSearchHits(hits,q);
+  }catch(e){
+    if(seq!==searchSeq)return;
+    console.warn('global search failed:',e);
+    showSearchState('Search unavailable');
+  }
+}
+function scheduleGlobalSearch(){
+  clearTimeout(searchTimer);
+  const q=($('sessSearch').value||'').trim();
+  if(q.length<2){closeSearchDropdown();return}
+  searchTimer=setTimeout(runGlobalSearch,500);
+}
+$('sessSearch').oninput=e=>{searchQ=e.target.value.trim();sLim=20;renderSessions(allS);scheduleGlobalSearch()};
+$('sessSearch').onkeydown=e=>{
+  if(e.key==='Enter'){e.preventDefault();runGlobalSearch()}
+  if(e.key==='Escape'&&!$('searchDropdown').hidden){e.preventDefault();e.stopPropagation();closeSearchDropdown()}
+};
+$('sessSearch').onblur=()=>{searchBlurTimer=setTimeout(closeSearchDropdown,600)};
+$('searchDropdown').addEventListener('mousedown',e=>{if(e.target.closest('.search-hit'))e.preventDefault()});
+$('searchDropdown').addEventListener('click',e=>{const row=e.target.closest('.search-hit');if(row&&row.dataset.sid){closeSearchDropdown();openSession(row.dataset.sid)}});
 // Delegated clicks
 $('sList').addEventListener('click',e=>{const row=e.target.closest('.sr');if(row&&row.dataset.sid)openSession(row.dataset.sid)});
 document.addEventListener('click',e=>{const btn=e.target.closest('[data-copy]');if(btn){navigator.clipboard.writeText(btn.dataset.copy);toast('Copied!')}});
@@ -989,7 +1120,7 @@ async function openSession(id){
   if(location.hash!=='#session/'+encodedId)history.pushState(null,null,'#session/'+encodedId);
   if(!isReopen){
     $('dHeader').innerHTML='<div class="loading-card"><div class="spinner"></div>Loading session...</div>';
-    $('tokenSection').innerHTML='';$('dQStats').innerHTML='';$('dMsgs').innerHTML='';$('dTools').innerHTML='';$('dFiles').innerHTML='';$('dAgents').innerHTML='';
+    $('tokenSection').innerHTML='';$('dQStats').innerHTML='';$('dMsgs').innerHTML='';$('dTools').innerHTML='';$('dFiles').innerHTML='';$('dAgents').innerHTML='';$('dModels').innerHTML='';
     window.scrollTo({top:0,behavior:'smooth'});
   }
   let d;
@@ -1015,6 +1146,7 @@ async function openSession(id){
 
   const msgs=d.messages||[];
   const tools=d.tools||[],files=d.files||[],agentStats=d.agent_stats||[];
+  renderDetailModels(d.models||[]);
   $('dQStats').innerHTML=`<div class="qs"><div class="qs-num">${msgs.length}</div><div class="qs-label">Messages</div></div><div class="qs"><div class="qs-num">${tools.length}</div><div class="qs-label">Tools</div></div><div class="qs"><div class="qs-num">${files.length}</div><div class="qs-label">Files</div></div><div class="qs"><div class="qs-num">${agentStats.length}</div><div class="qs-label">Agents</div></div><div class="qs"><div class="qs-num">${ft(total)}</div><div class="qs-label">Tokens</div></div>`;
   $('cntMsg').textContent=msgs.length;$('cntTool').textContent=tools.length;$('cntFile').textContent=files.length;$('cntAgent').textContent=agentStats.length;
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('on',i===0));

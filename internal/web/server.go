@@ -1064,6 +1064,24 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		sj.EndTime = sess.EndTime.Format(time.RFC3339)
 	}
 
+	// Per-model breakdown for this session (used by the detail view's
+	// "By model" card). Soft-fail: an error here shouldn't block the rest
+	// of the detail payload, the chart is purely additive.
+	models, err := s.db.GetSessionModelBreakdown(sess.SessionID)
+	if err != nil {
+		log.Printf("session model breakdown: %v", err)
+		models = nil
+	}
+	mb := make([]map[string]any, 0, len(models))
+	for _, m := range models {
+		mb = append(mb, map[string]any{
+			"model":         m.Model,
+			"input_tokens":  m.InputTokens,
+			"output_tokens": m.OutputTokens,
+			"cost_usd":      m.CostUSD,
+		})
+	}
+
 	writeJSON(w, map[string]any{
 		"session":     sj,
 		"messages":    mj,
@@ -1072,5 +1090,6 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		"files":       fj,
 		"tool_stats":  tsj,
 		"agent_stats": asj,
+		"models":      mb,
 	})
 }
