@@ -152,7 +152,7 @@ func (s *DB) ListSessionsLimit(limit int) ([]SessionRow, error) {
 	if limit <= 0 {
 		limit = DefaultSessionListLimit
 	}
-	rows, err := s.db.Query(`
+	const listSessionsSQL = `
 		SELECT session_id, platform, start_time, end_time, status,
 		       total_input_tokens, total_output_tokens, total_cost_usd,
 		       cwd, git_branch, latest_context_tokens, model,
@@ -162,7 +162,12 @@ func (s *DB) ListSessionsLimit(limit int) ([]SessionRow, error) {
 		   OR total_input_tokens > 0 OR total_output_tokens > 0
 		   OR total_cache_read_tokens > 0 OR total_cache_creation_tokens > 0
 		ORDER BY start_time DESC LIMIT ?
-	`, limit)
+	`
+	stmt, err := s.getOrPrepare(listSessionsSQL)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := stmt.Query(limit)
 	if err != nil {
 		return nil, err
 	}
@@ -901,27 +906,39 @@ func (s *DB) GetCostBetween(from, to time.Time) (float64, error) {
 	return cost, nil
 }
 
+const dailyCostCacheSumSQL = `
+	SELECT COALESCE(SUM(cost_usd), 0)
+	FROM daily_cost_cache WHERE day >= ? AND day < ?
+`
+
 func (s *DB) getDailyCostCacheSum(fromDay, toDay time.Time) (float64, error) {
 	if !toDay.After(fromDay) {
 		return 0, nil
 	}
+	stmt, err := s.getOrPrepare(dailyCostCacheSumSQL)
+	if err != nil {
+		return 0, err
+	}
 	var cost float64
-	err := s.db.QueryRow(`
-		SELECT COALESCE(SUM(cost_usd), 0)
-		FROM daily_cost_cache WHERE day >= ? AND day < ?
-	`, fromDay.Format("2006-01-02"), toDay.Format("2006-01-02")).Scan(&cost)
+	err = stmt.QueryRow(fromDay.Format("2006-01-02"), toDay.Format("2006-01-02")).Scan(&cost)
 	return cost, err
 }
+
+const costBetweenFromTokenUsageSQL = `
+	SELECT COALESCE(SUM(cost_usd), 0)
+	FROM token_usage WHERE timestamp >= ? AND timestamp < ?
+`
 
 func (s *DB) getCostBetweenFromTokenUsage(from, to time.Time) (float64, error) {
 	if !to.After(from) {
 		return 0, nil
 	}
+	stmt, err := s.getOrPrepare(costBetweenFromTokenUsageSQL)
+	if err != nil {
+		return 0, err
+	}
 	var cost float64
-	err := s.db.QueryRow(`
-		SELECT COALESCE(SUM(cost_usd), 0)
-		FROM token_usage WHERE timestamp >= ? AND timestamp < ?
-	`, formatQueryTime(from), formatQueryTime(to)).Scan(&cost)
+	err = stmt.QueryRow(formatQueryTime(from), formatQueryTime(to)).Scan(&cost)
 	return cost, err
 }
 

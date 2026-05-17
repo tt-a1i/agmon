@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tt-a1i/tokenmeter/internal/appdir"
@@ -14,10 +15,16 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type stmtCache struct {
+	mu    sync.RWMutex
+	stmts map[string]*sql.Stmt
+}
+
 type DB struct {
 	db                 *sql.DB
 	path               string
 	searchFallbackLike bool
+	cache              stmtCache
 }
 
 const storageTimeLayout = "2006-01-02T15:04:05.000000000Z"
@@ -77,6 +84,7 @@ func Open(path string) (*DB, error) {
 	}
 
 	s := &DB{db: db, path: path}
+	s.cache.stmts = make(map[string]*sql.Stmt)
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -85,7 +93,36 @@ func Open(path string) (*DB, error) {
 }
 
 func (s *DB) Close() error {
+	s.cache.mu.Lock()
+	for _, stmt := range s.cache.stmts {
+		_ = stmt.Close()
+	}
+	s.cache.stmts = nil
+	s.cache.mu.Unlock()
 	return s.db.Close()
+}
+
+// getOrPrepare returns a cached *sql.Stmt for the given query, preparing it
+// on first use. Cached statements are closed when the DB is closed.
+func (s *DB) getOrPrepare(query string) (*sql.Stmt, error) {
+	s.cache.mu.RLock()
+	stmt, ok := s.cache.stmts[query]
+	s.cache.mu.RUnlock()
+	if ok {
+		return stmt, nil
+	}
+
+	s.cache.mu.Lock()
+	defer s.cache.mu.Unlock()
+	if stmt, ok = s.cache.stmts[query]; ok {
+		return stmt, nil
+	}
+	stmt, err := s.db.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	s.cache.stmts[query] = stmt
+	return stmt, nil
 }
 
 // Stats returns connection pool statistics for the underlying *sql.DB.

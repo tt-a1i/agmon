@@ -97,21 +97,23 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux := http.NewServeMux()
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
-	mux.HandleFunc("/api/sessions", s.authMiddleware(s.handleSessions))
-	mux.HandleFunc("/api/costs", s.authMiddleware(s.handleCosts))
-	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
-	mux.HandleFunc("/api/projection", s.authMiddleware(s.handleProjection))
-	mux.HandleFunc("/api/events", s.authMiddleware(s.handleEvents))
-	mux.HandleFunc("/api/export", s.authMiddleware(s.handleExport))
-	mux.HandleFunc("/api/compare", s.authMiddleware(s.handleCompare))
-	mux.HandleFunc("/api/search", s.authMiddleware(s.handleSearch))
-	mux.HandleFunc("/api/budgets", s.authMiddleware(s.handleBudgets))
-	mux.HandleFunc("/api/budgets/", s.authMiddleware(s.handleBudgetByID))
-	mux.HandleFunc("/api/session/", s.authMiddleware(s.handleSessionDetail))
-	mux.HandleFunc("/api/analytics", s.authMiddleware(s.handleAnalytics))
-	mux.HandleFunc("/api/export-report", s.authMiddleware(s.handleExportReport))
-	mux.HandleFunc("/api/health", s.authMiddleware(s.handleHealth))
-	mux.HandleFunc("/metrics", s.authMiddleware(s.handleMetrics))
+	// gzip wraps JSON API endpoints; SSE (/api/events) and /metrics are excluded.
+	gz := gzipMiddleware
+	mux.HandleFunc("/api/sessions", s.authMiddleware(gz(s.handleSessions)))
+	mux.HandleFunc("/api/costs", s.authMiddleware(gz(s.handleCosts)))
+	mux.HandleFunc("/api/stats", s.authMiddleware(gz(s.handleStats)))
+	mux.HandleFunc("/api/projection", s.authMiddleware(gz(s.handleProjection)))
+	mux.HandleFunc("/api/events", s.authMiddleware(s.handleEvents)) // SSE — no gzip
+	mux.HandleFunc("/api/export", s.authMiddleware(gz(s.handleExport)))
+	mux.HandleFunc("/api/compare", s.authMiddleware(gz(s.handleCompare)))
+	mux.HandleFunc("/api/search", s.authMiddleware(gz(s.handleSearch)))
+	mux.HandleFunc("/api/budgets", s.authMiddleware(gz(s.handleBudgets)))
+	mux.HandleFunc("/api/budgets/", s.authMiddleware(gz(s.handleBudgetByID)))
+	mux.HandleFunc("/api/session/", s.authMiddleware(gz(s.handleSessionDetail)))
+	mux.HandleFunc("/api/analytics", s.authMiddleware(gz(s.handleAnalytics)))
+	mux.HandleFunc("/api/export-report", s.authMiddleware(gz(s.handleExportReport)))
+	mux.HandleFunc("/api/health", s.authMiddleware(gz(s.handleHealth)))
+	mux.HandleFunc("/metrics", s.authMiddleware(s.handleMetrics)) // metrics — no gzip
 
 	s.srv = &http.Server{
 		Addr:              s.addr,
