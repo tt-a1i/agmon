@@ -3088,10 +3088,17 @@ window.addEventListener('unhandledrejection',function(e){
 // === Analytics panel ===
 (function(){
 var analyticsVisible=false;
-var lastAnalyticsRange=null;
+var lastAnalyticsCacheKey=null;
 
 function fc(v){return v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4)}
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function deltaLabel(cur,prev){
+  if(prev===null||prev===undefined||prev===0)return'';
+  var pct=((cur-prev)/Math.abs(prev))*100;
+  var sign=pct>=0?'+':'';
+  var cls=pct>0?'color:#ef4444':'color:#22c55e';
+  return' <span style="font-size:10px;'+cls+'">'+sign+pct.toFixed(1)+'%</span>';
+}
 
 window.toggleAnalyticsView=function(){
   if(analyticsVisible){closeAnalyticsView();return}
@@ -3117,15 +3124,34 @@ window.closeAnalyticsView=function(){
   if(ov)ov.style.display='';
 };
 
-async function loadAnalytics(){
+window.applyAnalyticsFilters=function(){
+  lastAnalyticsCacheKey=null;
+  loadAnalytics();
+};
+
+function buildAnalyticsURL(){
   var r=typeof range!=='undefined'?range:'week';
-  if(r===lastAnalyticsRange)return;
+  var ws=(document.getElementById('ac-filter-workspace')||{}).value||'';
+  var tag=(document.getElementById('ac-filter-tag')||{}).value||'';
+  var model=(document.getElementById('ac-filter-model')||{}).value||'';
+  var cmp=(document.getElementById('ac-filter-compare')||{}).checked;
+  var url='/api/analytics?range='+encodeURIComponent(r);
+  if(ws)url+='&workspace='+encodeURIComponent(ws);
+  if(tag)url+='&tag='+encodeURIComponent(tag);
+  if(model)url+='&model='+encodeURIComponent(model);
+  if(cmp)url+='&compare=prev_period';
+  return url;
+}
+
+async function loadAnalytics(){
+  var url=buildAnalyticsURL();
+  if(url===lastAnalyticsCacheKey)return;
   var loading=document.getElementById('analyticsLoading');
   var grid=document.getElementById('analyticsGrid');
   loading.style.display='';grid.style.display='none';
   try{
-    var data=await api('/api/analytics?range='+encodeURIComponent(r));
-    lastAnalyticsRange=r;
+    var data=await api(url);
+    lastAnalyticsCacheKey=url;
     renderAnalytics(data);
     loading.style.display='none';grid.style.display='';
   }catch(e){
@@ -3134,12 +3160,22 @@ async function loadAnalytics(){
 }
 
 function renderAnalytics(d){
-  // Card 1: top expensive sessions
+  var pp=d.previous_period||null;
+
+  // Card 1: top expensive sessions — click to drilldown
   var tbody=document.getElementById('ac-top-body');
   tbody.innerHTML='';
   (d.top_expensive_sessions||[]).forEach(function(s){
     var tr=document.createElement('tr');
-    tr.innerHTML='<td>'+esc(s.git_branch||s.id.slice(0,8))+'</td><td><span class="badge">'+esc(s.platform)+'</span></td><td class="num">'+fc(s.cost_usd)+'</td>';
+    tr.style.cursor='pointer';
+    tr.title='Click to open session detail';
+    var prevCost=null;
+    if(pp)(pp.top_expensive_sessions||[]).forEach(function(ps){if(ps.id===s.id)prevCost=ps.cost_usd});
+    tr.innerHTML='<td>'+esc(s.git_branch||s.id.slice(0,8))+'</td><td><span class="badge">'+esc(s.platform)+'</span></td><td class="num">'+fc(s.cost_usd)+deltaLabel(s.cost_usd,prevCost)+'</td>';
+    tr.addEventListener('click',function(){
+      if(typeof openSession==='function'){closeAnalyticsView();openSession(s.id)}
+      else if(typeof showToast==='function')showToast('Session detail not available','warning');
+    });
     tbody.appendChild(tr);
   });
   if(!tbody.children.length){tbody.innerHTML='<tr><td colspan="3" style="color:var(--text-muted);text-align:center">No sessions in range</td></tr>'}
@@ -3154,28 +3190,40 @@ function renderAnalytics(d){
   });
   if(!ttbody.children.length){ttbody.innerHTML='<tr><td colspan="4" style="color:var(--text-muted);text-align:center">No tool calls in range</td></tr>'}
 
-  // Card 3: model mix
+  // Card 3: model mix with delta when comparing
   var mtbody=document.getElementById('ac-models-body');
   mtbody.innerHTML='';
   var models=(d.model_mix_daily&&d.model_mix_daily[0]&&d.model_mix_daily[0].models)||[];
+  var prevModels=pp&&pp.model_mix_daily&&pp.model_mix_daily[0]?pp.model_mix_daily[0].models||[]:[];
   models.forEach(function(m){
+    var prevCostM=null;
+    prevModels.forEach(function(pm){if(pm.model===m.model)prevCostM=pm.cost_usd});
     var tr=document.createElement('tr');
-    tr.innerHTML='<td>'+esc(m.model)+'</td><td class="num">'+((m.input_tokens||0).toLocaleString())+'</td><td class="num">'+((m.output_tokens||0).toLocaleString())+'</td><td class="num">'+fc(m.cost_usd)+'</td>';
+    tr.innerHTML='<td>'+esc(m.model)+'</td><td class="num">'+((m.input_tokens||0).toLocaleString())+'</td><td class="num">'+((m.output_tokens||0).toLocaleString())+'</td><td class="num">'+fc(m.cost_usd)+deltaLabel(m.cost_usd,prevCostM)+'</td>';
     mtbody.appendChild(tr);
   });
   if(!mtbody.children.length){mtbody.innerHTML='<tr><td colspan="4" style="color:var(--text-muted);text-align:center">No token usage in range</td></tr>'}
 
-  // Card 4: anomalies
+  // Card 4: anomalies — click to drilldown
   var ul=document.getElementById('ac-anomalies-list');
   var emp=document.getElementById('ac-anomalies-empty');
   ul.innerHTML='';
   var anomalies=d.anomalies||[];
-  if(anomalies.length===0){emp.hidden=false}else{emp.hidden=true;anomalies.forEach(function(a){
-    var li=document.createElement('li');
-    li.className='analytics-anomaly-item';
-    li.innerHTML='<div class="analytics-anomaly-reason">'+esc(a.reason)+'</div><div class="analytics-anomaly-sid">'+esc(a.session_id.slice(0,12))+' · '+fc(a.cost_usd)+'</div>';
-    ul.appendChild(li);
-  })}
+  if(anomalies.length===0){emp.hidden=false}else{
+    emp.hidden=true;
+    anomalies.forEach(function(a){
+      var li=document.createElement('li');
+      li.className='analytics-anomaly-item';
+      li.style.cursor='pointer';
+      li.title='Click to open session detail';
+      li.innerHTML='<div class="analytics-anomaly-reason">'+esc(a.reason)+'</div><div class="analytics-anomaly-sid">'+esc(a.session_id.slice(0,12))+' · '+fc(a.cost_usd)+'</div>';
+      li.addEventListener('click',function(){
+        if(typeof openSession==='function'){closeAnalyticsView();openSession(a.session_id)}
+        else if(typeof showToast==='function')showToast('Session detail not available','warning');
+      });
+      ul.appendChild(li);
+    });
+  }
 }
 
 window.doExportReport=function(){
