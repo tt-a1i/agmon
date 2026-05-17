@@ -15,7 +15,8 @@ import (
 )
 
 type DB struct {
-	db *sql.DB
+	db                 *sql.DB
+	searchFallbackLike bool
 }
 
 const storageTimeLayout = "2006-01-02T15:04:05.000000000Z"
@@ -203,6 +204,11 @@ func (s *DB) migrate() error {
 				updated_at  TEXT NOT NULL
 			);
 
+		CREATE TABLE IF NOT EXISTS schema_version (
+			key     TEXT PRIMARY KEY,
+			version INTEGER NOT NULL
+		);
+
 		CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id);
 		CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
 		CREATE INDEX IF NOT EXISTS idx_tool_calls_agent ON tool_calls(agent_id);
@@ -216,6 +222,10 @@ func (s *DB) migrate() error {
 	`)
 	if err != nil {
 		return err
+	}
+	if err := s.createSearchIndex(); err != nil {
+		log.Printf("fts5 search index unavailable, falling back to LIKE search: %v", err)
+		s.searchFallbackLike = true
 	}
 	// Schema migrations for new columns (idempotent).
 	s.addColumnIfMissing("sessions", "last_event_time", "TEXT NOT NULL DEFAULT ''")
@@ -274,7 +284,14 @@ func (s *DB) migrate() error {
 	if err != nil {
 		return err
 	}
-	return s.backfillDailyCostCacheIfEmpty()
+	if err := s.backfillDailyCostCacheIfEmpty(); err != nil {
+		return err
+	}
+	if err := s.backfillSearchIndexIfNeeded(); err != nil {
+		log.Printf("backfill search index failed, falling back to LIKE search: %v", err)
+		s.searchFallbackLike = true
+	}
+	return nil
 }
 
 type dailyCostCacheExecer interface {
@@ -531,12 +548,17 @@ func (s *DB) InsertToolCallStart(callID, agentID, sessionID, toolName, params st
 		return false, err
 	}
 	n, _ := res.RowsAffected()
+	if n > 0 && params != "" {
+		if err := s.IndexToolCallContent(sessionID, callID, params, "", startTime); err != nil {
+			return false, err
+		}
+	}
 	return n > 0, nil
 }
 
 func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatus, durationMs int64, endTime time.Time) error {
 	endStr := formatStorageTime(endTime)
-	_, err := s.db.Exec(`
+	res, err := s.db.Exec(`
 		UPDATE tool_calls SET result_summary = ?, status = ?,
 			duration_ms = CASE WHEN ? > 0 THEN ?
 				ELSE MAX(0, CAST(ROUND((julianday(?) - julianday(start_time)) * 86400000) AS INTEGER))
@@ -544,7 +566,18 @@ func (s *DB) UpdateToolCallEnd(callID, result string, status event.ToolCallStatu
 			end_time = ?
 		WHERE call_id = ?
 	`, result, string(status), durationMs, durationMs, endStr, endStr, callID)
-	return err
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 || result == "" {
+		return nil
+	}
+	var sessionID string
+	if err := s.db.QueryRow(`SELECT session_id FROM tool_calls WHERE call_id = ?`, callID).Scan(&sessionID); err != nil {
+		return err
+	}
+	return s.IndexToolCallContent(sessionID, callID, "", result, endTime)
 }
 
 // InsertTokenUsage inserts a token usage record.
@@ -623,11 +656,15 @@ func (s *DB) CleanOldSessions(olderThanDays int) (int, error) {
 
 	// Delete related records first (SQLite FK not enforced by default).
 	for _, q := range []string{
+		`DELETE FROM search_index WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
 		`DELETE FROM file_changes WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
 		`DELETE FROM token_usage  WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
 		`DELETE FROM tool_calls   WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
 		`DELETE FROM agents       WHERE session_id IN (SELECT session_id FROM sessions WHERE ` + whereClause + `)`,
 	} {
+		if s.searchFallbackLike && strings.Contains(q, "search_index") {
+			continue
+		}
 		if _, err := tx.Exec(q, cutoff); err != nil {
 			return 0, err
 		}
@@ -819,9 +856,20 @@ func (s *DB) InsertFileChange(sessionID, filePath string, changeType event.FileC
 }
 
 func (s *DB) InsertFileChangeWithSource(sessionID, filePath string, changeType event.FileChangeType, ts time.Time, sourceID string) error {
-	_, err := s.db.Exec(`
+	res, err := s.db.Exec(`
 		INSERT OR IGNORE INTO file_changes (session_id, file_path, change_type, timestamp, source_id)
 		VALUES (?, ?, ?, ?, ?)
 	`, sessionID, filePath, string(changeType), formatStorageTime(ts), sourceID)
-	return err
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return nil
+	}
+	indexID := sourceID
+	if indexID == "" {
+		indexID = sessionID + ":" + filePath + ":" + formatStorageTime(ts)
+	}
+	return s.IndexFileChange(sessionID, indexID, filePath, ts)
 }

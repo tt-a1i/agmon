@@ -294,7 +294,17 @@ func (s *DB) SearchHits(query string, limit int) ([]SearchHit, error) {
 	if limit > 200 {
 		limit = 200
 	}
+	if s.searchFallbackLike || searchRequiresLikeFallback(query) {
+		return s.searchHitsLike(query, limit)
+	}
+	hits, err := s.searchHitsFTS(query, limit)
+	if err != nil {
+		return s.searchHitsLike(query, limit)
+	}
+	return hits, nil
+}
 
+func (s *DB) searchHitsLike(query string, limit int) ([]SearchHit, error) {
 	likePattern := "%" + escapeLikePattern(query) + "%"
 	rows, err := s.db.Query(`
 		SELECT session_id, git_branch, cwd, platform, kind, body, timestamp
@@ -353,6 +363,70 @@ func (s *DB) SearchHits(query string, limit int) ([]SearchHit, error) {
 		hits = append(hits, hit)
 	}
 	return hits, rows.Err()
+}
+
+func (s *DB) searchHitsFTS(query string, limit int) ([]SearchHit, error) {
+	matchQuery := sanitizeFTSQuery(query)
+	if matchQuery == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT search_index.session_id,
+		       COALESCE(s.git_branch, '') AS git_branch,
+		       COALESCE(s.cwd, '') AS cwd,
+		       s.platform,
+		       search_index.kind,
+		       snippet(search_index, 2, '<mark>', '</mark>', '…', 30) AS excerpt,
+		       search_index.ts
+		FROM search_index
+		JOIN sessions s ON search_index.session_id = s.session_id
+		WHERE search_index MATCH ?
+		ORDER BY search_index.ts DESC
+		LIMIT ?
+	`, matchQuery, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hits := make([]SearchHit, 0)
+	for rows.Next() {
+		var hit SearchHit
+		var gitBranch, cwd, excerpt, ts string
+		if err := rows.Scan(&hit.SessionID, &gitBranch, &cwd, &hit.Platform, &hit.Kind, &excerpt, &ts); err != nil {
+			return nil, err
+		}
+		hit.SessionName = searchSessionName(hit.SessionID, gitBranch, cwd)
+		hit.Excerpt = trimHighlightedExcerpt(excerpt)
+		hit.Timestamp = parseTime(ts)
+		hits = append(hits, hit)
+	}
+	return hits, rows.Err()
+}
+
+func searchRequiresLikeFallback(query string) bool {
+	return strings.ContainsAny(query, "%_")
+}
+
+func trimHighlightedExcerpt(excerpt string) string {
+	excerpt = strings.ReplaceAll(excerpt, "\r", " ")
+	excerpt = strings.ReplaceAll(excerpt, "\n", " ")
+	if len(excerpt) <= 80 {
+		return excerpt
+	}
+	idx := strings.Index(strings.ToLower(excerpt), "<mark>")
+	if idx < 0 {
+		return excerpt[:80]
+	}
+	start := idx - 30
+	if start < 0 {
+		start = 0
+	}
+	end := start + 80
+	if end > len(excerpt) {
+		end = len(excerpt)
+	}
+	return excerpt[start:end]
 }
 
 func searchExcerpt(text, query string) string {
