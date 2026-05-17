@@ -997,11 +997,22 @@ func runWeb() error {
 	if maybePrintCmdHelp("web", os.Args[2:]) {
 		return nil
 	}
-	port := "8370"
-	for i, arg := range os.Args {
-		if arg == "--port" && i+1 < len(os.Args) {
-			port = os.Args[i+1]
+	webOpts, err := parseWebOptions(os.Args[2:])
+	if err != nil {
+		return err
+	}
+	if webOpts.generateToken {
+		token, path, err := writeGeneratedWebToken()
+		if err != nil {
+			return fmt.Errorf("generate web token: %w", err)
 		}
+		fmt.Printf("Token written to %s\n", path)
+		fmt.Printf("Set request header: Authorization: Bearer %s\n", token)
+		return nil
+	}
+	authToken, err := resolveWebAuthToken(webOpts)
+	if err != nil {
+		return err
 	}
 
 	db := mustOpenDB()
@@ -1044,12 +1055,13 @@ func runWeb() error {
 	opts := []web.ServerOption{
 		web.WithEventSocketPath(sockPath),
 		web.WithBuildVersion(version),
+		web.WithAuthToken(authToken),
 	}
 	if d != nil {
 		opts = append(opts, web.WithMetricsProvider(daemonMetricsProvider{daemon: d, db: db}))
 	}
-	srv := web.NewServer(db, port, opts...)
-	fmt.Printf("TokenMeter web dashboard: http://localhost:%s\n", port)
+	srv := web.NewServer(db, webOpts.port, opts...)
+	fmt.Printf("TokenMeter web dashboard: http://localhost:%s\n", webOpts.port)
 
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)

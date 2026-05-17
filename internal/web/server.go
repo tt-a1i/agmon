@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,7 @@ type Server struct {
 	buildVersion    string
 	eventSockPath   string
 	eventHeartbeat  time.Duration
+	authToken       string
 	metricsProvider MetricsProvider
 	subscribeRemote func(string) (<-chan event.Event, func(), error)
 	startedAt       time.Time
@@ -70,6 +72,12 @@ func WithBuildVersion(version string) ServerOption {
 	}
 }
 
+func WithAuthToken(token string) ServerOption {
+	return func(s *Server) {
+		s.authToken = token
+	}
+}
+
 func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	s := &Server{
 		db:              db,
@@ -86,19 +94,19 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux := http.NewServeMux()
 	staticFS, _ := fs.Sub(staticFiles, "static")
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
-	mux.HandleFunc("/api/sessions", s.handleSessions)
-	mux.HandleFunc("/api/costs", s.handleCosts)
-	mux.HandleFunc("/api/stats", s.handleStats)
-	mux.HandleFunc("/api/projection", s.handleProjection)
-	mux.HandleFunc("/api/events", s.handleEvents)
-	mux.HandleFunc("/api/export", s.handleExport)
-	mux.HandleFunc("/api/compare", s.handleCompare)
-	mux.HandleFunc("/api/search", s.handleSearch)
-	mux.HandleFunc("/api/budgets", s.handleBudgets)
-	mux.HandleFunc("/api/budgets/", s.handleBudgetByID)
-	mux.HandleFunc("/api/session/", s.handleSessionDetail)
-	mux.HandleFunc("/api/health", s.handleHealth)
-	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/sessions", s.authMiddleware(s.handleSessions))
+	mux.HandleFunc("/api/costs", s.authMiddleware(s.handleCosts))
+	mux.HandleFunc("/api/stats", s.authMiddleware(s.handleStats))
+	mux.HandleFunc("/api/projection", s.authMiddleware(s.handleProjection))
+	mux.HandleFunc("/api/events", s.authMiddleware(s.handleEvents))
+	mux.HandleFunc("/api/export", s.authMiddleware(s.handleExport))
+	mux.HandleFunc("/api/compare", s.authMiddleware(s.handleCompare))
+	mux.HandleFunc("/api/search", s.authMiddleware(s.handleSearch))
+	mux.HandleFunc("/api/budgets", s.authMiddleware(s.handleBudgets))
+	mux.HandleFunc("/api/budgets/", s.authMiddleware(s.handleBudgetByID))
+	mux.HandleFunc("/api/session/", s.authMiddleware(s.handleSessionDetail))
+	mux.HandleFunc("/api/health", s.authMiddleware(s.handleHealth))
+	mux.HandleFunc("/metrics", s.authMiddleware(s.handleMetrics))
 
 	s.srv = &http.Server{
 		Addr:              s.addr,
@@ -143,6 +151,38 @@ func writeAPIError(w http.ResponseWriter, status int, publicMessage string) {
 func writeInternalError(w http.ResponseWriter, err error) {
 	log.Printf("web api error: %v", err)
 	writeAPIError(w, http.StatusInternalServerError, "internal server error")
+}
+
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.authToken == "" || !s.authProtectedPath(r.URL.Path) {
+			next(w, r)
+			return
+		}
+		if s.validBearer(r) {
+			next(w, r)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="tokenmeter"`)
+		writeAPIError(w, http.StatusUnauthorized, "missing or invalid bearer token")
+	}
+}
+
+func (s *Server) authProtectedPath(path string) bool {
+	return strings.HasPrefix(path, "/api/") || path == "/metrics"
+}
+
+func (s *Server) validBearer(r *http.Request) bool {
+	if token := r.URL.Query().Get("token"); token != "" {
+		return subtle.ConstantTimeCompare([]byte(token), []byte(s.authToken)) == 1
+	}
+	const prefix = "Bearer "
+	header := r.Header.Get("Authorization")
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	token := strings.TrimPrefix(header, prefix)
+	return subtle.ConstantTimeCompare([]byte(token), []byte(s.authToken)) == 1
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {

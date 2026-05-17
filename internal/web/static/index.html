@@ -1005,6 +1005,17 @@ function sessionsPath(workspace){
 }
 function renderMd(s){let h=escHtml(s);h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');h=h.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');return h}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
+function webAuthToken(){try{return localStorage.getItem('tokenmeter-web-token')||''}catch(e){return ''}}
+function authRequired(r){if(r.status!==401)return false;try{alert('Token required. Set token in localStorage: tokenmeter-web-token')}catch(e){}return true}
+function withAuthUrl(u){const token=webAuthToken();if(!token)return u;const url=new URL(u,location.href);url.searchParams.set('token',token);return url.pathname+url.search+url.hash}
+async function apiFetch(u,opts={}){
+  const token=webAuthToken(),next={...opts},headers=new Headers(opts.headers||{});
+  if(token)headers.set('Authorization','Bearer '+token);
+  next.headers=headers;
+  const r=await fetch(u,next);
+  authRequired(r);
+  return r;
+}
 const OFFLINE_API_CACHE='tokenmeter-api-v1';
 function showOfflineBadge(){
   const b=$('offlineBadge');if(!b)return;
@@ -1058,7 +1069,7 @@ function drawSparkline(canvasId,values,color){
 }
 async function api(u){
   try{
-    const r=await fetch(u);
+    const r=await apiFetch(u);
     if(r.headers&&r.headers.get('X-TokenMeter-Cache')==='hit'&&navigator.onLine===false)showOfflineBadge();
     if(!r.ok){
       if(r.status===503)showOfflineBadge();
@@ -1471,7 +1482,7 @@ async function saveTag(){
   const sid=lastDetail.session.session_id;
   const tag=input.value.trim();
   try{
-    const r=await fetch('/api/session/'+encodeURIComponent(sid)+'/tag',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tag})});
+    const r=await apiFetch('/api/session/'+encodeURIComponent(sid)+'/tag',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tag})});
     if(!r.ok){const text=await r.text();toast('Tag save failed: '+text.slice(0,80));return}
     const resp=await r.json();
     lastDetail.session.tag=resp.tag||'';
@@ -1764,7 +1775,7 @@ function handleRealtimeEvent(ev){
 }
 function connectEvents(){
   if(!window.EventSource){startFallbackPolling();startSlowPolling();return}
-  eventSource=new EventSource('/api/events');
+  eventSource=new EventSource(withAuthUrl('/api/events'));
   eventSource.onopen=()=>stopFallbackPolling();
   eventSource.onmessage=e=>{try{handleRealtimeEvent(JSON.parse(e.data))}catch(err){console.warn('bad realtime event:',err)}};
   eventSource.onerror=()=>startFallbackPolling();
@@ -1854,7 +1865,7 @@ try{budgetStatusCache=JSON.parse(localStorage.getItem('tokenmeter-budget-status'
 
 async function fetchBudgets(){
   try{
-    const r=await fetch('/api/budgets');if(!r.ok)return;
+    const r=await apiFetch('/api/budgets');if(!r.ok)return;
     const list=await r.json();budgets=Array.isArray(list)?list:[];
     // Detect status crossover (anything → over) to surface a one-shot
     // toast. We only fire when prior status was NOT 'over' so a
@@ -1934,7 +1945,7 @@ async function submitBudgetForm(){
   const url=budgetEditId?`/api/budgets/${budgetEditId}`:'/api/budgets';
   const method=budgetEditId?'PUT':'POST';
   try{
-    const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body});
+    const r=await apiFetch(url,{method,headers:{'Content-Type':'application/json'},body});
     if(!r.ok){const t=await r.text();toast('Save failed: '+t.slice(0,80));return}
     closeBudgetForm();fetchBudgets();
     toast(budgetEditId?'Budget updated':'Budget created');
@@ -1945,7 +1956,7 @@ async function deleteBudget(id){
   const b=budgets.find(x=>x.id===id);
   if(!confirm(`Delete budget "${b?b.name:id}"?`))return;
   try{
-    const r=await fetch(`/api/budgets/${id}`,{method:'DELETE'});
+    const r=await apiFetch(`/api/budgets/${id}`,{method:'DELETE'});
     if(!r.ok&&r.status!==204){const t=await r.text();toast('Delete failed: '+t.slice(0,80));return}
     // Drop from local status cache so a re-created budget starts fresh.
     delete budgetStatusCache[id];try{localStorage.setItem('tokenmeter-budget-status',JSON.stringify(budgetStatusCache))}catch(e){}
