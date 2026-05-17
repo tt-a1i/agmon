@@ -205,10 +205,40 @@ func (d *Daemon) Start() error {
 		defer d.bgWG.Done()
 		d.autoBackupLoop()
 	}()
+	d.bgWG.Add(1)
+	go func() {
+		defer d.bgWG.Done()
+		d.walCheckpointLoop()
+	}()
 	d.dispatchWebhookEvent(context.Background(), webhookEventDaemonStarted, WebhookPayload{
 		Daemon: &DaemonWebhookPayload{Status: "started"},
 	})
 	return nil
+}
+
+func (d *Daemon) walCheckpointLoop() {
+	select {
+	case <-d.done:
+		return
+	case <-time.After(30 * time.Minute):
+	}
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		result, err := d.db.CheckpointTruncate()
+		if err != nil {
+			log.Printf("wal checkpoint: %v", err)
+		} else if result.DBWalBytes > 50*1024*1024 {
+			log.Printf("wal large: %d MB (busy=%d, frames=%d)", result.DBWalBytes/(1024*1024), result.Busy, result.Log)
+		}
+
+		select {
+		case <-d.done:
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // staleSweepLoop periodically re-runs MarkStaleSessionsEnded so a daemon that

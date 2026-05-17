@@ -16,6 +16,7 @@ import (
 
 type DB struct {
 	db                 *sql.DB
+	path               string
 	searchFallbackLike bool
 }
 
@@ -75,7 +76,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}
 
-	s := &DB{db: db}
+	s := &DB{db: db, path: path}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
