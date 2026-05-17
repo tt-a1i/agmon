@@ -33,6 +33,44 @@ var tokenmeterHookNames = []string{
 	"SubagentStart", "SubagentStop",
 }
 
+type daemonMetricsProvider struct {
+	daemon *daemon.Daemon
+	db     *storage.DB
+}
+
+func (p daemonMetricsProvider) DaemonStats() (int64, int64, int64) {
+	if p.daemon == nil {
+		return 0, 0, 0
+	}
+	return p.daemon.Stats()
+}
+
+func (p daemonMetricsProvider) BudgetUsageAll() ([]web.BudgetMetric, error) {
+	budgets, err := p.db.ListBudgets()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]web.BudgetMetric, 0, len(budgets))
+	for _, budget := range budgets {
+		used, limit, err := p.db.GetBudgetUsage(budget.ID)
+		if err != nil {
+			return nil, err
+		}
+		percent := 0.0
+		if limit > 0 {
+			percent = used / limit * 100
+		}
+		result = append(result, web.BudgetMetric{
+			Name:     budget.Name,
+			Platform: budget.Platform,
+			UsedUSD:  used,
+			LimitUSD: limit,
+			Percent:  percent,
+		})
+	}
+	return result, nil
+}
+
 func defaultLogPath() string {
 	return appdir.PathFor("tokenmeter.log", "agmon.log")
 }
@@ -778,7 +816,14 @@ func runWeb() error {
 		fmt.Println("daemon already running (connecting to existing)")
 	}
 
-	srv := web.NewServer(db, port, web.WithEventSocketPath(sockPath))
+	opts := []web.ServerOption{
+		web.WithEventSocketPath(sockPath),
+		web.WithBuildVersion(version),
+	}
+	if d != nil {
+		opts = append(opts, web.WithMetricsProvider(daemonMetricsProvider{daemon: d, db: db}))
+	}
+	srv := web.NewServer(db, port, opts...)
 	fmt.Printf("TokenMeter web dashboard: http://localhost:%s\n", port)
 
 	sigCh := make(chan os.Signal, 2)

@@ -788,3 +788,121 @@ func TestStaticFileServing(t *testing.T) {
 		t.Error("expected 'TokenMeter' in HTML")
 	}
 }
+
+type mockMetricsProvider struct {
+	droppedBcast int64
+	droppedShut  int64
+	dupTool      int64
+	budgets      []BudgetMetric
+}
+
+func (m mockMetricsProvider) DaemonStats() (int64, int64, int64) {
+	return m.droppedBcast, m.droppedShut, m.dupTool
+}
+
+func (m mockMetricsProvider) BudgetUsageAll() ([]BudgetMetric, error) {
+	return m.budgets, nil
+}
+
+func TestHandleMetricsReturnsPrometheusFormat(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0", WithBuildVersion("test-version"))
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "text/plain") || !strings.Contains(ct, "version=0.0.4") {
+		t.Fatalf("content-type: got %q", ct)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		"# HELP tokenmeter_build_info Build version",
+		"# TYPE tokenmeter_build_info gauge",
+		`tokenmeter_build_info{version="test-version"} 1`,
+		"# HELP tokenmeter_today_cost_usd Total cost today (local TZ bucket)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestHandleMetricsIncludesDaemonStats(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0", WithMetricsProvider(mockMetricsProvider{
+		droppedBcast: 7,
+		droppedShut:  3,
+		dupTool:      2,
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	srv.handleMetrics(w, req)
+
+	body := w.Body.String()
+	for _, want := range []string{
+		"tokenmeter_daemon_dropped_broadcasts_total 7",
+		"tokenmeter_daemon_dropped_shutdown_total 3",
+		"tokenmeter_daemon_duplicate_tool_starts_total 2",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestHandleMetricsIncludesBudgets(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().Add(-time.Minute)
+	if err := db.UpsertSession("budget-metrics", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "budget-metrics", 1, 1, 0, 0, "sonnet", 4.20, now, "budget-metrics"); err != nil {
+		t.Fatalf("insert usage: %v", err)
+	}
+	if _, err := db.InsertBudget("Claude monthly", 100, string(event.PlatformClaude)); err != nil {
+		t.Fatalf("insert budget: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	srv.handleMetrics(w, req)
+
+	body := w.Body.String()
+	for _, want := range []string{
+		`tokenmeter_budget_used_usd{name="Claude monthly",platform="claude"} 4.2`,
+		`tokenmeter_budget_limit_usd{name="Claude monthly",platform="claude"} 100`,
+		`tokenmeter_budget_percent{name="Claude monthly",platform="claude"} 4.2`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics missing %q\n%s", want, body)
+		}
+	}
+}
+
+func TestHandleMetricsEscapesLabels(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0", WithMetricsProvider(mockMetricsProvider{
+		budgets: []BudgetMetric{{
+			Name:     "bad\"name\\line\nnext",
+			Platform: "claude",
+			UsedUSD:  1,
+			LimitUSD: 2,
+			Percent:  50,
+		}},
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	srv.handleMetrics(w, req)
+
+	want := `name="bad\"name\\line\nnext"`
+	if body := w.Body.String(); !strings.Contains(body, want) {
+		t.Fatalf("escaped label %q not found\n%s", want, body)
+	}
+}

@@ -28,13 +28,28 @@ var staticFiles embed.FS
 type Server struct {
 	db              *storage.DB
 	addr            string
+	buildVersion    string
 	eventSockPath   string
 	eventHeartbeat  time.Duration
+	metricsProvider MetricsProvider
 	subscribeRemote func(string) (<-chan event.Event, func(), error)
 	srv             *http.Server // built in NewServer so Shutdown is race-free vs Start
 }
 
 type ServerOption func(*Server)
+
+type MetricsProvider interface {
+	DaemonStats() (droppedBroadcasts, droppedShutdownEvts, duplicateToolStarts int64)
+	BudgetUsageAll() ([]BudgetMetric, error)
+}
+
+type BudgetMetric struct {
+	Name     string
+	Platform string
+	UsedUSD  float64
+	LimitUSD float64
+	Percent  float64
+}
 
 func WithEventSocketPath(sockPath string) ServerOption {
 	return func(s *Server) {
@@ -42,10 +57,23 @@ func WithEventSocketPath(sockPath string) ServerOption {
 	}
 }
 
+func WithMetricsProvider(p MetricsProvider) ServerOption {
+	return func(s *Server) {
+		s.metricsProvider = p
+	}
+}
+
+func WithBuildVersion(version string) ServerOption {
+	return func(s *Server) {
+		s.buildVersion = version
+	}
+}
+
 func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	s := &Server{
 		db:              db,
 		addr:            "127.0.0.1:" + port,
+		buildVersion:    "dev",
 		eventHeartbeat:  30 * time.Second,
 		subscribeRemote: daemon.SubscribeRemote,
 	}
@@ -66,6 +94,7 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux.HandleFunc("/api/budgets", s.handleBudgets)
 	mux.HandleFunc("/api/budgets/", s.handleBudgetByID)
 	mux.HandleFunc("/api/session/", s.handleSessionDetail)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 
 	s.srv = &http.Server{
 		Addr:              s.addr,
@@ -528,6 +557,130 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		TopTools:      topTools,
 		TopSessions:   topSessions,
 	})
+}
+
+// handleMetrics emits Prometheus text exposition metrics. Metric names use the
+// tokenmeter_ prefix, counters end in _total, cost values are USD, token values
+// are raw token counts, and budget_percent is a 0-100 percentage.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	totalSessions, err := s.db.GetVisibleSessionCount()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	activeSessions, err := s.db.GetActiveSessionCount()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	todayCost, err := s.db.GetTodayCost()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	todayInput, todayOutput, err := s.db.GetTodayTokens()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	budgets, err := s.metricsBudgets()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	var droppedBroadcasts, droppedShutdown, duplicateToolStarts int64
+	if s.metricsProvider != nil {
+		droppedBroadcasts, droppedShutdown, duplicateToolStarts = s.metricsProvider.DaemonStats()
+	}
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	fmt.Fprintln(w, "# HELP tokenmeter_build_info Build version")
+	fmt.Fprintln(w, "# TYPE tokenmeter_build_info gauge")
+	fmt.Fprintf(w, "tokenmeter_build_info{version=\"%s\"} 1\n\n", prometheusLabelValue(s.buildVersion))
+
+	writePromGauge(w, "tokenmeter_sessions_total", "Total sessions in storage", float64(totalSessions))
+	writePromGauge(w, "tokenmeter_sessions_active", "Active sessions", float64(activeSessions))
+	writePromGauge(w, "tokenmeter_today_cost_usd", "Total cost today (local TZ bucket)", todayCost)
+	writePromCounter(w, "tokenmeter_today_tokens_input", "Total input tokens today", float64(todayInput))
+	writePromCounter(w, "tokenmeter_today_tokens_output", "Total output tokens today", float64(todayOutput))
+	writePromCounter(w, "tokenmeter_daemon_dropped_broadcasts_total", "Slow subscriber drops", float64(droppedBroadcasts))
+	writePromCounter(w, "tokenmeter_daemon_dropped_shutdown_total", "Events dropped during shutdown", float64(droppedShutdown))
+	writePromCounter(w, "tokenmeter_daemon_duplicate_tool_starts_total", "Duplicate Pre-hook emits", float64(duplicateToolStarts))
+
+	fmt.Fprintln(w, "# HELP tokenmeter_budget_used_usd Budget usage")
+	fmt.Fprintln(w, "# TYPE tokenmeter_budget_used_usd gauge")
+	for _, budget := range budgets {
+		fmt.Fprintf(w, "tokenmeter_budget_used_usd{name=\"%s\",platform=\"%s\"} %g\n",
+			prometheusLabelValue(budget.Name), prometheusLabelValue(budget.Platform), budget.UsedUSD)
+	}
+	fmt.Fprintln(w, "# HELP tokenmeter_budget_limit_usd Budget limit")
+	fmt.Fprintln(w, "# TYPE tokenmeter_budget_limit_usd gauge")
+	for _, budget := range budgets {
+		fmt.Fprintf(w, "tokenmeter_budget_limit_usd{name=\"%s\",platform=\"%s\"} %g\n",
+			prometheusLabelValue(budget.Name), prometheusLabelValue(budget.Platform), budget.LimitUSD)
+	}
+	fmt.Fprintln(w, "# HELP tokenmeter_budget_percent Budget usage percent")
+	fmt.Fprintln(w, "# TYPE tokenmeter_budget_percent gauge")
+	for _, budget := range budgets {
+		fmt.Fprintf(w, "tokenmeter_budget_percent{name=\"%s\",platform=\"%s\"} %g\n",
+			prometheusLabelValue(budget.Name), prometheusLabelValue(budget.Platform), budget.Percent)
+	}
+}
+
+func writePromGauge(w http.ResponseWriter, name, help string, value float64) {
+	fmt.Fprintf(w, "# HELP %s %s\n", name, help)
+	fmt.Fprintf(w, "# TYPE %s gauge\n", name)
+	fmt.Fprintf(w, "%s %g\n\n", name, value)
+}
+
+func writePromCounter(w http.ResponseWriter, name, help string, value float64) {
+	fmt.Fprintf(w, "# HELP %s %s\n", name, help)
+	fmt.Fprintf(w, "# TYPE %s counter\n", name)
+	fmt.Fprintf(w, "%s %g\n\n", name, value)
+}
+
+func prometheusLabelValue(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, "\n", `\n`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	return value
+}
+
+func (s *Server) metricsBudgets() ([]BudgetMetric, error) {
+	if s.metricsProvider != nil {
+		return s.metricsProvider.BudgetUsageAll()
+	}
+
+	budgets, err := s.db.ListBudgets()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]BudgetMetric, 0, len(budgets))
+	for _, budget := range budgets {
+		used, limit, err := s.db.GetBudgetUsage(budget.ID)
+		if err != nil {
+			return nil, err
+		}
+		percent := 0.0
+		if limit > 0 {
+			percent = used / limit * 100
+		}
+		result = append(result, BudgetMetric{
+			Name:     budget.Name,
+			Platform: budget.Platform,
+			UsedUSD:  used,
+			LimitUSD: limit,
+			Percent:  percent,
+		})
+	}
+	return result, nil
 }
 
 type budgetRequest struct {
