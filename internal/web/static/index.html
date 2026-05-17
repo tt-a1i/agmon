@@ -731,6 +731,34 @@ body.hide-workspace .workspace-bar{display:none}
 .analytics-anomaly-item{padding:8px;border-left:3px solid #f59e0b;background:rgba(245,158,11,.08);border-radius:0 4px 4px 0;margin-bottom:6px;font-size:12px}
 .analytics-anomaly-reason{color:#f59e0b;font-weight:600}
 .analytics-anomaly-sid{color:var(--text-muted);font-size:11px;margin-top:2px}
+/* Session Drill-Down View */
+#session-detail-view{padding:20px 24px;max-width:1100px;margin:0 auto}
+.sdv-header-top{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+#sdv-back{background:0;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer;transition:all .1s;flex-shrink:0}
+#sdv-back:hover{background:var(--bg2);color:var(--text)}
+.sdv-title{font-size:16px;font-weight:700;color:var(--text-strong);margin:0}
+.sdv-meta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11px;color:var(--text-muted);margin-bottom:14px}
+.sdv-meta code{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:10px;color:var(--text);font-family:'SF Mono',monospace;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle}
+.sdv-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px}
+.sdv-tabs button{background:0;border:0;color:var(--text-muted);font:inherit;font-size:12px;font-weight:500;padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;transition:all .1s;margin-bottom:-1px}
+.sdv-tabs button:hover{color:var(--text)}
+.sdv-tabs button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+#sdv-content{min-height:180px}
+.sdv-timeline{display:flex;flex-direction:column}
+.sdv-tl-item{display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-bottom:1px solid var(--border-light);font-size:12px}
+.sdv-tl-time{width:72px;flex-shrink:0;color:var(--text-muted);font-size:10px;padding-top:2px}
+.sdv-tl-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.sdv-tl-body{flex:1}
+.sdv-tl-name{font-weight:600;color:var(--text-strong)}
+.sdv-tl-sub{font-size:10px;color:var(--text-muted);margin-top:2px}
+.sdv-tokens-chart-wrap{height:110px;border-radius:6px;overflow:hidden;margin-bottom:10px;background:var(--bg3);position:relative}
+.sdv-tokens-chart-wrap canvas{display:block;width:100%;height:100%}
+/* Custom date range picker */
+#range-custom{display:none;align-items:center;gap:5px;padding:3px 6px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;margin-left:6px;flex-shrink:0}
+#range-custom.show{display:flex}
+#range-custom input[type=date]{background:var(--bg);border:1px solid var(--border);color:var(--text-strong);border-radius:4px;padding:2px 5px;font:inherit;font-size:11px;color-scheme:light dark;cursor:pointer;max-width:130px}
+#range-custom label{font-size:10px;color:var(--text-muted)}
+#range-apply{background:var(--accent);border:0;color:#fff;border-radius:4px;padding:3px 9px;font:inherit;font-size:11px;font-weight:600;cursor:pointer}
 </style>
 </head>
 <body>
@@ -749,6 +777,14 @@ body.hide-workspace .workspace-bar{display:none}
       <button class="rb" data-r="today">Today</button>
       <button class="rb" data-r="month">Month</button>
       <button class="rb" data-r="all">All</button>
+      <button class="rb" data-r="custom">Custom</button>
+    </div>
+    <div id="range-custom" role="group" aria-label="Custom date range">
+      <label for="range-from">From</label>
+      <input type="date" id="range-from" aria-label="From date">
+      <label for="range-to">To</label>
+      <input type="date" id="range-to" aria-label="To date">
+      <button id="range-apply">Apply</button>
     </div>
     <span class="updated" id="updated"></span>
     <button class="export-btn" id="exportBtn" onclick="toggleExportPop()" title="Export data" aria-label="Export">📥</button>
@@ -953,6 +989,29 @@ body.hide-workspace .workspace-bar{display:none}
       <p id="ac-anomalies-empty" style="color:var(--text-muted);font-size:12px" hidden>No anomalies detected.</p>
     </div>
   </div>
+</section>
+
+<!-- Session Drill-Down View: full-page detail (append-only, do not reorder) -->
+<section id="session-detail-view" hidden role="region" aria-labelledby="sdv-title">
+  <div class="sdv-header-top">
+    <button id="sdv-back" aria-label="Back to dashboard">← Back</button>
+    <h2 class="sdv-title" id="sdv-title">Session <span id="sdv-id"></span></h2>
+  </div>
+  <div class="sdv-meta">
+    <span>Workspace: <code id="sdv-cwd">—</code></span>
+    <span>Branch: <code id="sdv-branch">—</code></span>
+    <span>Duration: <span id="sdv-duration">—</span></span>
+    <span>Cost: <span id="sdv-cost">—</span></span>
+    <span id="sdv-tag-display"></span>
+  </div>
+  <nav class="sdv-tabs" role="tablist" aria-label="Session detail sections">
+    <button role="tab" data-sdv-tab="timeline" aria-selected="true" tabindex="0">Timeline</button>
+    <button role="tab" data-sdv-tab="tools" aria-selected="false" tabindex="-1">Tool Calls</button>
+    <button role="tab" data-sdv-tab="messages" aria-selected="false" tabindex="-1">Messages</button>
+    <button role="tab" data-sdv-tab="files" aria-selected="false" tabindex="-1">Files</button>
+    <button role="tab" data-sdv-tab="tokens" aria-selected="false" tabindex="-1">Tokens</button>
+  </nav>
+  <div id="sdv-content" role="tabpanel"></div>
 </section>
 </main>
 
@@ -1650,7 +1709,7 @@ $('sessSearch').onblur=()=>{searchBlurTimer=setTimeout(closeSearchDropdown,600)}
 $('searchDropdown').addEventListener('mousedown',e=>{if(e.target.closest('.search-hit'))e.preventDefault()});
 $('searchDropdown').addEventListener('click',e=>{const row=e.target.closest('.search-hit');if(row&&row.dataset.sid){closeSearchDropdown();openSession(row.dataset.sid)}});
 // Delegated clicks
-$('sList').addEventListener('click',e=>{const row=e.target.closest('.sr');if(row&&row.dataset.sid)openSession(row.dataset.sid)});
+$('sList').addEventListener('click',e=>{const row=e.target.closest('.sr');if(row&&row.dataset.sid)openSessionDetailView(row.dataset.sid)});
 document.addEventListener('click',e=>{const btn=e.target.closest('[data-copy]');if(btn){navigator.clipboard.writeText(btn.dataset.copy);toast('Copied!')}});
 
 // Detail
@@ -1969,7 +2028,7 @@ async function fetchSessionsWithWorkspace(){
 
 async function refresh(){try{
   const sessionsReq=fetchSessionsWithWorkspace();
-  const[stats,costs,sessionData,projection]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),sessionsReq,api('/api/projection')]);
+  const[stats,costs,sessionData,projection]=await Promise.all([api('/api/stats'),api('/api/costs?range='+(range==='custom'?'all':range)),sessionsReq,api('/api/projection')]);
   applyDashboardData(stats,costs,sessionData.sessions,projection,sessionData.catalog);
 }catch(e){showRefreshError(e)}}
 
@@ -1979,7 +2038,7 @@ async function refreshSessions(){try{
 }catch(e){showRefreshError(e)}}
 
 async function refreshCosts(){try{
-  const[stats,costs,projection]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),api('/api/projection')]);
+  const[stats,costs,projection]=await Promise.all([api('/api/stats'),api('/api/costs?range='+(range==='custom'?'all':range)),api('/api/projection')]);
   applyDashboardData(stats,costs,allS,projection);
 }catch(e){showRefreshError(e)}}
 
@@ -2059,6 +2118,8 @@ function connectEvents(){
 }
 
 document.querySelectorAll('.rb').forEach(b=>{b.onclick=()=>{document.querySelectorAll('.rb').forEach(x=>x.classList.remove('on'));b.classList.add('on');range=b.dataset.r;localStorage.setItem('tokenmeter-range',range);
+  const rc=$('range-custom');if(rc){if(range==='custom'){rc.classList.add('show');const today=new Date(),f=new Date(today-30*864e5);$('range-from').value=f.toISOString().substring(0,10);$('range-to').value=today.toISOString().substring(0,10)}else{rc.classList.remove('show')}}
+  if(range==='custom')return;
   const c=$('chartCanvas');if(c){c.style.opacity='0';setTimeout(()=>{refresh();setTimeout(()=>{c.style.opacity='1'},50)},150)}else{refresh()}
 }});
 // Sort
@@ -2069,7 +2130,7 @@ document.querySelectorAll('#sessionPlatform button').forEach(b=>{b.onclick=()=>{
 let gPressed=false,gTimer=null;
 document.addEventListener('keydown',e=>{
   const inInput=document.activeElement.matches('input');
-  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if($('exportPop')&&$('exportPop').classList.contains('show')){$('exportPop').classList.remove('show')}else if($('cmpView')&&$('cmpView').classList.contains('show')){closeCompare()}else if(compareSet.size>0){clearCompareSelect()}else if($('navR')&&$('navR').classList.contains('open')){$('navR').classList.remove('open');$('hamburgerBtn').classList.remove('open')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if(tagFilter!==null){tagFilter=null;renderSessions(allS)}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
+  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if($('exportPop')&&$('exportPop').classList.contains('show')){$('exportPop').classList.remove('show')}else if($('cmpView')&&$('cmpView').classList.contains('show')){closeCompare()}else if(compareSet.size>0){clearCompareSelect()}else if($('navR')&&$('navR').classList.contains('open')){$('navR').classList.remove('open');$('hamburgerBtn').classList.remove('open')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if(tagFilter!==null){tagFilter=null;renderSessions(allS)}else if($('session-detail-view')&&!$('session-detail-view').hidden){closeSessionDetailView()}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
   // g-prefix sequence: g d → dashboard / g s → stats / g m → messages.
   // First `g` arms for 1s; second key dispatches and consumes the prefix.
   if(!inInput&&!$('kbdModal').classList.contains('show')){
@@ -2571,6 +2632,185 @@ function toggleHamburger(btn){
   btn.classList.toggle('open',open);
   btn.setAttribute('aria-expanded',open?'true':'false');
 }
+
+// === Session Drill-Down View ===
+var _sdvData=null,_sdvSid=null,_sdvTab='timeline';
+
+function openSessionDetailView(id){
+  _sdvSid=id;_sdvTab='timeline';
+  // Show SDV, hide other views
+  var sdv=$('session-detail-view');if(sdv)sdv.hidden=false;
+  $('overview').classList.add('hide');
+  var det=$('detail');if(det)det.classList.remove('show');
+  var back=$('sdv-back');if(back)setTimeout(function(){back.focus()},50);
+  if(location.hash!=='#sdv/'+encodeURIComponent(id))history.pushState(null,null,'#sdv/'+encodeURIComponent(id));
+  // Loading state
+  var idEl=$('sdv-id');if(idEl)idEl.textContent=id.substring(0,8)+'…';
+  var content=$('sdv-content');if(content)content.innerHTML='<div class="loading-card"><div class="spinner"></div>Loading…</div>';
+  // Reset tab selection
+  document.querySelectorAll('.sdv-tabs button').forEach(function(b){
+    var isSel=b.dataset.sdvTab==='timeline';
+    b.setAttribute('aria-selected',isSel?'true':'false');
+    b.setAttribute('tabindex',isSel?'0':'-1');
+  });
+  // Fetch data (reuse existing API endpoint)
+  api('/api/session/'+encodeURIComponent(id)).then(function(d){
+    if(!d||!d.session){if(content)content.innerHTML='<div class="loading-card">Session not found</div>';return}
+    _sdvData=d;detailSid=id;detailActive=d.session.status==='active';
+    sdvPopulateHeader(d.session);
+    sdvSwitchTab('timeline');
+  }).catch(function(){if(content)content.innerHTML='<div class="loading-card">Failed to load</div>'});
+}
+
+function closeSessionDetailView(){
+  var sdv=$('session-detail-view');if(sdv)sdv.hidden=true;
+  $('overview').classList.remove('hide');
+  _sdvSid=null;_sdvData=null;detailSid=null;detailActive=false;
+  history.pushState(null,null,'#');
+  refresh();
+}
+
+function sdvPopulateHeader(s){
+  var dur=s.end_time?Math.round((new Date(s.end_time)-new Date(s.start_time))/1000):0;
+  var durS=dur>0?(dur>=3600?Math.floor(dur/3600)+'h '+Math.floor(dur%3600/60)+'m':Math.floor(dur/60)+'m '+dur%60+'s'):(s.status==='active'?'running…':'—');
+  var f=function(id,v){var el=$('sdv-'+id);if(el)el.textContent=v||'—'};
+  f('id',s.session_id.substring(0,8));
+  f('cwd',s.cwd);f('branch',s.git_branch);f('duration',durS);f('cost',fc(s.cost_usd));
+  var tagEl=$('sdv-tag-display');if(tagEl)tagEl.textContent=s.tag?'Tag: '+s.tag:'';
+}
+
+function sdvSwitchTab(tab){
+  _sdvTab=tab;
+  document.querySelectorAll('.sdv-tabs button').forEach(function(b){
+    var isSel=b.dataset.sdvTab===tab;
+    b.setAttribute('aria-selected',isSel?'true':'false');
+    b.setAttribute('tabindex',isSel?'0':'-1');
+  });
+  var content=$('sdv-content');if(!content||!_sdvData)return;
+  switch(tab){
+    case 'timeline':content.innerHTML=sdvTimelineHtml(_sdvData);break;
+    case 'tools':content.innerHTML=sdvToolsHtml(_sdvData);break;
+    case 'messages':content.innerHTML=sdvMessagesHtml(_sdvData);break;
+    case 'files':content.innerHTML=sdvFilesHtml(_sdvData);break;
+    case 'tokens':sdvRenderTokens(_sdvData,content);break;
+    default:content.innerHTML='';
+  }
+}
+
+function sdvTimelineHtml(d){
+  var items=[];
+  (d.tools||[]).forEach(function(t){
+    items.push({time:t.created_at||t.start_time,name:t.tool_name,sub:t.status||'',color:'#4f46e5',icon:'🔧'});
+  });
+  (d.files||[]).forEach(function(f){
+    var ico=f.change_type==='create'?'➕':f.change_type==='delete'?'🗑':'✏️';
+    items.push({time:f.created_at,name:f.file_path,sub:f.change_type||'modify',color:'#22c55e',icon:ico});
+  });
+  (d.agent_stats||[]).forEach(function(a){
+    items.push({time:d.session.start_time,name:'Agent: '+(a.role||'main'),sub:a.tool_calls+' tools',color:'#06b6d4',icon:'🤖'});
+  });
+  items.sort(function(a,b){return new Date(a.time||0)-new Date(b.time||0)});
+  if(!items.length)return'<div class="empty-state"><div class="empty-icon" aria-hidden="true">⏱</div><h3>No timeline events</h3><p>No tool calls or file changes recorded yet.</p></div>';
+  return'<div class="sdv-timeline">'+items.map(function(it){
+    var t=it.time?new Date(it.time).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';
+    return'<div class="sdv-tl-item"><div class="sdv-tl-time">'+escHtml(t)+'</div><div class="sdv-tl-dot" style="background:'+it.color+'" aria-hidden="true"></div><div class="sdv-tl-body"><div class="sdv-tl-name">'+it.icon+' '+escHtml(it.name||'—')+'</div>'+(it.sub?'<div class="sdv-tl-sub">'+escHtml(it.sub)+'</div>':'')+'</div></div>';
+  }).join('')+'</div>';
+}
+
+function sdvToolsHtml(d){
+  var tools=d.tools||[];
+  if(!tools.length)return'<div class="empty-state"><div class="empty-icon" aria-hidden="true">🔧</div><h3>No tool calls</h3></div>';
+  return'<div>'+tools.map(function(t){
+    return'<div style="padding:8px 0;border-bottom:1px solid var(--border-light);font-size:12px"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span><span style="margin-right:4px">'+toolIcon(t.tool_name)+'</span><strong>'+escHtml(t.tool_name)+'</strong></span><span style="font-size:10px;color:var(--text-muted)">'+(t.duration_ms?t.duration_ms+'ms':'')+'</span></div>'+(t.params_summary?'<div style="font-size:10px;color:var(--text-muted);font-family:monospace;white-space:pre-wrap;max-height:56px;overflow:hidden">'+escHtml(t.params_summary.substring(0,200))+'</div>':'')+'</div>';
+  }).join('')+'</div>';
+}
+
+function sdvMessagesHtml(d){
+  var msgs=d.messages||[];
+  if(!msgs.length)return'<div class="empty-state"><div class="empty-icon" aria-hidden="true">💬</div><h3>No messages</h3></div>';
+  return'<div>'+msgs.slice(0,100).map(function(m){
+    var cls=m.role==='user'?'var(--accent-bg)':'transparent';
+    var txt=m.content?m.content.substring(0,300):'';
+    return'<div style="padding:8px 10px;border-bottom:1px solid var(--border-light);background:'+cls+'"><div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:3px">'+escHtml(m.role||'')+'</div><div style="font-size:12px;color:var(--text);white-space:pre-wrap;word-break:break-word">'+escHtml(txt)+(m.content&&m.content.length>300?'<span style="color:var(--text-muted)"> …</span>':'')+'</div></div>';
+  }).join('')+'</div>';
+}
+
+function sdvFilesHtml(d){
+  var files=d.files||[];
+  if(!files.length)return'<div class="empty-state"><div class="empty-icon" aria-hidden="true">📁</div><h3>No file changes</h3></div>';
+  var groups={create:[],modify:[],delete:[]};
+  files.forEach(function(f){var t=f.change_type;groups[t&&groups[t]?t:'modify'].push(f)});
+  var html='<div>';
+  [['create','➕ Created','#22c55e'],['modify','✏️ Modified','#4f46e5'],['delete','🗑 Deleted','#ef4444']].forEach(function(g){
+    var list=groups[g[0]];if(!list.length)return;
+    html+='<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:'+g[2]+';margin-bottom:6px">'+g[1]+' ('+list.length+')</div>';
+    html+=list.map(function(f){return'<div style="font-size:11px;font-family:monospace;color:var(--text);padding:2px 0">'+escHtml(f.file_path)+'</div>'}).join('');
+    html+='</div>';
+  });
+  return html+'</div>';
+}
+
+function sdvRenderTokens(d,content){
+  var s=d.session,models=d.models||[];
+  var totalTok=(s.input_tokens||0)+(s.output_tokens||0);
+  var html='<div><div class="sdv-tokens-chart-wrap"><canvas id="sdv-tok-canvas" role="img" aria-label="Token breakdown by model"></canvas></div>';
+  html+='<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">'+ft(totalTok)+' total tokens · '+fc(s.cost_usd)+'</div>';
+  if(models.length){
+    html+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="font-size:10px;color:var(--text-muted);text-align:left"><th style="padding:4px 8px">Model</th><th style="padding:4px 8px;text-align:right">Input</th><th style="padding:4px 8px;text-align:right">Output</th><th style="padding:4px 8px;text-align:right">Cost</th></tr></thead><tbody>';
+    html+=models.map(function(m){
+      return'<tr style="border-top:1px solid var(--border-light)"><td style="padding:6px 8px;font-family:monospace;font-size:11px">'+escHtml(m.model||m.Model||'unknown')+'</td><td style="padding:6px 8px;text-align:right;color:var(--text-muted)">'+ft(m.input_tokens||m.InputTokens||0)+'</td><td style="padding:6px 8px;text-align:right;color:var(--text-muted)">'+ft(m.output_tokens||m.OutputTokens||0)+'</td><td style="padding:6px 8px;text-align:right;font-weight:600">'+fc(m.cost_usd||m.CostUSD||0)+'</td></tr>';
+    }).join('');
+    html+='</tbody></table>';
+  }else{html+='<div style="font-size:12px;color:var(--text-muted)">'+ft(totalTok)+' tokens · '+fc(s.cost_usd)+'</div>'}
+  html+='</div>';
+  content.innerHTML=html;
+  // Mini bar chart (reuse icSetupCanvas from charts section)
+  (window.requestIdleCallback||setTimeout)(function(){
+    var canvas=$('sdv-tok-canvas'),wrap=canvas?canvas.parentElement:null;
+    if(!canvas||!wrap||!models.length||typeof icSetupCanvas!=='function')return;
+    var _r=icSetupCanvas(canvas,wrap),ctx=_r.ctx,W=_r.W,H=_r.H;
+    var CI='#4f46e5',CO='#06b6d4',tc=typeof icCssVar==='function'?icCssVar('--text-muted'):'#9ca3af';
+    var rows=models.slice(0,6),ROW_H=Math.min(22,Math.floor((H-8)/Math.max(rows.length,1)));
+    var LW=110,BW=W-LW-8;
+    var mxT=rows.reduce(function(m,r){return Math.max(m,(r.input_tokens||r.InputTokens||0)+(r.output_tokens||r.OutputTokens||0))},1);
+    ctx.clearRect(0,0,W,H);ctx.font='10px system-ui,sans-serif';
+    rows.forEach(function(m,i){
+      var y=4+i*ROW_H,inT=m.input_tokens||m.InputTokens||0,outT=m.output_tokens||m.OutputTokens||0;
+      var iW=Math.max((inT/mxT)*BW,0),oW=Math.max((outT/mxT)*BW,0);
+      ctx.fillStyle=tc;ctx.textAlign='left';
+      ctx.fillText((m.model||m.Model||'unknown').replace(/^claude-/,'').substring(0,15),0,y+ROW_H*0.75);
+      if(iW>0){ctx.fillStyle=CI;ctx.fillRect(LW,y+2,iW,ROW_H-5)}
+      if(oW>0){ctx.fillStyle=CO;ctx.fillRect(LW+iW,y+2,oW,ROW_H-5)}
+    });
+  },{timeout:200});
+}
+
+// Wire SDV tab clicks
+(function(){
+  document.querySelectorAll('.sdv-tabs button').forEach(function(b){
+    b.addEventListener('click',function(){sdvSwitchTab(b.dataset.sdvTab)});
+  });
+  var back=$('sdv-back');if(back)back.addEventListener('click',closeSessionDetailView);
+})();
+
+// === Custom Date Range Picker ===
+var _customRangeFrom='',_customRangeTo='';
+(function(){
+  var applyBtn=$('range-apply');
+  if(!applyBtn)return;
+  applyBtn.addEventListener('click',function(){
+    var from=$('range-from').value,to=$('range-to').value;
+    if(!from||!to){showToast('Select both from and to dates','warning');return}
+    _customRangeFrom=from;_customRangeTo=to;
+    try{localStorage.setItem('tokenmeter-range-from',from);localStorage.setItem('tokenmeter-range-to',to)}catch(e){}
+    refresh();
+  });
+  // Restore saved custom range
+  var savedFrom=localStorage.getItem('tokenmeter-range-from'),savedTo=localStorage.getItem('tokenmeter-range-to');
+  if(savedFrom&&$('range-from'))$('range-from').value=savedFrom;
+  if(savedTo&&$('range-to'))$('range-to').value=savedTo;
+  if(savedFrom&&savedTo){_customRangeFrom=savedFrom;_customRangeTo=savedTo}
+})();
 
 // === Interactive Charts (vanilla Canvas, no external libs) ===
 var _icCostPts=null,_icDonutSegs=null;

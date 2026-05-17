@@ -1437,6 +1437,83 @@ func TestStaticIndexHasChartReducedMotion(t *testing.T) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+func TestStaticIndexHasSessionDetailView(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="session-detail-view"`) {
+		t.Error("index.html missing id=\"session-detail-view\"")
+	}
+	if !strings.Contains(body, "openSessionDetailView") {
+		t.Error("index.html missing openSessionDetailView function")
+	}
+	if !strings.Contains(body, "closeSessionDetailView") {
+		t.Error("index.html missing closeSessionDetailView function")
+	}
+}
+
+func TestStaticIndexHasSDVTabs(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `role="tablist"`) {
+		t.Error("index.html missing role=\"tablist\" on SDV nav")
+	}
+	if !strings.Contains(body, `aria-label="Session detail sections"`) {
+		t.Error("index.html missing aria-label for session detail tablist")
+	}
+	for _, tab := range []string{"timeline", "tools", "messages", "files", "tokens"} {
+		if !strings.Contains(body, `data-sdv-tab="`+tab+`"`) {
+			t.Errorf("index.html missing SDV tab %q", tab)
+		}
+	}
+}
+
+func TestStaticIndexHasSDVBackButton(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="sdv-back"`) {
+		t.Error("index.html missing id=\"sdv-back\"")
+	}
+	if !strings.Contains(body, `aria-label="Back to dashboard"`) {
+		t.Error("index.html missing aria-label on SDV back button")
+	}
+}
+
+func TestStaticIndexHasCustomRangePicker(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="range-custom"`) {
+		t.Error("index.html missing id=\"range-custom\"")
+	}
+	if !strings.Contains(body, `id="range-from"`) {
+		t.Error("index.html missing id=\"range-from\"")
+	}
+	if !strings.Contains(body, `id="range-to"`) {
+		t.Error("index.html missing id=\"range-to\"")
+	}
+}
+
+func TestStaticIndexHasRangeApply(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="range-apply"`) {
+		t.Error("index.html missing id=\"range-apply\"")
+	}
+	// Apply button must be wired — look for click handler or range apply reference
+	if !strings.Contains(body, "range-apply") {
+		t.Error("index.html range-apply button not referenced in JS")
+	}
+}
+
+func TestStaticIndexHasDateInputA11y(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `type="date"`) {
+		t.Error("index.html missing type=\"date\" inputs")
+	}
+	if !strings.Contains(body, `aria-label="From date"`) {
+		t.Error("index.html missing aria-label on from date input")
+	}
+	if !strings.Contains(body, `aria-label="To date"`) {
+		t.Error("index.html missing aria-label on to date input")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 func TestHandleProjection(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().Add(-time.Hour)
