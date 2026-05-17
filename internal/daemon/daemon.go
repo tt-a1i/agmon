@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -31,6 +32,9 @@ type Daemon struct {
 	batchCh     chan event.Event // buffered channel for async event processing
 	batchDone   chan struct{}    // closed when batch consumer exits
 	bgWG        sync.WaitGroup   // background goroutines started in Start() (sweepers, etc.)
+	webhooks    *WebhookConfig
+
+	budgetLastStatus map[int64]string
 
 	// Observability counters. Atomic so callers/inspectors don't need the
 	// daemon mutex. Currently logged at Stop(); a future /metrics endpoint
@@ -42,13 +46,14 @@ type Daemon struct {
 
 func New(db *storage.DB, sockPath string) *Daemon {
 	return &Daemon{
-		db:          db,
-		sockPath:    sockPath,
-		remoteSubs:  make(map[net.Conn]struct{}),
-		clientConns: make(map[net.Conn]struct{}),
-		done:        make(chan struct{}),
-		batchCh:     make(chan event.Event, 10000),
-		batchDone:   make(chan struct{}),
+		db:               db,
+		sockPath:         sockPath,
+		remoteSubs:       make(map[net.Conn]struct{}),
+		clientConns:      make(map[net.Conn]struct{}),
+		done:             make(chan struct{}),
+		batchCh:          make(chan event.Event, 10000),
+		batchDone:        make(chan struct{}),
+		budgetLastStatus: make(map[int64]string),
 	}
 }
 
@@ -137,6 +142,13 @@ func (d *Daemon) Start() error {
 	d.subListener = subLn
 	log.Printf("daemon listening on %s", d.sockPath)
 
+	webhooks, err := LoadWebhookConfig()
+	if err != nil {
+		log.Printf("load webhook config: %v", err)
+	} else {
+		d.webhooks = webhooks
+	}
+
 	// Clean up sessions that never received a SessionEnd (e.g. process killed).
 	if err := d.db.MarkStaleSessionsEnded(2 * time.Hour); err != nil {
 		log.Printf("stale session cleanup: %v", err)
@@ -167,6 +179,11 @@ func (d *Daemon) Start() error {
 		defer d.bgWG.Done()
 		d.staleSweepLoop()
 	}()
+	d.bgWG.Add(1)
+	go func() {
+		defer d.bgWG.Done()
+		d.budgetSweepLoop()
+	}()
 	return nil
 }
 
@@ -187,6 +204,50 @@ func (d *Daemon) staleSweepLoop() {
 			}
 		}
 	}
+}
+
+func (d *Daemon) budgetSweepLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.done:
+			return
+		case <-ticker.C:
+			if err := d.checkBudgetTransitions(context.Background()); err != nil {
+				log.Printf("budgetSweepLoop: %v", err)
+			}
+		}
+	}
+}
+
+func (d *Daemon) checkBudgetTransitions(ctx context.Context) error {
+	budgets, err := d.db.ListBudgets()
+	if err != nil {
+		return err
+	}
+	if d.budgetLastStatus == nil {
+		d.budgetLastStatus = make(map[int64]string)
+	}
+	for _, budget := range budgets {
+		used, limit, err := d.db.GetBudgetUsage(budget.ID)
+		if err != nil {
+			log.Printf("budget usage %d: %v", budget.ID, err)
+			continue
+		}
+		percent, current := budgetStatus(used, limit)
+		previous, seen := d.budgetLastStatus[budget.ID]
+		d.budgetLastStatus[budget.ID] = current
+		if !seen {
+			continue
+		}
+		eventName := budgetWebhookEventForTransition(previous, current)
+		if eventName == "" {
+			continue
+		}
+		d.dispatchWebhookEvent(ctx, eventName, budgetWebhookPayload(budget, used, limit, percent, current))
+	}
+	return nil
 }
 
 func (d *Daemon) repairEmptyTokenModels() {
