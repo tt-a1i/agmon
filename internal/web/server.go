@@ -3,10 +3,10 @@ package web
 import (
 	"context"
 	"embed"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -351,58 +351,122 @@ func (s *Server) exportRange(rangeParam string) (string, time.Time, time.Time, e
 }
 
 func (s *Server) writeExportCSV(w http.ResponseWriter, from, to time.Time) {
-	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"date", "session_id", "session_name", "platform", "model", "input_tokens", "output_tokens", "cache_tokens", "cost_usd"}); err != nil {
+	if _, err := io.WriteString(w, "date,session_id,session_name,platform,model,input_tokens,output_tokens,cache_tokens,cost_usd\n"); err != nil {
 		log.Printf("web export csv header: %v", err)
 		return
 	}
+	buf := make([]byte, 0, 256)
 	err := s.db.ForEachSessionExportRow(from, to, func(row storage.SessionExportRow) error {
-		return cw.Write([]string{
-			row.Date,
-			row.SessionID,
-			row.SessionName,
-			row.Platform,
-			row.Model,
-			strconv.Itoa(row.InputTokens),
-			strconv.Itoa(row.OutputTokens),
-			strconv.Itoa(row.CacheTokens),
-			fmt.Sprintf("%.6f", row.CostUSD),
-		})
+		buf = appendExportCSVRow(buf[:0], row)
+		_, err := w.Write(buf)
+		return err
 	})
-	cw.Flush()
-	if flushErr := cw.Error(); flushErr != nil {
-		log.Printf("web export csv flush: %v", flushErr)
-	}
 	if err != nil {
 		log.Printf("web export csv rows: %v", err)
 	}
 }
 
 func (s *Server) writeExportJSON(w http.ResponseWriter, from, to time.Time) {
-	if _, err := fmt.Fprint(w, "["); err != nil {
+	if _, err := io.WriteString(w, "["); err != nil {
 		return
 	}
 	first := true
+	buf := make([]byte, 0, 256)
 	err := s.db.ForEachSessionExportRow(from, to, func(row storage.SessionExportRow) error {
-		payload, err := json.Marshal(row)
-		if err != nil {
-			return err
-		}
 		if !first {
-			if _, err := fmt.Fprint(w, ","); err != nil {
+			if _, err := io.WriteString(w, ","); err != nil {
 				return err
 			}
 		}
 		first = false
-		_, err = w.Write(payload)
+		buf = appendExportJSONRow(buf[:0], row)
+		_, err := w.Write(buf)
 		return err
 	})
-	if _, closeErr := fmt.Fprint(w, "]"); closeErr != nil {
+	if _, closeErr := io.WriteString(w, "]"); closeErr != nil {
 		log.Printf("web export json close: %v", closeErr)
 	}
 	if err != nil {
 		log.Printf("web export json rows: %v", err)
 	}
+}
+
+func appendExportCSVRow(buf []byte, row storage.SessionExportRow) []byte {
+	buf = appendCSVField(buf, row.Date)
+	buf = append(buf, ',')
+	buf = appendCSVField(buf, row.SessionID)
+	buf = append(buf, ',')
+	buf = appendCSVField(buf, row.SessionName)
+	buf = append(buf, ',')
+	buf = appendCSVField(buf, row.Platform)
+	buf = append(buf, ',')
+	buf = appendCSVField(buf, row.Model)
+	buf = append(buf, ',')
+	buf = strconv.AppendInt(buf, int64(row.InputTokens), 10)
+	buf = append(buf, ',')
+	buf = strconv.AppendInt(buf, int64(row.OutputTokens), 10)
+	buf = append(buf, ',')
+	buf = strconv.AppendInt(buf, int64(row.CacheTokens), 10)
+	buf = append(buf, ',')
+	buf = strconv.AppendFloat(buf, row.CostUSD, 'f', 6, 64)
+	buf = append(buf, '\n')
+	return buf
+}
+
+func appendCSVField(buf []byte, field string) []byte {
+	if !strings.ContainsAny(field, "\",\r\n") {
+		return append(buf, field...)
+	}
+	buf = append(buf, '"')
+	for i := 0; i < len(field); i++ {
+		if field[i] == '"' {
+			buf = append(buf, '"')
+		}
+		buf = append(buf, field[i])
+	}
+	buf = append(buf, '"')
+	return buf
+}
+
+func appendExportJSONRow(buf []byte, row storage.SessionExportRow) []byte {
+	buf = append(buf, '{')
+	buf = appendJSONStringField(buf, "date", row.Date)
+	buf = append(buf, ',')
+	buf = appendJSONStringField(buf, "session_id", row.SessionID)
+	buf = append(buf, ',')
+	buf = appendJSONStringField(buf, "session_name", row.SessionName)
+	buf = append(buf, ',')
+	buf = appendJSONStringField(buf, "platform", row.Platform)
+	buf = append(buf, ',')
+	buf = appendJSONStringField(buf, "model", row.Model)
+	buf = append(buf, ',')
+	buf = appendJSONIntField(buf, "input_tokens", row.InputTokens)
+	buf = append(buf, ',')
+	buf = appendJSONIntField(buf, "output_tokens", row.OutputTokens)
+	buf = append(buf, ',')
+	buf = appendJSONIntField(buf, "cache_tokens", row.CacheTokens)
+	buf = append(buf, ',')
+	buf = appendJSONFloatField(buf, "cost_usd", row.CostUSD)
+	buf = append(buf, '}')
+	return buf
+}
+
+func appendJSONStringField(buf []byte, key, value string) []byte {
+	buf = strconv.AppendQuote(buf, key)
+	buf = append(buf, ':')
+	return strconv.AppendQuote(buf, value)
+}
+
+func appendJSONIntField(buf []byte, key string, value int) []byte {
+	buf = strconv.AppendQuote(buf, key)
+	buf = append(buf, ':')
+	return strconv.AppendInt(buf, int64(value), 10)
+}
+
+func appendJSONFloatField(buf []byte, key string, value float64) []byte {
+	buf = strconv.AppendQuote(buf, key)
+	buf = append(buf, ':')
+	return strconv.AppendFloat(buf, value, 'f', -1, 64)
 }
 
 type costResponse struct {

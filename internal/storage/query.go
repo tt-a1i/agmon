@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -42,6 +43,10 @@ type SessionExportRow struct {
 	OutputTokens int     `json:"output_tokens"`
 	CacheTokens  int     `json:"cache_tokens"`
 	CostUSD      float64 `json:"cost_usd"`
+}
+
+var exportRowPool = sync.Pool{
+	New: func() any { return new(SessionExportRow) },
 }
 
 type SearchHit struct {
@@ -225,7 +230,7 @@ func (s *DB) ListSessionsByPlatform(platform string, limit int) ([]SessionRow, e
 
 func (s *DB) ForEachSessionExportRow(from, to time.Time, fn func(SessionExportRow) error) error {
 	rows, err := s.db.Query(`
-		SELECT DATE(t.timestamp, 'localtime') as day,
+		SELECT t.timestamp,
 		       t.session_id,
 		       COALESCE(s.git_branch, ''),
 		       COALESCE(s.cwd, ''),
@@ -246,19 +251,38 @@ func (s *DB) ForEachSessionExportRow(from, to time.Time, fn func(SessionExportRo
 	defer rows.Close()
 
 	for rows.Next() {
-		var row SessionExportRow
-		var gitBranch, cwd string
-		if err := rows.Scan(&row.Date, &row.SessionID, &gitBranch, &cwd,
+		row := exportRowPool.Get().(*SessionExportRow)
+		var timestamp, gitBranch, cwd string
+		if err := rows.Scan(&timestamp, &row.SessionID, &gitBranch, &cwd,
 			&row.Platform, &row.Model, &row.InputTokens, &row.OutputTokens,
 			&row.CacheTokens, &row.CostUSD); err != nil {
+			releaseExportRow(row)
 			return err
 		}
+		row.Date = exportLocalDate(timestamp)
 		row.SessionName = exportSessionName(row.SessionID, gitBranch, cwd)
-		if err := fn(row); err != nil {
+		err := fn(*row)
+		releaseExportRow(row)
+		if err != nil {
 			return err
 		}
 	}
 	return rows.Err()
+}
+
+func exportLocalDate(timestamp string) string {
+	if t, ok := parseStorageTime(timestamp); ok {
+		return t.In(time.Local).Format("2006-01-02")
+	}
+	if len(timestamp) >= len("2006-01-02") {
+		return timestamp[:len("2006-01-02")]
+	}
+	return timestamp
+}
+
+func releaseExportRow(row *SessionExportRow) {
+	*row = SessionExportRow{}
+	exportRowPool.Put(row)
 }
 
 func exportSessionName(sessionID, gitBranch, cwd string) string {

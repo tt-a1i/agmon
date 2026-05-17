@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -166,7 +167,7 @@ func TestHandleExportCSVJSONAndRangeBoundary(t *testing.T) {
 	if err := db.UpsertSession("recent-session", event.PlatformClaude, recent); err != nil {
 		t.Fatalf("upsert recent: %v", err)
 	}
-	if err := db.UpdateSessionMeta("recent-session", "/Users/test/project-alpha", "feature/export"); err != nil {
+	if err := db.UpdateSessionMeta("recent-session", "/Users/test/project-alpha", "feature/export, \"quoted\""); err != nil {
 		t.Fatalf("update recent meta: %v", err)
 	}
 	if err := db.InsertTokenUsage("agent-recent", "recent-session", 1000, 400, 25, 75, "claude-sonnet-4-6", 0.42, recent, "src-recent"); err != nil {
@@ -205,7 +206,7 @@ func TestHandleExportCSVJSONAndRangeBoundary(t *testing.T) {
 	if strings.Join(records[0], ",") != strings.Join(wantHeader, ",") {
 		t.Fatalf("csv header: got %v, want %v", records[0], wantHeader)
 	}
-	if records[1][1] != "recent-session" || records[1][2] != "feature/export" || records[1][7] != "100" || records[1][8] != "0.420000" {
+	if records[1][1] != "recent-session" || records[1][2] != "feature/export, \"quoted\"" || records[1][7] != "100" || records[1][8] != "0.420000" {
 		t.Fatalf("csv row: got %v", records[1])
 	}
 
@@ -225,6 +226,55 @@ func TestHandleExportCSVJSONAndRangeBoundary(t *testing.T) {
 	}
 	if len(rows) != 2 {
 		t.Fatalf("json rows: got %d, want 2", len(rows))
+	}
+}
+
+func TestExportRowPoolDoesNotCorruptOutput(t *testing.T) {
+	db := testDB(t)
+	now := time.Now()
+	for s := 0; s < 5; s++ {
+		sessionID := "pool-session-" + strconv.Itoa(s)
+		if err := db.UpsertSession(sessionID, event.PlatformClaude, now); err != nil {
+			t.Fatalf("upsert session %d: %v", s, err)
+		}
+		if err := db.UpdateSessionMeta(sessionID, "/tmp/pool-"+strconv.Itoa(s), "pool/branch-"+strconv.Itoa(s)); err != nil {
+			t.Fatalf("update session meta %d: %v", s, err)
+		}
+	}
+	for i := 0; i < 100; i++ {
+		sessionID := "pool-session-" + strconv.Itoa(i%5)
+		if err := db.InsertTokenUsage("pool-agent", sessionID, 100+i, 20+i%7, i%3, i%5, "pool-model", float64(i)/1000, now.Add(time.Duration(i)*time.Second), "pool-src-"+strconv.Itoa(i)); err != nil {
+			t.Fatalf("insert token usage %d: %v", i, err)
+		}
+	}
+
+	srv := NewServer(db, "0")
+	request := func() string {
+		req := httptest.NewRequest(http.MethodGet, "/api/export?range=all&format=csv", nil)
+		w := httptest.NewRecorder()
+		srv.handleExport(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+		}
+		return w.Body.String()
+	}
+	want := request()
+
+	var wg sync.WaitGroup
+	errCh := make(chan string, 12)
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if got := request(); got != want {
+				errCh <- got
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	if got, ok := <-errCh; ok {
+		t.Fatalf("concurrent export output differed\nwant:\n%s\ngot:\n%s", want, got)
 	}
 }
 
