@@ -643,7 +643,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err := copyToClipboard(md); err == nil {
 					m.flashMsg = fmt.Sprintf("Copied share report for %s", name)
 				} else {
-					m.flashMsg = "Share report ready in tokenmeter share " + shortSessionIDForDisplay(s.SessionID)
+					m.flashMsg = "Share report ready in tm share " + shortSessionIDForDisplay(s.SessionID)
 				}
 				m.flashExpire = time.Now().Add(3 * time.Second)
 			}

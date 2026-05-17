@@ -242,7 +242,7 @@ func TestHandleExportCSVJSONAndRangeBoundary(t *testing.T) {
 	if ct := csvRec.Header().Get("Content-Type"); !strings.Contains(ct, "text/csv") {
 		t.Fatalf("csv content-type: got %q", ct)
 	}
-	if cd := csvRec.Header().Get("Content-Disposition"); !strings.Contains(cd, `attachment; filename="tokenmeter-7d-`) || !strings.HasSuffix(cd, `.csv"`) {
+	if cd := csvRec.Header().Get("Content-Disposition"); !strings.Contains(cd, `attachment; filename="tm-7d-`) || !strings.HasSuffix(cd, `.csv"`) {
 		t.Fatalf("csv content-disposition: got %q", cd)
 	}
 	records, err := csv.NewReader(strings.NewReader(csvRec.Body.String())).ReadAll()

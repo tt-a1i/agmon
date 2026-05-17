@@ -207,7 +207,10 @@ func containsCommand(commands []string, want string) bool {
 
 func hasTokenMeterEmit(commands []string) bool {
 	for _, cmd := range commands {
-		if strings.Contains(cmd, "tokenmeter") && strings.HasSuffix(cmd, " emit") {
+		if !strings.HasSuffix(cmd, " emit") {
+			continue
+		}
+		if strings.Contains(cmd, "tm") || strings.Contains(cmd, "tokenmeter") {
 			return true
 		}
 	}

@@ -5,7 +5,7 @@
 │                                                                                                                    │
 │   No sessions yet.                                                                                                 │
 │                                                                                                                    │
-│   Run 'tokenmeter setup' to configure Claude Code hooks,                                                           │
+│   Run 'tm setup' to configure Claude Code hooks,                                                                   │
 │   then start using Claude Code normally.                                                                           │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  t range  T tag:all  W workspace  A all  p plat:All  s sort:Recent  / filter  Tab view  j/k nav  c resume  r report  Enter msgs  q quit

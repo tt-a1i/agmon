@@ -51,10 +51,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: Build local image
-        run: docker buildx build --load -t tokenmeter:scan --build-arg VERSION=scan .
+        run: docker buildx build --load -t tm:scan --build-arg VERSION=scan .
       - uses: aquasecurity/trivy-action@0.28.0
         with:
-          image-ref: 'tokenmeter:scan'
+          image-ref: 'tm:scan'
           format: 'sarif'
           output: 'trivy-image.sarif'
           severity: 'CRITICAL,HIGH'

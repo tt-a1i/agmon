@@ -64,7 +64,7 @@ func runVersionWithDeps(args []string, out io.Writer) error {
 
 func printVersionText(out io.Writer, info VersionInfo, checked bool) {
 	if !checked {
-		fmt.Fprintf(out, "tokenmeter %s\n", info.Current)
+		fmt.Fprintf(out, "tm %s\n", info.Current)
 		return
 	}
 	if info.CheckError != "" {
@@ -89,7 +89,7 @@ func printVersionText(out io.Writer, info VersionInfo, checked bool) {
 		fmt.Fprintf(out, "Latest: %s\n", info.Latest)
 	}
 	fmt.Fprintf(out, "Update: %s\n\n", info.ReleaseURL)
-	fmt.Fprintln(out, "To update: tokenmeter update")
+	fmt.Fprintln(out, "To update: tm update")
 }
 
 func isNewerVersion(remote, local string) bool {

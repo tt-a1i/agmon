@@ -170,7 +170,7 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		w.Header().Set("WWW-Authenticate", `Bearer realm="tokenmeter"`)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="tm"`)
 		writeAPIError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 	}
 }
@@ -403,7 +403,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := fmt.Sprintf("tokenmeter-%s-%s.%s", rangeLabel, to.Format("2006-01-02"), format)
+	filename := fmt.Sprintf("tm-%s-%s.%s", rangeLabel, to.Format("2006-01-02"), format)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	if format == "json" {
 		w.Header().Set("Content-Type", "application/json")
@@ -1812,7 +1812,7 @@ func (s *Server) handleExportReport(w http.ResponseWriter, r *http.Request) {
 	anomalies := computeCostAnomalies(allSessions)
 
 	now := time.Now()
-	filename := fmt.Sprintf("tokenmeter-report-%s-%s.html", rangeLabel, now.Format("2006-01-02"))
+	filename := fmt.Sprintf("tm-report-%s-%s.html", rangeLabel, now.Format("2006-01-02"))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 

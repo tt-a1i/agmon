@@ -167,7 +167,7 @@ func TestE2EExportRoundTrip(t *testing.T) {
 	baseURL := startTestWebServer(t, rig.db, rig.sockPath)
 
 	resp, body := getBody(t, baseURL+"/api/export?range=week&format=csv")
-	if resp.Header.Get("Content-Type") == "" || !strings.Contains(resp.Header.Get("Content-Disposition"), "tokenmeter-week-") {
+	if resp.Header.Get("Content-Type") == "" || !strings.Contains(resp.Header.Get("Content-Disposition"), "tm-week-") {
 		t.Fatalf("unexpected export headers: content-type=%q disposition=%q", resp.Header.Get("Content-Type"), resp.Header.Get("Content-Disposition"))
 	}
 	records, err := csv.NewReader(bytes.NewReader(body)).ReadAll()

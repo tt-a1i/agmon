@@ -16,7 +16,7 @@ func runWebhook() error {
 		return nil
 	}
 	if len(os.Args) < 3 {
-		return fmt.Errorf("usage: tokenmeter webhook <list|test|replay>")
+		return fmt.Errorf("usage: tm webhook <list|test|replay>")
 	}
 	switch os.Args[2] {
 	case "list":
@@ -56,7 +56,7 @@ func runWebhookList() error {
 
 func runWebhookTest() error {
 	if len(os.Args) != 4 {
-		return fmt.Errorf("usage: tokenmeter webhook test <url>")
+		return fmt.Errorf("usage: tm webhook test <url>")
 	}
 	url := os.Args[3]
 	payload := daemon.WebhookPayload{
@@ -74,7 +74,7 @@ func runWebhookTest() error {
 
 func runWebhookReplay() error {
 	if len(os.Args) != 3 {
-		return fmt.Errorf("usage: tokenmeter webhook replay")
+		return fmt.Errorf("usage: tm webhook replay")
 	}
 	path := daemon.WebhookDeadLetterPathForCLI()
 	f, err := os.Open(path)

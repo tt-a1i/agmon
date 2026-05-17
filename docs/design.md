@@ -9,18 +9,18 @@ Real-time observability for AI coding agents. TUI-based monitor that shows what 
 ## Architecture
 
 ```
-Claude Code hooks ──→ Unix socket ──→ tokenmeter daemon (aggregate/store)
+Claude Code hooks ──→ Unix socket ──→ tm daemon (aggregate/store)
 Codex logs ─────────→                        ↓
                                       ~/.tokenmeter/data/tokenmeter.db (SQLite)
                                              ↓
-                                      tokenmeter tui (connect to daemon)
+                                      tm tui (connect to daemon)
 ```
 
 ### Components
 
-1. **tokenmeter emit** — lightweight CLI called by hooks, sends events to daemon via Unix socket
-2. **tokenmeter daemon** — receives events, parses logs, aggregates data, stores to SQLite
-3. **tokenmeter tui** — connects to daemon, renders real-time TUI
+1. **tm emit** — lightweight CLI called by hooks, sends events to daemon via Unix socket
+2. **tm daemon** — receives events, parses logs, aggregates data, stores to SQLite
+3. **tm tui** — connects to daemon, renders real-time TUI
 
 ### Communication
 
@@ -85,13 +85,13 @@ SQLite database at `~/.tokenmeter/data/tokenmeter.db` (using modernc.org/sqlite,
 ## CLI Commands
 
 ```
-tokenmeter                    # start TUI (auto-starts daemon)
-tokenmeter daemon             # start daemon only
-tokenmeter status             # quick summary of active sessions
-tokenmeter report [session]   # text report for a session
-tokenmeter cost [today|week]  # cost statistics
-tokenmeter setup              # auto-configure hooks
-tokenmeter uninstall          # clean up hooks and data
+tm                    # start TUI (auto-starts daemon)
+tm daemon             # start daemon only
+tm status             # quick summary of active sessions
+tm report [session]   # text report for a session
+tm cost [today|week]  # cost statistics
+tm setup              # auto-configure hooks
+tm uninstall          # clean up hooks and data
 ```
 
 ## V1 Metrics
@@ -114,5 +114,5 @@ tokenmeter uninstall          # clean up hooks and data
 ## Distribution
 
 - GitHub Releases via goreleaser (darwin/linux × amd64/arm64)
-- Homebrew tap: `brew install tokenmeter`
+- Homebrew tap: `brew install tt-a1i/tap/tm`
 - Single binary, zero dependencies

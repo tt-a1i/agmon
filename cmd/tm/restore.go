@@ -18,7 +18,7 @@ func runRestore() error {
 		return nil
 	}
 	if len(os.Args) != 3 {
-		return fmt.Errorf("usage: tokenmeter restore <source-path>")
+		return fmt.Errorf("usage: tm restore <source-path>")
 	}
 	sourcePath := os.Args[2]
 	if err := storage.ValidateSQLiteBackup(sourcePath); err != nil {
@@ -47,7 +47,7 @@ func runRestore() error {
 
 	fmt.Printf("Restored from: %s\n", sourcePath)
 	fmt.Printf("New DB size: %s\n", formatCompactBytes(info.Size()))
-	fmt.Println("Run 'tokenmeter doctor' to verify.")
+	fmt.Println("Run 'tm doctor' to verify.")
 	return nil
 }
 

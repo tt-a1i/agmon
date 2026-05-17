@@ -64,7 +64,7 @@ jobs:
         run: go test ./... -race -count=1 -timeout=180s
 
       - name: Build
-        run: go build -o tokenmeter ./cmd/tokenmeter/
+        run: go build -o tm ./cmd/tm/
 
   release:
     needs: test

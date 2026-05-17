@@ -45,7 +45,7 @@ func runCompletion() error {
 		return nil
 	}
 	if len(os.Args) < 3 {
-		return fmt.Errorf("usage: tokenmeter completion bash|zsh|fish")
+		return fmt.Errorf("usage: tm completion bash|zsh|fish")
 	}
 	switch os.Args[2] {
 	case "bash":
@@ -62,7 +62,7 @@ func runCompletion() error {
 
 func bashCompletionScript() string {
 	subcmds := strings.Join(completionSubcommands, " ")
-	return fmt.Sprintf(`_tokenmeter() {
+	return fmt.Sprintf(`_tm() {
     local cur prev subcmds
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -70,7 +70,7 @@ func bashCompletionScript() string {
     subcmds="%s"
 
     case "$prev" in
-        tokenmeter)
+        tm)
             COMPREPLY=( $(compgen -W "$subcmds" -- "$cur") )
             return 0 ;;
         budget)
@@ -119,7 +119,7 @@ func bashCompletionScript() string {
 
     return 0
 }
-complete -F _tokenmeter tokenmeter
+complete -F _tm tm
 `, subcmds)
 }
 
@@ -128,8 +128,8 @@ func zshCompletionScript() string {
 	for _, cmd := range completionSubcommands {
 		fmt.Fprintf(&subcmds, "\n        '%s:%s'", cmd, completionSubcommandDescription(cmd))
 	}
-	return fmt.Sprintf(`#compdef tokenmeter
-_tokenmeter() {
+	return fmt.Sprintf(`#compdef tm
+_tm() {
     local state
     local -a subcmds
     subcmds=(%s
@@ -160,40 +160,40 @@ _tokenmeter() {
             ;;
     esac
 }
-_tokenmeter "$@"
+_tm "$@"
 `, subcmds.String())
 }
 
 func fishCompletionScript() string {
 	subcmds := strings.Join(completionSubcommands, " ")
-	return fmt.Sprintf(`complete -c tokenmeter -f
-complete -c tokenmeter -n '__fish_use_subcommand' -a '%s'
-complete -c tokenmeter -n '__fish_seen_subcommand_from budget' -a 'list set delete usage'
-complete -c tokenmeter -n '__fish_seen_subcommand_from webhook' -a 'list test replay'
-complete -c tokenmeter -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
-complete -c tokenmeter -n '__fish_seen_subcommand_from cost' -a 'today week month 3month year all'
-complete -c tokenmeter -n '__fish_seen_subcommand_from report' -l weekly -d 'Weekly cost report'
-complete -c tokenmeter -n '__fish_seen_subcommand_from report' -l monthly -d 'Monthly cost report'
-complete -c tokenmeter -n '__fish_seen_subcommand_from export' -l range -d 'Export range'
-complete -c tokenmeter -n '__fish_seen_subcommand_from export' -l format -d 'Export format'
-complete -c tokenmeter -n '__fish_seen_subcommand_from export' -l out -d 'Output file'
-complete -c tokenmeter -n '__fish_seen_subcommand_from analyze' -l range -d 'Analysis range'
-complete -c tokenmeter -n '__fish_seen_subcommand_from analyze' -l json -d 'Output JSON'
-complete -c tokenmeter -n '__fish_seen_subcommand_from watch' -l session -d 'Session ID prefix'
-complete -c tokenmeter -n '__fish_seen_subcommand_from watch' -l types -d 'Event types'
-complete -c tokenmeter -n '__fish_seen_subcommand_from watch' -l no-color -d 'Disable ANSI colors'
-complete -c tokenmeter -n '__fish_seen_subcommand_from doctor' -l json -d 'Output JSON'
-complete -c tokenmeter -n '__fish_seen_subcommand_from doctor' -l fix -d 'Attempt repairs'
-complete -c tokenmeter -n '__fish_seen_subcommand_from compact' -l full -d 'Run VACUUM'
-complete -c tokenmeter -n '__fish_seen_subcommand_from top' -l once -d 'Print one snapshot'
-complete -c tokenmeter -n '__fish_seen_subcommand_from top' -l no-clear -d 'Do not clear screen'
-complete -c tokenmeter -n '__fish_seen_subcommand_from top' -l interval -d 'Refresh interval'
-complete -c tokenmeter -n '__fish_seen_subcommand_from healthcheck' -l json -d 'Output JSON'
-complete -c tokenmeter -n '__fish_seen_subcommand_from init' -l skip-prompts -d 'Use defaults'
-complete -c tokenmeter -n '__fish_seen_subcommand_from logs' -l follow -d 'Follow log output'
-complete -c tokenmeter -n '__fish_seen_subcommand_from logs' -l emit -d 'Show hook emit logs'
-complete -c tokenmeter -n '__fish_seen_subcommand_from logs' -l path -d 'Log file path'
-complete -c tokenmeter -n '__fish_seen_subcommand_from logs' -l lines -d 'Tail line count'
+	return fmt.Sprintf(`complete -c tm -f
+complete -c tm -n '__fish_use_subcommand' -a '%s'
+complete -c tm -n '__fish_seen_subcommand_from budget' -a 'list set delete usage'
+complete -c tm -n '__fish_seen_subcommand_from webhook' -a 'list test replay'
+complete -c tm -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
+complete -c tm -n '__fish_seen_subcommand_from cost' -a 'today week month 3month year all'
+complete -c tm -n '__fish_seen_subcommand_from report' -l weekly -d 'Weekly cost report'
+complete -c tm -n '__fish_seen_subcommand_from report' -l monthly -d 'Monthly cost report'
+complete -c tm -n '__fish_seen_subcommand_from export' -l range -d 'Export range'
+complete -c tm -n '__fish_seen_subcommand_from export' -l format -d 'Export format'
+complete -c tm -n '__fish_seen_subcommand_from export' -l out -d 'Output file'
+complete -c tm -n '__fish_seen_subcommand_from analyze' -l range -d 'Analysis range'
+complete -c tm -n '__fish_seen_subcommand_from analyze' -l json -d 'Output JSON'
+complete -c tm -n '__fish_seen_subcommand_from watch' -l session -d 'Session ID prefix'
+complete -c tm -n '__fish_seen_subcommand_from watch' -l types -d 'Event types'
+complete -c tm -n '__fish_seen_subcommand_from watch' -l no-color -d 'Disable ANSI colors'
+complete -c tm -n '__fish_seen_subcommand_from doctor' -l json -d 'Output JSON'
+complete -c tm -n '__fish_seen_subcommand_from doctor' -l fix -d 'Attempt repairs'
+complete -c tm -n '__fish_seen_subcommand_from compact' -l full -d 'Run VACUUM'
+complete -c tm -n '__fish_seen_subcommand_from top' -l once -d 'Print one snapshot'
+complete -c tm -n '__fish_seen_subcommand_from top' -l no-clear -d 'Do not clear screen'
+complete -c tm -n '__fish_seen_subcommand_from top' -l interval -d 'Refresh interval'
+complete -c tm -n '__fish_seen_subcommand_from healthcheck' -l json -d 'Output JSON'
+complete -c tm -n '__fish_seen_subcommand_from init' -l skip-prompts -d 'Use defaults'
+complete -c tm -n '__fish_seen_subcommand_from logs' -l follow -d 'Follow log output'
+complete -c tm -n '__fish_seen_subcommand_from logs' -l emit -d 'Show hook emit logs'
+complete -c tm -n '__fish_seen_subcommand_from logs' -l path -d 'Log file path'
+complete -c tm -n '__fish_seen_subcommand_from logs' -l lines -d 'Tail line count'
 `, subcmds)
 }
 

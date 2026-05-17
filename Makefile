@@ -3,11 +3,11 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o tokenmeter ./cmd/tokenmeter/
+	go build -ldflags "-X main.version=$(VERSION)" -o tm ./cmd/tm/
 
 install: build
-	cp tokenmeter $(shell go env GOPATH)/bin/tokenmeter
-	codesign --sign - --force $(shell go env GOPATH)/bin/tokenmeter 2>/dev/null || true
+	cp tm $(shell go env GOPATH)/bin/tm
+	codesign --sign - --force $(shell go env GOPATH)/bin/tm 2>/dev/null || true
 
 test:
 	go test -cover ./...
@@ -29,7 +29,7 @@ coverage:
 	go tool cover -func=coverage.out | tail -20
 
 clean:
-	rm -f tokenmeter
+	rm -f tm tokenmeter
 
 flaky:
 	ROUNDS=20 bash scripts/find_flaky.sh

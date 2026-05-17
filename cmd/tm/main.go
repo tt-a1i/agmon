@@ -193,12 +193,14 @@ func newTUIModel(db *storage.DB, tuiCh chan tui.EventMsg, opts tuiOptions) tui.M
 
 func main() {
 	if len(os.Args) < 2 || isTUIFlag(os.Args[1]) {
+		ensureHooksInstalled()
 		runTUI(os.Args[1:]...)
 		return
 	}
 
 	switch os.Args[1] {
 	case "daemon":
+		ensureHooksInstalled()
 		runDaemon()
 	case "reload":
 		if err := runReload(); err != nil {
@@ -309,6 +311,7 @@ func main() {
 	case "tag":
 		runTag()
 	case "web":
+		ensureHooksInstalled()
 		if err := runWeb(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -503,7 +506,7 @@ func runDaemon() {
 	claudeLogWatcher.Start()
 	defer claudeLogWatcher.Stop()
 
-	fmt.Printf("tokenmeter daemon running (socket: %s)\n", sockPath)
+	fmt.Printf("tm daemon running (socket: %s)\n", sockPath)
 
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -584,20 +587,33 @@ func runEmitWithReader(sockPath string, r io.Reader) error {
 	return nil
 }
 
-// tokenmeter setup hook format:
+// tm setup hook format:
 // Claude Code settings.json uses: [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }]
 func runSetup() {
 	if maybePrintCmdHelp("setup", os.Args[2:]) {
 		return
 	}
-	home, _ := os.UserHomeDir()
-	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	if err := installHooks(false); err != nil {
+		log.Fatalf("setup failed: %v", err)
+	}
+}
+
+// installHooks writes the tm emit hooks into ~/.claude/settings.json.
+// When silent is true, prints nothing to stdout (used by auto-setup).
+// Returns an error instead of calling log.Fatalf so callers can decide.
+func installHooks(silent bool) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	claudeDir := filepath.Join(home, ".claude")
+	settingsPath := filepath.Join(claudeDir, "settings.json")
 
 	var settings map[string]any
 	data, err := os.ReadFile(settingsPath)
 	if err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
-			log.Fatalf("settings.json contains invalid JSON: %v\nPlease fix %s before running setup.", err, settingsPath)
+			return fmt.Errorf("settings.json contains invalid JSON: %v\nPlease fix %s before running setup", err, settingsPath)
 		}
 	}
 	if settings == nil {
@@ -606,9 +622,8 @@ func runSetup() {
 
 	tokenmeterPath, _ := os.Executable()
 	if tokenmeterPath == "" {
-		tokenmeterPath = "tokenmeter"
+		tokenmeterPath = "tm"
 	}
-	// Quote the path if it contains spaces or quotes so the shell doesn't split it.
 	quoted := tokenmeterPath
 	if strings.ContainsAny(tokenmeterPath, " \t\"") {
 		quoted = `"` + strings.ReplaceAll(tokenmeterPath, `"`, `\"`) + `"`
@@ -619,33 +634,59 @@ func runSetup() {
 	if !ok {
 		hooks = make(map[string]any)
 	}
-
 	for _, hookName := range tokenmeterHookNames {
 		removeTokenMeterHook(hooks, hookName)
 		addHookEntry(hooks, hookName, emitCmd)
 	}
-
 	settings["hooks"] = hooks
 
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		log.Fatalf("marshal settings: %v", err)
+		return fmt.Errorf("marshal settings: %w", err)
 	}
-
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		log.Fatalf("create claude dir: %v", err)
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return fmt.Errorf("create claude dir: %w", err)
 	}
-
 	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
-		log.Fatalf("write settings: %v", err)
+		return fmt.Errorf("write settings: %w", err)
 	}
 
-	fmt.Println("✓ Claude Code hooks configured")
-	fmt.Printf("  Settings: %s\n", settingsPath)
-	fmt.Printf("  Command:  %s\n", emitCmd)
-	fmt.Printf("  Events:   %s\n", strings.Join(tokenmeterHookNames, ", "))
-	fmt.Println()
-	fmt.Println("Run `tokenmeter` to start monitoring.")
+	if !silent {
+		fmt.Println("✓ Claude Code hooks configured")
+		fmt.Printf("  Settings: %s\n", settingsPath)
+		fmt.Printf("  Command:  %s\n", emitCmd)
+		fmt.Printf("  Events:   %s\n", strings.Join(tokenmeterHookNames, ", "))
+		fmt.Println()
+		fmt.Println("Run `tm` to start monitoring.")
+	}
+	return nil
+}
+
+// ensureHooksInstalled is the auto-setup hook called by long-running entry points
+// (TUI, daemon, web). It silently installs hooks pointing at this binary if no
+// tm/tokenmeter emit hook is already registered in ~/.claude/settings.json.
+// Skips entirely if Claude Code is not installed (no ~/.claude dir).
+func ensureHooksInstalled() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	claudeDir := filepath.Join(home, ".claude")
+	if _, err := os.Stat(claudeDir); os.IsNotExist(err) {
+		return
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		s := string(data)
+		if strings.Contains(s, "tm emit") || strings.Contains(s, "tokenmeter emit") {
+			return
+		}
+	}
+	if err := installHooks(true); err != nil {
+		fmt.Fprintf(os.Stderr, "[tm] auto-setup skipped: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[tm] Claude Code hooks installed → %s\n", settingsPath)
 }
 
 // addHookEntry adds a TokenMeter hook entry in the correct Claude Code format:
@@ -771,7 +812,12 @@ func isTokenMeterEmitCommand(cmd string) bool {
 	if !strings.HasSuffix(cmd, " emit") {
 		return false
 	}
-	return strings.Contains(cmd, "tokenmeter") || strings.Contains(cmd, "agmon")
+	exe := strings.TrimSuffix(cmd, " emit")
+	exe = strings.Trim(exe, `"'`)
+	base := filepath.Base(exe)
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".test")
+	return base == "tm" || base == "tokenmeter" || base == "agmon"
 }
 
 func runReport() {
@@ -1253,9 +1299,9 @@ func runTag() {
 		return
 	}
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: tokenmeter tag <session-id> [text]\n")
-		fmt.Fprintf(os.Stderr, "  Set a tag:   tokenmeter tag abc123 \"refactoring auth\"\n")
-		fmt.Fprintf(os.Stderr, "  Clear tag:   tokenmeter tag abc123\n")
+		fmt.Fprintf(os.Stderr, "Usage: tm tag <session-id> [text]\n")
+		fmt.Fprintf(os.Stderr, "  Set a tag:   tm tag abc123 \"refactoring auth\"\n")
+		fmt.Fprintf(os.Stderr, "  Clear tag:   tm tag abc123\n")
 		os.Exit(1)
 	}
 
@@ -1376,10 +1422,10 @@ var helpSections = []helpSection{
 
 func printHelp() {
 	fmt.Printf("TokenMeter v%s — AI coding agent usage meter\n\n", version)
-	fmt.Println("Usage: tokenmeter <command> [args...]")
-	fmt.Println("Or:    tokenmeter                  Launch TUI (auto-starts daemon)")
-	fmt.Println("       tokenmeter --all            Launch TUI without workspace filtering")
-	fmt.Println("       tokenmeter --workspace PATH Launch TUI scoped to a workspace path")
+	fmt.Println("Usage: tm <command> [args...]")
+	fmt.Println("Or:    tm                  Launch TUI (auto-starts daemon)")
+	fmt.Println("       tm --all            Launch TUI without workspace filtering")
+	fmt.Println("       tm --workspace PATH Launch TUI scoped to a workspace path")
 	fmt.Println()
 
 	width := helpCommandWidth(helpSections)
@@ -1393,16 +1439,16 @@ func printHelp() {
 
 	fmt.Println("▎Examples")
 	for _, example := range []helpCommand{
-		{"tokenmeter", "Launch TUI"},
-		{"tokenmeter cost today", "Show today's tokens"},
-		{"tokenmeter export --range week", "Export this week as CSV"},
-		{"tokenmeter compare abc def", "Diff sessions by ID prefix"},
-		{`tokenmeter budget set "Monthly" 100 --platform claude`, "Create a Claude monthly budget"},
+		{"tm", "Launch TUI"},
+		{"tm cost today", "Show today's tokens"},
+		{"tm export --range week", "Export this week as CSV"},
+		{"tm compare abc def", "Diff sessions by ID prefix"},
+		{`tm budget set "Monthly" 100 --platform claude`, "Create a Claude monthly budget"},
 	} {
 		fmt.Printf("  %-*s  # %s\n", width, example.name, example.desc)
 	}
 	fmt.Println()
-	fmt.Println("Run 'tokenmeter <command> --help' for command-specific options (if available).")
+	fmt.Println("Run 'tm <command> --help' for command-specific options (if available).")
 	fmt.Println("Source: https://github.com/tt-a1i/tokenmeter")
 }
 

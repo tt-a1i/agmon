@@ -52,7 +52,7 @@ func runInit() error {
 		return err
 	}
 
-	fmt.Println("Setup complete! Run 'tokenmeter' to start.")
+	fmt.Println("Setup complete! Run 'tm' to start.")
 	return nil
 }
 
@@ -213,7 +213,7 @@ func initPricingStep(scanner *bufio.Scanner, skipPrompts bool) error {
 func initDoctorStep() error {
 	fmt.Println("[6/6] Running self-diagnostic...")
 	prevArgs := os.Args
-	os.Args = []string{"tokenmeter", "doctor"}
+	os.Args = []string{"tm", "doctor"}
 	defer func() { os.Args = prevArgs }()
 	if err := runDoctor(); err != nil {
 		return err

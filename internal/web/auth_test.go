@@ -31,7 +31,7 @@ func TestRequiresBearerWhenConfigured(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status: got %d, want 401", w.Code)
 	}
-	if got := w.Header().Get("WWW-Authenticate"); got != `Bearer realm="tokenmeter"` {
+	if got := w.Header().Get("WWW-Authenticate"); got != `Bearer realm="tm"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
 	}
 }

@@ -28,7 +28,7 @@ func TestRunRestoreCreatesPreBackup(t *testing.T) {
 		}
 	})
 
-	for _, want := range []string{"Pre-restore backup:", "Restored from: " + sourcePath, "New DB size:", "Run 'tokenmeter doctor' to verify."} {
+	for _, want := range []string{"Pre-restore backup:", "Restored from: " + sourcePath, "New DB size:", "Run 'tm doctor' to verify."} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("restore output missing %q:\n%s", want, out)
 		}

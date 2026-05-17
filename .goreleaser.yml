@@ -1,8 +1,8 @@
 version: 2
 
 builds:
-  - main: ./cmd/tokenmeter
-    binary: tokenmeter
+  - main: ./cmd/tm
+    binary: tm
     env:
       - CGO_ENABLED=0
     goos:
@@ -36,4 +36,4 @@ brews:
     homepage: "https://github.com/tt-a1i/tokenmeter"
     description: "Real-time observability for AI coding agents"
     install: |
-      bin.install "tokenmeter"
+      bin.install "tm"

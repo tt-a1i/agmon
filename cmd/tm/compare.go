@@ -51,7 +51,7 @@ func runCompare() error {
 		return nil
 	}
 	if len(args) < 2 {
-		return fmt.Errorf("usage: tokenmeter compare <sessionA> <sessionB> [--format text|json]")
+		return fmt.Errorf("usage: tm compare <sessionA> <sessionB> [--format text|json]")
 	}
 	aPrefix := args[0]
 	bPrefix := args[1]

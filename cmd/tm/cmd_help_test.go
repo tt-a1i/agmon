@@ -32,10 +32,10 @@ func TestRunExportWithHelpFlag(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Usage: tokenmeter export [options]",
+		"Usage: tm export [options]",
 		"Export session/token data as CSV or JSON",
 		"--range RANGE",
-		"See also: tokenmeter compare, tokenmeter share",
+		"See also: tm compare, tm share",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("export help missing %q:\n%s", want, out)
@@ -53,7 +53,7 @@ func TestRunCompareWithHelpFlag(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Usage: tokenmeter compare <sessionA> <sessionB> [options]",
+		"Usage: tm compare <sessionA> <sessionB> [options]",
 		"Compare two sessions",
 		"--format FORMAT",
 	} {
@@ -68,7 +68,7 @@ func TestRunUnknownCommandSuggestsHelp(t *testing.T) {
 	if !strings.Contains(msg, "unknown command: bogus") {
 		t.Fatalf("missing unknown command detail: %q", msg)
 	}
-	if !strings.Contains(msg, "Run 'tokenmeter help'") {
+	if !strings.Contains(msg, "Run 'tm help'") {
 		t.Fatalf("missing help suggestion: %q", msg)
 	}
 }

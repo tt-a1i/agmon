@@ -27,7 +27,7 @@ issues:
     - path: _test\.go
       linters:
         - errcheck
-    - path: cmd/tokenmeter/main\.go
+    - path: cmd/tm/main\.go
       linters:
         - errcheck
   max-issues-per-linter: 0

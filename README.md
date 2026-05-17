@@ -53,19 +53,19 @@
 - **7 天费用趋势** — Stats 视图内置垂直柱状图，一眼看清每日花费走势
 - **工具调用追踪** — 名称、参数、结果、耗时、状态
 - **对话消息** — 浏览每个会话中的用户提示词，支持 `/` 搜索过滤
-- **会话标签** — `tokenmeter tag <id> "备注"` 给会话打标签，方便回忆
+- **会话标签** — `tm tag <id> "备注"` 给会话打标签，方便回忆
 - **时间范围统计** — 今日 / 本周 / 本月 / 全部 Token 与费用聚合
-- **费用报告** — `tokenmeter report --weekly/--monthly` 生成 Markdown 费用报告（按模型、按会话细分）
-- **分享战报** — `tokenmeter share [session]` 生成可复制的 Markdown 会话复盘，适合群内分享或交接
-- **Web Dashboard** — `tokenmeter web` 启动本地 Web 面板，支持深色/浅色模式、面积图、会话详情、对话回顾
+- **费用报告** — `tm report --weekly/--monthly` 生成 Markdown 费用报告（按模型、按会话细分）
+- **分享战报** — `tm share [session]` 生成可复制的 Markdown 会话复盘，适合群内分享或交接
+- **Web Dashboard** — `tm web` 启动本地 Web 面板，支持深色/浅色模式、面积图、会话详情、对话回顾
 - **实时更新** — daemon 广播事件，TUI 实时刷新
-- **零配置** — `tokenmeter setup` + `tokenmeter`，单二进制文件，无依赖
+- **零配置** — 首次运行 `tm` 自动注入 hooks，单二进制文件，无依赖
 
 ## 支持平台
 
 | 平台 | 接入方式 | 说明 |
 |------|---------|------|
-| **Claude Code** | Hooks + JSONL 日志监听 | `tokenmeter setup` 自动注入 hooks 到 `~/.claude/settings.json` |
+| **Claude Code** | Hooks + JSONL 日志监听 | `tm setup` 自动注入 hooks 到 `~/.claude/settings.json` |
 | **Codex** | JSONL 日志监听 | 自动轮询 `~/.codex/sessions/` |
 
 ## 安装
@@ -82,13 +82,13 @@ curl -sL https://raw.githubusercontent.com/tt-a1i/tokenmeter/main/install.sh | s
 发布细节见 [docs/release.md](docs/release.md)。
 
 ```bash
-brew install tt-a1i/tap/tokenmeter
+brew install tt-a1i/tap/tm
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/tt-a1i/tokenmeter/cmd/tokenmeter@latest
+go install github.com/tt-a1i/tokenmeter/cmd/tm@latest
 ```
 
 ### 从源码构建
@@ -102,11 +102,8 @@ make install
 ## 快速开始
 
 ```bash
-# 1. 配置 Claude Code hooks
-tokenmeter setup
-
-# 2. 启动 TUI（自动启动 daemon）
-tokenmeter
+# 启动 TUI（首次运行自动注入 Claude Code hooks + 自动起 daemon）
+tm
 ```
 
 就这样。正常使用 Claude Code 或 Codex，TokenMeter 在后台自动采集所有数据。
@@ -115,20 +112,20 @@ tokenmeter
 
 | 命令 | 说明 |
 |------|------|
-| `tokenmeter` | 启动 TUI（自动启动 daemon） |
-| `tokenmeter daemon` | 仅启动 daemon |
-| `tokenmeter status` | 快速查看会话摘要 |
-| `tokenmeter report [session]` | 详细文本报告 |
-| `tokenmeter report --weekly` | 本周 Markdown 费用报告 |
-| `tokenmeter report --monthly` | 本月 Markdown 费用报告 |
-| `tokenmeter share [session]` | 生成可分享的 Markdown 会话战报 |
-| `tokenmeter cost [today\|week]` | Token 用量统计 |
-| `tokenmeter web [--port N]` | 启动 Web Dashboard（默认端口 8370） |
-| `tokenmeter clean [days]` | 清理 N 天前的历史数据（默认 7 天） |
-| `tokenmeter tag <id> [text]` | 给会话打标签（省略 text 则清除） |
-| `tokenmeter setup` | 配置 Claude Code hooks |
-| `tokenmeter uninstall` | 卸载 hooks 并停止 daemon |
-| `tokenmeter version` | 显示版本 |
+| `tm` | 启动 TUI（自动启动 daemon） |
+| `tm daemon` | 仅启动 daemon |
+| `tm status` | 快速查看会话摘要 |
+| `tm report [session]` | 详细文本报告 |
+| `tm report --weekly` | 本周 Markdown 费用报告 |
+| `tm report --monthly` | 本月 Markdown 费用报告 |
+| `tm share [session]` | 生成可分享的 Markdown 会话战报 |
+| `tm cost [today\|week]` | Token 用量统计 |
+| `tm web [--port N]` | 启动 Web Dashboard（默认端口 8370） |
+| `tm clean [days]` | 清理 N 天前的历史数据（默认 7 天） |
+| `tm tag <id> [text]` | 给会话打标签（省略 text 则清除） |
+| `tm setup` | 配置 Claude Code hooks |
+| `tm uninstall` | 卸载 hooks 并停止 daemon |
+| `tm version` | 显示版本 |
 
 ## TUI 视图
 
@@ -162,8 +159,8 @@ tokenmeter
 ## Web Dashboard
 
 ```bash
-tokenmeter web              # 打开 http://localhost:8370
-tokenmeter web --port 9000  # 自定义端口
+tm web              # 打开 http://localhost:8370
+tm web --port 9000  # 自定义端口
 ```
 
 浏览器面板功能：
@@ -190,15 +187,15 @@ tokenmeter web --port 9000  # 自定义端口
 > ASCII 版速写：
 >
 > ```
-> Claude Code hooks ──→ tokenmeter emit ──→ Unix socket ─┐
+> Claude Code hooks ──→ tm emit ──→ Unix socket ─┐
 > Claude JSONL 日志 ──→ ClaudeLogWatcher ───────────┤
 > Codex  JSONL 日志 ──→ CodexWatcher ───────────────┘
 >                                                    ▼
->                                              tokenmeter daemon
+>                                              tm daemon
 >                                                    │
 >                                          SQLite (~/.tokenmeter/data/tokenmeter.db)
 >                                                    │
->                                  tokenmeter TUI  ◄─────┴─────►  tokenmeter web
+>                                       tm TUI  ◄─────┴─────►  tm web
 > ```
 
 ## 数据存储
@@ -222,12 +219,12 @@ tokenmeter web --port 9000  # 自定义端口
 ## 配置 / 环境变量
 
 - `INSTALL_DIR`（仅 `install.sh`）— 覆盖默认 `/usr/local/bin` 安装位置。
-- HTTP 端口通过 `tokenmeter web --port N` 指定；Web Dashboard `?limit=N` query 参数可拉取 200 以外的 session 数量（cap 1000）。
+- HTTP 端口通过 `tm web --port N` 指定；Web Dashboard `?limit=N` query 参数可拉取 200 以外的 session 数量（cap 1000）。
 
 ## 卸载
 
 ```bash
-tokenmeter uninstall        # 移除 hooks，停止 daemon
+tm uninstall        # 移除 hooks，停止 daemon
 rm -rf ~/.tokenmeter        # 删除所有数据
 ```
 

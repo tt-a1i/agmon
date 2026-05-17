@@ -36,7 +36,7 @@ func runUpdate() {
 	if maybePrintCmdHelp("update", os.Args[2:]) {
 		return
 	}
-	fmt.Printf("tokenmeter v%s — checking for updates...\n", version)
+	fmt.Printf("tm v%s — checking for updates...\n", version)
 
 	rel, err := fetchLatestRelease()
 	if err != nil {
@@ -214,7 +214,7 @@ func extractTarGz(data []byte) ([]byte, error) {
 			return nil, err
 		}
 		name := filepath.Base(hdr.Name)
-		if name == "tokenmeter" || name == "tokenmeter.exe" {
+		if name == "tm" || name == "tm.exe" || name == "tokenmeter" || name == "tokenmeter.exe" {
 			return io.ReadAll(tr)
 		}
 	}
@@ -228,7 +228,7 @@ func extractZip(data []byte) ([]byte, error) {
 	}
 	for _, f := range zr.File {
 		name := filepath.Base(f.Name)
-		if name == "tokenmeter" || name == "tokenmeter.exe" {
+		if name == "tm" || name == "tm.exe" || name == "tokenmeter" || name == "tokenmeter.exe" {
 			rc, err := f.Open()
 			if err != nil {
 				return nil, err

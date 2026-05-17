@@ -14,7 +14,7 @@ func runBudget() error {
 		return nil
 	}
 	if len(os.Args) < 3 {
-		return fmt.Errorf("usage: tokenmeter budget <list|set|delete|usage>")
+		return fmt.Errorf("usage: tm budget <list|set|delete|usage>")
 	}
 
 	db := mustOpenDB()
@@ -59,7 +59,7 @@ func runBudgetList(db *storage.DB) error {
 
 func runBudgetSet(db *storage.DB, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: tokenmeter budget set <name> <monthly_usd> [--platform claude|codex]")
+		return fmt.Errorf("usage: tm budget set <name> <monthly_usd> [--platform claude|codex]")
 	}
 	name := args[0]
 	monthlyUSD, err := strconv.ParseFloat(args[1], 64)
@@ -104,7 +104,7 @@ func runBudgetSet(db *storage.DB, args []string) error {
 
 func runBudgetDelete(db *storage.DB, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: tokenmeter budget delete <id>")
+		return fmt.Errorf("usage: tm budget delete <id>")
 	}
 	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil || id <= 0 {
@@ -119,7 +119,7 @@ func runBudgetDelete(db *storage.DB, args []string) error {
 
 func runBudgetUsage(db *storage.DB, args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: tokenmeter budget usage <id>")
+		return fmt.Errorf("usage: tm budget usage <id>")
 	}
 	id, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil || id <= 0 {

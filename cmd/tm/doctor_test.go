@@ -109,10 +109,10 @@ func TestDoctorDetectsMissingHooks(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "[✗] Claude hooks missing tokenmeter emit") {
+	if !strings.Contains(out, "[✗] Claude hooks missing tm emit") {
 		t.Fatalf("expected missing hooks error:\n%s", out)
 	}
-	if !strings.Contains(out, "Run 'tokenmeter setup'") {
+	if !strings.Contains(out, "Run 'tm setup'") {
 		t.Fatalf("expected setup suggestion:\n%s", out)
 	}
 }
@@ -135,7 +135,7 @@ func TestDoctorDetectsLargeDB(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(out, "[⚠] Database size") || !strings.Contains(out, "tokenmeter clean 30") {
+	if !strings.Contains(out, "[⚠] Database size") || !strings.Contains(out, "tm clean 30") {
 		t.Fatalf("expected db size warning:\n%s", out)
 	}
 }

@@ -13,7 +13,7 @@ func runCheckpoint() error {
 		return nil
 	}
 	if len(os.Args) > 2 {
-		return fmt.Errorf("usage: tokenmeter checkpoint")
+		return fmt.Errorf("usage: tm checkpoint")
 	}
 
 	dbPath := storage.DefaultDBPath()

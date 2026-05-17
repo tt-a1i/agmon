@@ -49,17 +49,17 @@
 - **7-day cost chart** — vertical bar chart in Stats view showing daily spend at a glance
 - **Tool call traces** — name, params, result, duration, success/failure status
 - **Conversation messages** — browse user prompts within each session, with `/` search
-- **Session tags** — `tokenmeter tag <id> "note"` to label sessions for easy recall
+- **Session tags** — `tm tag <id> "note"` to label sessions for easy recall
 - **Time range stats** — Today / Week / Month / All token & cost aggregation
-- **Share recaps** — `tokenmeter share [session]` creates a compact Markdown session recap for sharing or handoff
+- **Share recaps** — `tm share [session]` creates a compact Markdown session recap for sharing or handoff
 - **Live updates** — daemon broadcasts events, TUI refreshes in real time
-- **Zero config** — `tokenmeter setup` + `tokenmeter`, single binary, no dependencies
+- **Zero config** — first `tm` run auto-installs hooks, single binary, no dependencies
 
 ## Supported Platforms
 
 | Platform | Integration | How |
 |----------|-------------|-----|
-| **Claude Code** | Hooks + JSONL log watcher | `tokenmeter setup` auto-injects hooks into `~/.claude/settings.json` |
+| **Claude Code** | Hooks + JSONL log watcher | `tm setup` auto-injects hooks into `~/.claude/settings.json` |
 | **Codex** | JSONL log watcher | Automatic — polls `~/.codex/sessions/` |
 
 ## Install
@@ -76,13 +76,13 @@ Available only when the release pipeline is configured with a Homebrew tap repos
 See [docs/release.md](docs/release.md) for release prerequisites.
 
 ```bash
-brew install tt-a1i/tap/tokenmeter
+brew install tt-a1i/tap/tm
 ```
 
 ### Go Install
 
 ```bash
-go install github.com/tt-a1i/tokenmeter/cmd/tokenmeter@latest
+go install github.com/tt-a1i/tokenmeter/cmd/tm@latest
 ```
 
 ### From source
@@ -96,11 +96,8 @@ make install
 ## Quick Start
 
 ```bash
-# 1. Configure Claude Code hooks
-tokenmeter setup
-
-# 2. Launch TUI (auto-starts daemon)
-tokenmeter
+# Launch TUI (auto-installs Claude Code hooks + starts daemon on first run)
+tm
 ```
 
 That's it. Use Claude Code or Codex normally — TokenMeter captures everything in the background.
@@ -109,17 +106,17 @@ That's it. Use Claude Code or Codex normally — TokenMeter captures everything 
 
 | Command | Description |
 |---------|-------------|
-| `tokenmeter` | Start TUI (auto-starts daemon) |
-| `tokenmeter daemon` | Start daemon only |
-| `tokenmeter status` | Quick session summary |
-| `tokenmeter report [session]` | Detailed text report |
-| `tokenmeter share [session]` | Shareable Markdown session recap |
-| `tokenmeter cost [today\|week]` | Token usage statistics |
-| `tokenmeter clean [days]` | Remove sessions older than N days (default: 7) |
-| `tokenmeter tag <id> [text]` | Tag a session with a note (omit text to clear) |
-| `tokenmeter setup` | Configure Claude Code hooks |
-| `tokenmeter uninstall` | Remove hooks and stop daemon |
-| `tokenmeter version` | Show version |
+| `tm` | Start TUI (auto-starts daemon) |
+| `tm daemon` | Start daemon only |
+| `tm status` | Quick session summary |
+| `tm report [session]` | Detailed text report |
+| `tm share [session]` | Shareable Markdown session recap |
+| `tm cost [today\|week]` | Token usage statistics |
+| `tm clean [days]` | Remove sessions older than N days (default: 7) |
+| `tm tag <id> [text]` | Tag a session with a note (omit text to clear) |
+| `tm setup` | Configure Claude Code hooks |
+| `tm uninstall` | Remove hooks and stop daemon |
+| `tm version` | Show version |
 
 ## TUI Views
 
@@ -165,15 +162,15 @@ The diagram at the top shows the full data flow. Component cheat sheet:
 > ASCII sketch:
 >
 > ```
-> Claude Code hooks ──→ tokenmeter emit ──→ Unix socket ─┐
+> Claude Code hooks ──→ tm emit ──→ Unix socket ─┐
 > Claude JSONL logs ──→ ClaudeLogWatcher ───────────┤
 > Codex  JSONL logs ──→ CodexWatcher ───────────────┘
 >                                                    ▼
->                                              tokenmeter daemon
+>                                              tm daemon
 >                                                    │
 >                                          SQLite (~/.tokenmeter/data/tokenmeter.db)
 >                                                    │
->                                  tokenmeter TUI  ◄─────┴─────►  tokenmeter web
+>                                       tm TUI  ◄─────┴─────►  tm web
 > ```
 
 ## Data Storage
@@ -190,7 +187,7 @@ When upgrading from the old name, TokenMeter continues to read `~/.agmon/` if it
 ## Uninstall
 
 ```bash
-tokenmeter uninstall        # remove hooks, stop daemon
+tm uninstall        # remove hooks, stop daemon
 rm -rf ~/.tokenmeter        # remove all data
 ```
 

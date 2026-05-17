@@ -118,7 +118,7 @@ func runDoctor() error {
 		fmt.Printf("Summary: %d OK, %d warnings, %d errors.\n", ok, warnings, errs)
 	}
 	if doctorHooksNeedSetup(results) {
-		fmt.Println("Run 'tokenmeter setup' if hooks missing.")
+		fmt.Println("Run 'tm setup' if hooks missing.")
 	}
 	return nil
 }
@@ -370,9 +370,9 @@ func checkDoctorDatabaseSize(ctx doctorContext) doctorCheckResult {
 	size := info.Size()
 	switch {
 	case size > doctorDBErrorSizeBytes:
-		return doctorResult("database_size", doctorStatusError, fmt.Sprintf("Database size %s — run 'tokenmeter clean 30' soon", formatBytes(size)))
+		return doctorResult("database_size", doctorStatusError, fmt.Sprintf("Database size %s — run 'tm clean 30' soon", formatBytes(size)))
 	case size > doctorDBWarnSizeBytes:
-		return doctorResult("database_size", doctorStatusWarning, fmt.Sprintf("Database size %s — consider 'tokenmeter clean 30'", formatBytes(size)))
+		return doctorResult("database_size", doctorStatusWarning, fmt.Sprintf("Database size %s — consider 'tm clean 30'", formatBytes(size)))
 	default:
 		return doctorResult("database_size", doctorStatusOK, fmt.Sprintf("Database size %s", formatBytes(size)))
 	}
@@ -487,7 +487,7 @@ func checkDoctorClaudeHookCommand(ctx doctorContext) doctorCheckResult {
 	}
 	events := tokenMeterHookEvents(settings)
 	if len(events) == 0 {
-		return doctorFixableResult("claude_hook_command", doctorStatusError, "Claude hooks missing tokenmeter emit command", runDoctorSetupQuiet)
+		return doctorFixableResult("claude_hook_command", doctorStatusError, "Claude hooks missing tm emit command", runDoctorSetupQuiet)
 	}
 	return doctorResult("claude_hook_command", doctorStatusOK, fmt.Sprintf("Claude hooks configured (%d entries: %s)", len(events), strings.Join(events, ", ")))
 }

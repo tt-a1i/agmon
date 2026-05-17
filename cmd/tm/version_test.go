@@ -19,7 +19,7 @@ func TestRunVersionTextDefault(t *testing.T) {
 		t.Fatalf("runVersion: %v", err)
 	}
 
-	if got, want := strings.TrimSpace(out.String()), "tokenmeter v0.7.0"; got != want {
+	if got, want := strings.TrimSpace(out.String()), "tm v0.7.0"; got != want {
 		t.Fatalf("version output = %q, want %q", got, want)
 	}
 }
@@ -35,7 +35,7 @@ func TestRunVersionCheckLatest(t *testing.T) {
 		t.Fatalf("runVersion --check: %v", err)
 	}
 
-	for _, want := range []string{"TokenMeter v0.7.0 (current)", "Latest: v0.8.0", "Update:", "To update: tokenmeter update"} {
+	for _, want := range []string{"TokenMeter v0.7.0 (current)", "Latest: v0.8.0", "Update:", "To update: tm update"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("version --check output missing %q:\n%s", want, out.String())
 		}

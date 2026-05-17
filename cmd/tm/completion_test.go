@@ -14,7 +14,7 @@ func TestRunCompletionBash(t *testing.T) {
 		}
 	})
 
-	for _, want := range []string{"_tokenmeter()", "complete -F _tokenmeter tokenmeter", "budget)", "completion)"} {
+	for _, want := range []string{"_tm()", "complete -F _tm tm", "budget)", "completion)"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("bash completion missing %q:\n%s", want, out)
 		}
@@ -30,7 +30,7 @@ func TestRunCompletionZsh(t *testing.T) {
 		}
 	})
 
-	for _, want := range []string{"#compdef tokenmeter", "_tokenmeter \"$@\"", "budget) _values"} {
+	for _, want := range []string{"#compdef tm", "_tm \"$@\"", "budget) _values"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("zsh completion missing %q:\n%s", want, out)
 		}
@@ -46,7 +46,7 @@ func TestRunCompletionFish(t *testing.T) {
 		}
 	})
 
-	for _, want := range []string{"complete -c tokenmeter", "__fish_use_subcommand", "__fish_seen_subcommand_from budget"} {
+	for _, want := range []string{"complete -c tm", "__fish_use_subcommand", "__fish_seen_subcommand_from budget"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("fish completion missing %q:\n%s", want, out)
 		}

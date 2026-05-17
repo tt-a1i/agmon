@@ -15,7 +15,7 @@ func runBackup() error {
 		return nil
 	}
 	if len(os.Args) > 3 {
-		return fmt.Errorf("usage: tokenmeter backup [dest-path]")
+		return fmt.Errorf("usage: tm backup [dest-path]")
 	}
 
 	destPath := defaultBackupPath(time.Now())

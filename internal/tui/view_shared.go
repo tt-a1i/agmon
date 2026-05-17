@@ -352,5 +352,6 @@ func claudeHooksConfigured() bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), "tokenmeter emit")
+	s := string(data)
+	return strings.Contains(s, "tm emit") || strings.Contains(s, "tokenmeter emit")
 }

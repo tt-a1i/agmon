@@ -71,7 +71,7 @@ func parseSearchArgs(args []string) (string, int, error) {
 	}
 	query := strings.TrimSpace(strings.Join(queryParts, " "))
 	if query == "" {
-		return "", 0, fmt.Errorf("usage: tokenmeter search <query> [--limit N]")
+		return "", 0, fmt.Errorf("usage: tm search <query> [--limit N]")
 	}
 	return query, limit, nil
 }
