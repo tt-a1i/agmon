@@ -3,12 +3,14 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -57,6 +59,8 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux.HandleFunc("/api/costs", s.handleCosts)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/events", s.handleEvents)
+	mux.HandleFunc("/api/export", s.handleExport)
+	mux.HandleFunc("/api/compare", s.handleCompare)
 	mux.HandleFunc("/api/session/", s.handleSessionDetail)
 
 	s.srv = &http.Server{
@@ -209,7 +213,18 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	sessions, err := s.db.ListSessionsLimit(limit)
+	platform := r.URL.Query().Get("platform")
+	var sessions []storage.SessionRow
+	var err error
+	if platform != "" {
+		if platform != string(event.PlatformClaude) && platform != string(event.PlatformCodex) {
+			writeAPIError(w, http.StatusBadRequest, "invalid platform")
+			return
+		}
+		sessions, err = s.db.ListSessionsByPlatform(platform, limit)
+	} else {
+		sessions, err = s.db.ListSessionsLimit(limit)
+	}
 	if err != nil {
 		writeInternalError(w, err)
 		return
@@ -236,6 +251,124 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		result = append(result, sj)
 	}
 	writeJSON(w, result)
+}
+
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "csv"
+	}
+	if format != "csv" && format != "json" {
+		writeAPIError(w, http.StatusBadRequest, "invalid export format")
+		return
+	}
+
+	rangeLabel, from, to, err := s.exportRange(r.URL.Query().Get("range"))
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	filename := fmt.Sprintf("tokenmeter-%s-%s.%s", rangeLabel, to.Format("2006-01-02"), format)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	if format == "json" {
+		w.Header().Set("Content-Type", "application/json")
+		s.writeExportJSON(w, from, to)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	s.writeExportCSV(w, from, to)
+}
+
+func (s *Server) exportRange(rangeParam string) (string, time.Time, time.Time, error) {
+	now := time.Now()
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+
+	switch rangeParam {
+	case "today":
+		return "today", startOfToday, now, nil
+	case "week":
+		wd := now.Weekday()
+		if wd == 0 {
+			wd = 7
+		}
+		return "week", time.Date(now.Year(), now.Month(), now.Day()-int(wd-1), 0, 0, 0, 0, time.Local), now, nil
+	case "month":
+		return "month", time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local), now, nil
+	case "all":
+		firstDate, err := s.db.GetFirstTokenDate()
+		if err != nil {
+			return "", time.Time{}, time.Time{}, err
+		}
+		if firstDate.IsZero() {
+			firstDate = startOfToday.AddDate(0, 0, -29)
+		}
+		return "all", firstDate, now, nil
+	default:
+		return "7d", startOfToday.AddDate(0, 0, -6), now, nil
+	}
+}
+
+func (s *Server) writeExportCSV(w http.ResponseWriter, from, to time.Time) {
+	cw := csv.NewWriter(w)
+	if err := cw.Write([]string{"date", "session_id", "session_name", "platform", "model", "input_tokens", "output_tokens", "cache_tokens", "cost_usd"}); err != nil {
+		log.Printf("web export csv header: %v", err)
+		return
+	}
+	err := s.db.ForEachSessionExportRow(from, to, func(row storage.SessionExportRow) error {
+		return cw.Write([]string{
+			row.Date,
+			row.SessionID,
+			row.SessionName,
+			row.Platform,
+			row.Model,
+			strconv.Itoa(row.InputTokens),
+			strconv.Itoa(row.OutputTokens),
+			strconv.Itoa(row.CacheTokens),
+			fmt.Sprintf("%.6f", row.CostUSD),
+		})
+	})
+	cw.Flush()
+	if flushErr := cw.Error(); flushErr != nil {
+		log.Printf("web export csv flush: %v", flushErr)
+	}
+	if err != nil {
+		log.Printf("web export csv rows: %v", err)
+	}
+}
+
+func (s *Server) writeExportJSON(w http.ResponseWriter, from, to time.Time) {
+	if _, err := fmt.Fprint(w, "["); err != nil {
+		return
+	}
+	first := true
+	err := s.db.ForEachSessionExportRow(from, to, func(row storage.SessionExportRow) error {
+		payload, err := json.Marshal(row)
+		if err != nil {
+			return err
+		}
+		if !first {
+			if _, err := fmt.Fprint(w, ","); err != nil {
+				return err
+			}
+		}
+		first = false
+		_, err = w.Write(payload)
+		return err
+	})
+	if _, closeErr := fmt.Fprint(w, "]"); closeErr != nil {
+		log.Printf("web export json close: %v", closeErr)
+	}
+	if err != nil {
+		log.Printf("web export json rows: %v", err)
+	}
 }
 
 type costResponse struct {
@@ -391,6 +524,183 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		TopTools:      topTools,
 		TopSessions:   topSessions,
 	})
+}
+
+type compareToolDiff struct {
+	Name   string `json:"name"`
+	ACount int    `json:"a_count"`
+	BCount int    `json:"b_count"`
+}
+
+type compareCostDiff struct {
+	A     float64 `json:"a"`
+	B     float64 `json:"b"`
+	Delta float64 `json:"delta"`
+}
+
+type compareTokenDiff struct {
+	AInput      int `json:"a_input"`
+	BInput      int `json:"b_input"`
+	DeltaInput  int `json:"delta_input"`
+	AOutput     int `json:"a_output"`
+	BOutput     int `json:"b_output"`
+	DeltaOutput int `json:"delta_output"`
+}
+
+type compareFileDiff struct {
+	AOnly  []string `json:"a_only"`
+	BOnly  []string `json:"b_only"`
+	Common []string `json:"common"`
+}
+
+func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	aPrefix := r.URL.Query().Get("a")
+	bPrefix := r.URL.Query().Get("b")
+	if aPrefix == "" || bPrefix == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+
+	a, ok, err := s.db.GetSessionByIDPrefix(aPrefix)
+	if err != nil {
+		if errors.Is(err, storage.ErrAmbiguousSessionPrefix) {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+		} else {
+			writeInternalError(w, err)
+		}
+		return
+	}
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	b, ok, err := s.db.GetSessionByIDPrefix(bPrefix)
+	if err != nil {
+		if errors.Is(err, storage.ErrAmbiguousSessionPrefix) {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+		} else {
+			writeInternalError(w, err)
+		}
+		return
+	}
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	toolDiff, err := s.compareTools(a.SessionID, b.SessionID)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	fileDiff, err := s.compareFiles(a.SessionID, b.SessionID)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"tool_diff": toolDiff,
+		"cost_diff": compareCostDiff{
+			A:     a.TotalCostUSD,
+			B:     b.TotalCostUSD,
+			Delta: b.TotalCostUSD - a.TotalCostUSD,
+		},
+		"token_diff": compareTokenDiff{
+			AInput:      a.TotalInputTokens,
+			BInput:      b.TotalInputTokens,
+			DeltaInput:  b.TotalInputTokens - a.TotalInputTokens,
+			AOutput:     a.TotalOutputTokens,
+			BOutput:     b.TotalOutputTokens,
+			DeltaOutput: b.TotalOutputTokens - a.TotalOutputTokens,
+		},
+		"file_diff": fileDiff,
+	})
+}
+
+func (s *Server) compareTools(aID, bID string) ([]compareToolDiff, error) {
+	aStats, err := s.db.ListToolStats(aID)
+	if err != nil {
+		return nil, err
+	}
+	bStats, err := s.db.ListToolStats(bID)
+	if err != nil {
+		return nil, err
+	}
+
+	counts := make(map[string]*compareToolDiff)
+	for _, stat := range aStats {
+		diff := counts[stat.ToolName]
+		if diff == nil {
+			diff = &compareToolDiff{Name: stat.ToolName}
+			counts[stat.ToolName] = diff
+		}
+		diff.ACount = stat.Count
+	}
+	for _, stat := range bStats {
+		diff := counts[stat.ToolName]
+		if diff == nil {
+			diff = &compareToolDiff{Name: stat.ToolName}
+			counts[stat.ToolName] = diff
+		}
+		diff.BCount = stat.Count
+	}
+
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	result := make([]compareToolDiff, 0, len(names))
+	for _, name := range names {
+		result = append(result, *counts[name])
+	}
+	return result, nil
+}
+
+func (s *Server) compareFiles(aID, bID string) (compareFileDiff, error) {
+	aFiles, err := s.db.ListFileChanges(aID)
+	if err != nil {
+		return compareFileDiff{}, err
+	}
+	bFiles, err := s.db.ListFileChanges(bID)
+	if err != nil {
+		return compareFileDiff{}, err
+	}
+
+	aSet := make(map[string]struct{})
+	bSet := make(map[string]struct{})
+	for _, f := range aFiles {
+		aSet[f.FilePath] = struct{}{}
+	}
+	for _, f := range bFiles {
+		bSet[f.FilePath] = struct{}{}
+	}
+
+	var diff compareFileDiff
+	for path := range aSet {
+		if _, ok := bSet[path]; ok {
+			diff.Common = append(diff.Common, path)
+		} else {
+			diff.AOnly = append(diff.AOnly, path)
+		}
+	}
+	for path := range bSet {
+		if _, ok := aSet[path]; !ok {
+			diff.BOnly = append(diff.BOnly, path)
+		}
+	}
+	sort.Strings(diff.AOnly)
+	sort.Strings(diff.BOnly)
+	sort.Strings(diff.Common)
+	return diff, nil
 }
 
 // handleSessionDetail serves /api/session/{id} with tools, agents, files for a session.

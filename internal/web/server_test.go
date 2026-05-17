@@ -2,6 +2,7 @@ package web
 
 import (
 	"bufio"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -81,6 +82,42 @@ func TestHandleSessionsWithData(t *testing.T) {
 	}
 }
 
+func TestHandleSessionsPlatformFilter(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	if err := db.UpsertSession("claude-session", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert claude session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "claude-session", 100, 50, 0, 0, "sonnet", 0.1, now, "src-claude"); err != nil {
+		t.Fatalf("insert claude tokens: %v", err)
+	}
+	if err := db.UpsertSession("codex-session", event.PlatformCodex, now.Add(time.Minute)); err != nil {
+		t.Fatalf("upsert codex session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a2", "codex-session", 200, 75, 0, 0, "gpt-5", 0.2, now.Add(time.Minute), "src-codex"); err != nil {
+		t.Fatalf("insert codex tokens: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions?platform=codex", nil)
+	w := httptest.NewRecorder()
+	srv.handleSessions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	var sessions []sessionJSON
+	if err := json.Unmarshal(w.Body.Bytes(), &sessions); err != nil {
+		t.Fatalf("unmarshal sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len: got %d, want 1", len(sessions))
+	}
+	if sessions[0].SessionID != "codex-session" || sessions[0].Platform != string(event.PlatformCodex) {
+		t.Fatalf("session: got %#v, want codex-session only", sessions[0])
+	}
+}
+
 func TestHandleCosts(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()
@@ -116,6 +153,77 @@ func TestHandleCosts(t *testing.T) {
 	// from the first token date, so the result is at most a few days.
 	if len(resp.DailyCosts) > 60 {
 		t.Errorf("all range returned %d days; expected <= 60 (should start from first token date)", len(resp.DailyCosts))
+	}
+}
+
+func TestHandleExportCSVJSONAndRangeBoundary(t *testing.T) {
+	db := testDB(t)
+	now := time.Now()
+	recent := now.AddDate(0, 0, -2)
+	old := now.AddDate(0, 0, -10)
+
+	if err := db.UpsertSession("recent-session", event.PlatformClaude, recent); err != nil {
+		t.Fatalf("upsert recent: %v", err)
+	}
+	if err := db.UpdateSessionMeta("recent-session", "/Users/test/project-alpha", "feature/export"); err != nil {
+		t.Fatalf("update recent meta: %v", err)
+	}
+	if err := db.InsertTokenUsage("agent-recent", "recent-session", 1000, 400, 25, 75, "claude-sonnet-4-6", 0.42, recent, "src-recent"); err != nil {
+		t.Fatalf("insert recent tokens: %v", err)
+	}
+
+	if err := db.UpsertSession("old-session", event.PlatformCodex, old); err != nil {
+		t.Fatalf("upsert old: %v", err)
+	}
+	if err := db.InsertTokenUsage("agent-old", "old-session", 800, 200, 0, 0, "gpt-5", 0.24, old, "src-old"); err != nil {
+		t.Fatalf("insert old tokens: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	csvReq := httptest.NewRequest(http.MethodGet, "/api/export?format=csv", nil)
+	csvRec := httptest.NewRecorder()
+	srv.handleExport(csvRec, csvReq)
+
+	if csvRec.Code != http.StatusOK {
+		t.Fatalf("csv status: got %d, want 200. body: %s", csvRec.Code, csvRec.Body.String())
+	}
+	if ct := csvRec.Header().Get("Content-Type"); !strings.Contains(ct, "text/csv") {
+		t.Fatalf("csv content-type: got %q", ct)
+	}
+	if cd := csvRec.Header().Get("Content-Disposition"); !strings.Contains(cd, `attachment; filename="tokenmeter-7d-`) || !strings.HasSuffix(cd, `.csv"`) {
+		t.Fatalf("csv content-disposition: got %q", cd)
+	}
+	records, err := csv.NewReader(strings.NewReader(csvRec.Body.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("read csv: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("csv records: got %d, want header + one recent row. records=%v", len(records), records)
+	}
+	wantHeader := []string{"date", "session_id", "session_name", "platform", "model", "input_tokens", "output_tokens", "cache_tokens", "cost_usd"}
+	if strings.Join(records[0], ",") != strings.Join(wantHeader, ",") {
+		t.Fatalf("csv header: got %v, want %v", records[0], wantHeader)
+	}
+	if records[1][1] != "recent-session" || records[1][2] != "feature/export" || records[1][7] != "100" || records[1][8] != "0.420000" {
+		t.Fatalf("csv row: got %v", records[1])
+	}
+
+	jsonReq := httptest.NewRequest(http.MethodGet, "/api/export?range=all&format=json", nil)
+	jsonRec := httptest.NewRecorder()
+	srv.handleExport(jsonRec, jsonReq)
+
+	if jsonRec.Code != http.StatusOK {
+		t.Fatalf("json status: got %d, want 200. body: %s", jsonRec.Code, jsonRec.Body.String())
+	}
+	if ct := jsonRec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("json content-type: got %q", ct)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(jsonRec.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("unmarshal json export: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("json rows: got %d, want 2", len(rows))
 	}
 }
 
@@ -253,6 +361,103 @@ func TestHandleEventsSubscribeError(t *testing.T) {
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status: got %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleCompare(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	for _, id := range []string{"session-alpha", "session-beta", "ambiguous-one", "ambiguous-two"} {
+		if err := db.UpsertSession(id, event.PlatformClaude, now); err != nil {
+			t.Fatalf("upsert %s: %v", id, err)
+		}
+	}
+	if err := db.InsertTokenUsage("a", "session-alpha", 1000, 200, 0, 0, "sonnet", 0.50, now, "src-a"); err != nil {
+		t.Fatalf("insert alpha tokens: %v", err)
+	}
+	if err := db.InsertTokenUsage("b", "session-beta", 700, 300, 0, 0, "sonnet", 0.75, now, "src-b"); err != nil {
+		t.Fatalf("insert beta tokens: %v", err)
+	}
+	if _, err := db.InsertToolCallStart("tool-a-read", "a", "session-alpha", "Read", "a.go", now); err != nil {
+		t.Fatalf("insert alpha read: %v", err)
+	}
+	if err := db.UpdateToolCallEnd("tool-a-read", "ok", event.StatusSuccess, 10, now.Add(time.Second)); err != nil {
+		t.Fatalf("end alpha read: %v", err)
+	}
+	if _, err := db.InsertToolCallStart("tool-b-read", "b", "session-beta", "Read", "b.go", now); err != nil {
+		t.Fatalf("insert beta read: %v", err)
+	}
+	if err := db.UpdateToolCallEnd("tool-b-read", "ok", event.StatusSuccess, 20, now.Add(time.Second)); err != nil {
+		t.Fatalf("end beta read: %v", err)
+	}
+	if _, err := db.InsertToolCallStart("tool-b-edit", "b", "session-beta", "Edit", "b.go", now); err != nil {
+		t.Fatalf("insert beta edit: %v", err)
+	}
+	if err := db.InsertFileChange("session-alpha", "/tmp/common.go", event.FileEdit, now); err != nil {
+		t.Fatalf("insert alpha common file: %v", err)
+	}
+	if err := db.InsertFileChange("session-alpha", "/tmp/a-only.go", event.FileEdit, now); err != nil {
+		t.Fatalf("insert alpha only file: %v", err)
+	}
+	if err := db.InsertFileChange("session-beta", "/tmp/common.go", event.FileEdit, now); err != nil {
+		t.Fatalf("insert beta common file: %v", err)
+	}
+	if err := db.InsertFileChange("session-beta", "/tmp/b-only.go", event.FileCreate, now); err != nil {
+		t.Fatalf("insert beta only file: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	okReq := httptest.NewRequest(http.MethodGet, "/api/compare?a=session-alpha&b=session-beta", nil)
+	okRec := httptest.NewRecorder()
+	srv.handleCompare(okRec, okReq)
+
+	if okRec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", okRec.Code, okRec.Body.String())
+	}
+	var resp struct {
+		ToolDiff []struct {
+			Name   string `json:"name"`
+			ACount int    `json:"a_count"`
+			BCount int    `json:"b_count"`
+		} `json:"tool_diff"`
+		CostDiff struct {
+			A     float64 `json:"a"`
+			B     float64 `json:"b"`
+			Delta float64 `json:"delta"`
+		} `json:"cost_diff"`
+		FileDiff struct {
+			AOnly  []string `json:"a_only"`
+			BOnly  []string `json:"b_only"`
+			Common []string `json:"common"`
+		} `json:"file_diff"`
+	}
+	if err := json.Unmarshal(okRec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal compare: %v", err)
+	}
+	if resp.CostDiff.A != 0.50 || resp.CostDiff.B != 0.75 || resp.CostDiff.Delta != 0.25 {
+		t.Fatalf("cost diff: got %#v", resp.CostDiff)
+	}
+	if len(resp.ToolDiff) != 2 {
+		t.Fatalf("tool diff len: got %d, want 2: %#v", len(resp.ToolDiff), resp.ToolDiff)
+	}
+	if len(resp.FileDiff.AOnly) != 1 || resp.FileDiff.AOnly[0] != "/tmp/a-only.go" ||
+		len(resp.FileDiff.BOnly) != 1 || resp.FileDiff.BOnly[0] != "/tmp/b-only.go" ||
+		len(resp.FileDiff.Common) != 1 || resp.FileDiff.Common[0] != "/tmp/common.go" {
+		t.Fatalf("file diff: got %#v", resp.FileDiff)
+	}
+
+	missingReq := httptest.NewRequest(http.MethodGet, "/api/compare?a=session-alpha", nil)
+	missingRec := httptest.NewRecorder()
+	srv.handleCompare(missingRec, missingReq)
+	if missingRec.Code != http.StatusBadRequest {
+		t.Fatalf("missing param status: got %d, want 400", missingRec.Code)
+	}
+
+	ambiguousReq := httptest.NewRequest(http.MethodGet, "/api/compare?a=ambiguous&b=session-beta", nil)
+	ambiguousRec := httptest.NewRecorder()
+	srv.handleCompare(ambiguousRec, ambiguousReq)
+	if ambiguousRec.Code != http.StatusBadRequest {
+		t.Fatalf("ambiguous status: got %d, want 400", ambiguousRec.Code)
 	}
 }
 

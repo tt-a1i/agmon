@@ -31,6 +31,18 @@ type SessionRow struct {
 	Tag                      string
 }
 
+type SessionExportRow struct {
+	Date         string  `json:"date"`
+	SessionID    string  `json:"session_id"`
+	SessionName  string  `json:"session_name"`
+	Platform     string  `json:"platform"`
+	Model        string  `json:"model"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	CacheTokens  int     `json:"cache_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+}
+
 type AgentRow struct {
 	AgentID       string
 	SessionID     string
@@ -148,6 +160,99 @@ func (s *DB) ListSessionsLimit(limit int) ([]SessionRow, error) {
 		result = append(result, r)
 	}
 	return result, rows.Err()
+}
+
+// ListSessionsByPlatform returns visible sessions for a single platform.
+func (s *DB) ListSessionsByPlatform(platform string, limit int) ([]SessionRow, error) {
+	if limit <= 0 {
+		limit = DefaultSessionListLimit
+	}
+	rows, err := s.db.Query(`
+		SELECT session_id, platform, start_time, end_time, status,
+		       total_input_tokens, total_output_tokens, total_cost_usd,
+		       cwd, git_branch, latest_context_tokens, model,
+		       total_cache_read_tokens, total_cache_creation_tokens, tag
+		FROM sessions
+		WHERE platform = ?
+		  AND (
+		       status = 'active'
+		    OR total_input_tokens > 0 OR total_output_tokens > 0
+		    OR total_cache_read_tokens > 0 OR total_cache_creation_tokens > 0
+		  )
+		ORDER BY start_time DESC LIMIT ?
+	`, platform, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []SessionRow
+	for rows.Next() {
+		var r SessionRow
+		var startStr string
+		var endStr *string
+		if err := rows.Scan(&r.SessionID, &r.Platform, &startStr, &endStr,
+			&r.Status, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCostUSD,
+			&r.CWD, &r.GitBranch, &r.LatestContextTokens, &r.Model,
+			&r.TotalCacheReadTokens, &r.TotalCacheCreationTokens, &r.Tag); err != nil {
+			return nil, err
+		}
+		r.StartTime = parseTime(startStr)
+		r.EndTime = parseTimePtr(endStr)
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+func (s *DB) ForEachSessionExportRow(from, to time.Time, fn func(SessionExportRow) error) error {
+	rows, err := s.db.Query(`
+		SELECT DATE(t.timestamp, 'localtime') as day,
+		       t.session_id,
+		       COALESCE(s.git_branch, ''),
+		       COALESCE(s.cwd, ''),
+		       s.platform,
+		       COALESCE(NULLIF(t.model, ''), NULLIF(s.model, ''), '') as model,
+		       t.input_tokens,
+		       t.output_tokens,
+		       t.cache_creation_tokens + t.cache_read_tokens as cache_tokens,
+		       t.cost_usd
+		FROM token_usage t
+		JOIN sessions s ON t.session_id = s.session_id
+		WHERE t.timestamp >= ? AND t.timestamp < ?
+		ORDER BY t.timestamp ASC, t.id ASC
+	`, formatQueryTime(from), formatQueryTime(to))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var row SessionExportRow
+		var gitBranch, cwd string
+		if err := rows.Scan(&row.Date, &row.SessionID, &gitBranch, &cwd,
+			&row.Platform, &row.Model, &row.InputTokens, &row.OutputTokens,
+			&row.CacheTokens, &row.CostUSD); err != nil {
+			return err
+		}
+		row.SessionName = exportSessionName(row.SessionID, gitBranch, cwd)
+		if err := fn(row); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func exportSessionName(sessionID, gitBranch, cwd string) string {
+	if gitBranch != "" {
+		return gitBranch
+	}
+	if cwd != "" {
+		return cwd
+	}
+	if len(sessionID) > 8 {
+		return sessionID[:8]
+	}
+	return sessionID
 }
 
 // GetSessionByIDPrefix looks up a session by exact ID or unique prefix, searching
