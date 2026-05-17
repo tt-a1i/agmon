@@ -184,6 +184,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	case "logs":
+		if err := runLogs(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "backup":
 		if err := runBackup(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -357,6 +362,13 @@ func runDaemon() {
 	if err := daemon.EnsureNotRunning(); err != nil {
 		log.Fatalf("%v", err)
 	}
+
+	cleanupLogs, err := daemon.SetupLogFile()
+	if err != nil {
+		log.Fatalf("setup daemon log file: %v", err)
+	}
+	defer cleanupLogs()
+	log.Printf("daemon log file enabled")
 
 	db := mustOpenDB()
 	defer db.Close()
@@ -1180,6 +1192,7 @@ Usage:
   tokenmeter watch [session]    Live event stream from daemon
   tokenmeter top [--once]       Minimal live usage dashboard
   tokenmeter healthcheck [--json] Liveness check for scripts/probes
+  tokenmeter logs [--follow]    Show daemon logs
   tokenmeter backup [path]      Back up the local database
   tokenmeter restore <path>     Restore database from backup
   tokenmeter doctor [--json]    Run installation diagnostics
