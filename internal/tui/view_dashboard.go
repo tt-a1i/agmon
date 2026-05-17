@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -22,6 +24,10 @@ func (m Model) viewDashboard(width int) string {
 
 	if projection := m.renderProjectionSummary(); projection != "" {
 		b.WriteString(projection + "\n\n")
+	}
+
+	if workspaceLine := m.renderWorkspaceScope(); workspaceLine != "" {
+		b.WriteString(workspaceLine + "\n\n")
 	}
 
 	budgetLine := m.renderBudgetChips()
@@ -50,6 +56,8 @@ func (m Model) viewDashboard(width int) string {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No sessions match %q", m.filterText)))
 		} else if m.tagFilter != tagFilterAll {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No sessions tagged %q", tagFilterDisplayName(m.tagFilter))))
+		} else if m.workspaceFilter && m.workspace != "" {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No sessions in workspace %s", displayWorkspacePath(m.workspace))))
 		} else if m.platformFilter != platformAll {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No %s sessions", platformFilterNames[m.platformFilter])))
 		} else {
@@ -138,6 +146,35 @@ func (m Model) viewDashboard(width int) string {
 	}
 
 	return b.String()
+}
+
+func (m Model) renderWorkspaceScope() string {
+	if !m.workspaceFilter || m.workspace == "" {
+		return ""
+	}
+	return fmt.Sprintf(" %s %s · %d of %d sessions\n %s",
+		mutedStyle.Render("Workspace:"),
+		headerStyle.Render(displayWorkspacePath(m.workspace)),
+		workspaceSessionCount(m.sessions, m.workspace),
+		len(m.sessions),
+		mutedStyle.Render("Press W to toggle workspace filter · A to show all"))
+}
+
+func displayWorkspacePath(path string) string {
+	cleanPath := filepath.Clean(path)
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return cleanPath
+	}
+	cleanHome := filepath.Clean(home)
+	if cleanPath == cleanHome {
+		return "~"
+	}
+	rel, err := filepath.Rel(cleanHome, cleanPath)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return cleanPath
+	}
+	return filepath.Join("~", rel)
 }
 
 func (m Model) renderProjectionSummary() string {

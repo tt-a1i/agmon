@@ -64,17 +64,17 @@ func TestFilterSessionsAppliesTagFilter(t *testing.T) {
 		{SessionID: "plain-1", Platform: "claude", StartTime: time.Now().Add(-2 * time.Minute)},
 	}
 
-	got := filterSessions(sessions, "", platformAll, sortRecent, "auth")
+	got := filterSessions(sessions, "", platformAll, sortRecent, "auth", "", false)
 	if len(got) != 1 || got[0].SessionID != "auth-1" {
 		t.Fatalf("auth tag filter returned %#v", got)
 	}
 
-	got = filterSessions(sessions, "", platformAll, sortRecent, tagFilterUntagged)
+	got = filterSessions(sessions, "", platformAll, sortRecent, tagFilterUntagged, "", false)
 	if len(got) != 1 || got[0].SessionID != "plain-1" {
 		t.Fatalf("untagged filter returned %#v", got)
 	}
 
-	got = filterSessions(sessions, "refactor", platformAll, sortRecent, "")
+	got = filterSessions(sessions, "refactor", platformAll, sortRecent, "", "", false)
 	if len(got) != 1 || got[0].SessionID != "refactor-1" {
 		t.Fatalf("text filter should match tag text, got %#v", got)
 	}

@@ -106,9 +106,94 @@ func mustOpenDB() *storage.DB {
 	return db
 }
 
+type tuiOptions struct {
+	workspace       string
+	workspaceFilter bool
+}
+
+func isTUIFlag(arg string) bool {
+	return arg == "--all" || arg == "--workspace" || strings.HasPrefix(arg, "--workspace=")
+}
+
+func parseTUIOptions(args []string, getwd func() (string, error)) (tuiOptions, error) {
+	cwd, err := getwd()
+	if err != nil {
+		return tuiOptions{}, fmt.Errorf("get current workspace: %w", err)
+	}
+	workspace, err := cleanTUIWorkspace(cwd)
+	if err != nil {
+		return tuiOptions{}, err
+	}
+	opts := tuiOptions{
+		workspace:       workspace,
+		workspaceFilter: workspace != "",
+	}
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--all":
+			opts.workspace = ""
+			opts.workspaceFilter = false
+		case arg == "--workspace":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--workspace requires a path")
+			}
+			i++
+			workspace, err := cleanTUIWorkspace(args[i])
+			if err != nil {
+				return opts, err
+			}
+			opts.workspace = workspace
+			opts.workspaceFilter = true
+		case strings.HasPrefix(arg, "--workspace="):
+			workspace, err := cleanTUIWorkspace(strings.TrimPrefix(arg, "--workspace="))
+			if err != nil {
+				return opts, err
+			}
+			opts.workspace = workspace
+			opts.workspaceFilter = true
+		default:
+			return opts, fmt.Errorf("unknown TUI option: %s", arg)
+		}
+	}
+	return opts, nil
+}
+
+func cleanTUIWorkspace(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("workspace path cannot be empty")
+	}
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		if path == "~" {
+			path = home
+		} else {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace path: %w", err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func newTUIModel(db *storage.DB, tuiCh chan tui.EventMsg, opts tuiOptions) tui.Model {
+	m := tui.NewModel(db, tuiCh)
+	if opts.workspaceFilter && opts.workspace != "" {
+		m = m.WithWorkspace(opts.workspace)
+	}
+	return m
+}
+
 func main() {
-	if len(os.Args) < 2 {
-		runTUI()
+	if len(os.Args) < 2 || isTUIFlag(os.Args[1]) {
+		runTUI(os.Args[1:]...)
 		return
 	}
 
@@ -253,7 +338,13 @@ func latestOrRequestedSession(db *storage.DB, args []string) (storage.SessionRow
 	return sessions[0], true
 }
 
-func runTUI() {
+func runTUI(args ...string) {
+	opts, err := parseTUIOptions(args, os.Getwd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	db := mustOpenDB()
 	defer db.Close()
 
@@ -277,7 +368,7 @@ func runTUI() {
 			}()
 		}
 
-		m := tui.NewModel(db, tuiCh)
+		m := newTUIModel(db, tuiCh, opts)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		go checkAndNotifyUpdate(p)
 		if _, err := p.Run(); err != nil {
@@ -346,7 +437,7 @@ func runTUI() {
 		}
 	}()
 
-	m := tui.NewModel(db, tuiCh)
+	m := newTUIModel(db, tuiCh, opts)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	go checkAndNotifyUpdate(p)
 	if _, err := p.Run(); err != nil {
@@ -1171,6 +1262,8 @@ func printHelp() {
 
 Usage:
   tokenmeter                    Start TUI (auto-starts daemon)
+  tokenmeter --all              Start TUI without workspace filtering
+  tokenmeter --workspace PATH   Start TUI scoped to a workspace path
   tokenmeter daemon             Start daemon only
   tokenmeter reload             Reload daemon config via SIGHUP
   tokenmeter emit               Emit event from hook (reads stdin)

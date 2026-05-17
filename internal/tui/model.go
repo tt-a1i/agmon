@@ -187,6 +187,8 @@ type Model struct {
 	platformFilter         sessionPlatformFilter
 	dashboardSort          dashboardSort
 	tagFilter              string
+	workspace              string
+	workspaceFilter        bool
 	filterMode             bool
 	filterText             string
 	searchMode             bool
@@ -221,6 +223,12 @@ func NewModel(db *storage.DB, eventCh chan EventMsg) Model {
 		eventCh:       eventCh,
 		expandedCalls: make(map[string]bool),
 	}
+}
+
+func (m Model) WithWorkspace(workspace string) Model {
+	m.workspace = normalizeWorkspacePath(workspace)
+	m.workspaceFilter = m.workspace != ""
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -296,6 +304,9 @@ func (m Model) tabVisibleRows() int {
 	case tabDashboard:
 		rows = base - 6 // summary + header + "more" hint + blank + preview bar
 		if m.projection.DaysInMonth > 0 {
+			rows -= 2
+		}
+		if m.workspaceFilter && m.workspace != "" {
 			rows -= 2
 		}
 		if len(m.budgetChips) > 0 {
@@ -649,6 +660,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == tabDashboard {
 				m.cycleTagFilter()
 				m.refreshCostAnomalies()
+			}
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("W"))):
+			if m.activeTab == tabDashboard && m.workspace != "" {
+				m.workspaceFilter = !m.workspaceFilter
+				m.refreshFilteredViews()
+				m.refreshCostAnomalies()
+				m.resetListPosition()
+				m.syncSessionFromRow()
+			}
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("A"))):
+			if m.activeTab == tabDashboard && m.workspaceFilter {
+				m.workspaceFilter = false
+				m.refreshFilteredViews()
+				m.refreshCostAnomalies()
+				m.resetListPosition()
+				m.syncSessionFromRow()
 			}
 			return m, nil
 

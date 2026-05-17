@@ -268,6 +268,59 @@ func TestUpdateUpperTCyclesTagFilter(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceToggleW(t *testing.T) {
+	m, _ := modelHarness(t)
+	m.activeTab = tabDashboard
+	m = m.WithWorkspace("/code/a")
+	m.sessions = []storage.SessionRow{
+		{SessionID: "workspace", Platform: "claude", CWD: "/code/a"},
+		{SessionID: "other", Platform: "claude", CWD: "/code/b"},
+	}
+	m.refreshFilteredViews()
+
+	if !m.workspaceFilter {
+		t.Fatal("workspace filter should start enabled")
+	}
+	if got := len(m.filteredSessions()); got != 1 {
+		t.Fatalf("workspace filter got %d sessions, want 1", got)
+	}
+
+	m = sendKey(m, keyRunes('W'))
+	if m.workspaceFilter {
+		t.Fatal("W should disable workspace filter")
+	}
+	if got := len(m.filteredSessions()); got != 2 {
+		t.Fatalf("after W expected all sessions, got %d", got)
+	}
+
+	m = sendKey(m, keyRunes('W'))
+	if !m.workspaceFilter {
+		t.Fatal("second W should re-enable workspace filter")
+	}
+	if got := len(m.filteredSessions()); got != 1 {
+		t.Fatalf("after second W expected workspace sessions, got %d", got)
+	}
+}
+
+func TestModelWorkspaceShowAllA(t *testing.T) {
+	m, _ := modelHarness(t)
+	m.activeTab = tabDashboard
+	m = m.WithWorkspace("/code/a")
+	m.sessions = []storage.SessionRow{
+		{SessionID: "workspace", Platform: "claude", CWD: "/code/a/sub"},
+		{SessionID: "other", Platform: "claude", CWD: "/code/b"},
+	}
+	m.refreshFilteredViews()
+
+	m = sendKey(m, keyRunes('A'))
+	if m.workspaceFilter {
+		t.Fatal("A should disable workspace filter")
+	}
+	if got := len(m.filteredSessions()); got != 2 {
+		t.Fatalf("A should show all sessions, got %d", got)
+	}
+}
+
 func TestUpdateUpperSGlobalSearchAndEnterOpensHit(t *testing.T) {
 	m, db := modelHarness(t)
 	now := time.Now().UTC()

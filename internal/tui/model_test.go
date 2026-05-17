@@ -181,6 +181,37 @@ func TestRefreshFilteredViewsCachesCurrentFilterResults(t *testing.T) {
 	}
 }
 
+func TestModelWorkspaceFilterIncludesSubdirs(t *testing.T) {
+	m := NewModel(nil, nil).WithWorkspace("/code/a")
+	m.sessions = []storage.SessionRow{
+		{SessionID: "same", Platform: "claude", CWD: "/code/a"},
+		{SessionID: "child", Platform: "claude", CWD: "/code/a/service"},
+		{SessionID: "sibling", Platform: "claude", CWD: "/code/another"},
+	}
+	m.refreshFilteredViews()
+
+	got := m.filteredSessions()
+	if len(got) != 2 {
+		t.Fatalf("workspace filter returned %d sessions, want 2: %#v", len(got), got)
+	}
+	if got[0].SessionID != "same" || got[1].SessionID != "child" {
+		t.Fatalf("workspace filter should include same dir and child dirs, got %#v", got)
+	}
+}
+
+func TestModelWorkspaceFilterExcludesOthers(t *testing.T) {
+	m := NewModel(nil, nil).WithWorkspace("/code/a")
+	m.sessions = []storage.SessionRow{
+		{SessionID: "sibling-prefix", Platform: "claude", CWD: "/code/ab"},
+		{SessionID: "other", Platform: "claude", CWD: "/code/c"},
+	}
+	m.refreshFilteredViews()
+
+	if got := len(m.filteredSessions()); got != 0 {
+		t.Fatalf("workspace filter should exclude non-child sessions, got %#v", m.filteredSessions())
+	}
+}
+
 func TestViewDashboardRendersBudgetAndTagChips(t *testing.T) {
 	m := Model{
 		width:  120,

@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"hash/fnv"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -13,7 +14,7 @@ import (
 func (m *Model) refreshFilteredViews() {
 	filter := strings.ToLower(m.filterText)
 	m.normalizeTagFilter()
-	m.filteredSessionsCache = filterSessions(m.sessions, filter, m.platformFilter, m.dashboardSort, m.tagFilter)
+	m.filteredSessionsCache = filterSessions(m.sessions, filter, m.platformFilter, m.dashboardSort, m.tagFilter, m.workspace, m.workspaceFilter)
 	m.filteredToolCallsCache = filterToolCalls(m.toolCalls, filter)
 	m.filteredMessagesCache = filterMessages(m.messages, filter)
 }
@@ -129,9 +130,12 @@ func (m *Model) pruneExpandedCalls() {
 	}
 }
 
-func filterSessions(sessions []storage.SessionRow, filter string, platform sessionPlatformFilter, order dashboardSort, tagFilter string) []storage.SessionRow {
+func filterSessions(sessions []storage.SessionRow, filter string, platform sessionPlatformFilter, order dashboardSort, tagFilter, workspace string, workspaceFilter bool) []storage.SessionRow {
 	out := make([]storage.SessionRow, 0, len(sessions))
 	for _, s := range sessions {
+		if !matchesWorkspaceFilter(s, workspace, workspaceFilter) {
+			continue
+		}
 		if !matchesPlatformFilter(s, platform) {
 			continue
 		}
@@ -147,6 +151,43 @@ func filterSessions(sessions []storage.SessionRow, filter string, platform sessi
 	}
 	sortSessions(out, order)
 	return out
+}
+
+func normalizeWorkspacePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
+func matchesWorkspaceFilter(s storage.SessionRow, workspace string, enabled bool) bool {
+	if !enabled || workspace == "" {
+		return true
+	}
+	cwd := normalizeWorkspacePath(s.CWD)
+	if cwd == "" {
+		return false
+	}
+	workspace = normalizeWorkspacePath(workspace)
+	if cwd == workspace {
+		return true
+	}
+	rel, err := filepath.Rel(workspace, cwd)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func workspaceSessionCount(sessions []storage.SessionRow, workspace string) int {
+	count := 0
+	for _, s := range sessions {
+		if matchesWorkspaceFilter(s, workspace, true) {
+			count++
+		}
+	}
+	return count
 }
 
 func matchesPlatformFilter(s storage.SessionRow, platform sessionPlatformFilter) bool {
