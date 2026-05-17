@@ -10,9 +10,21 @@ package collector
 // context/regional processing, cross-check against your provider billing —
 // dashboard cost is an estimate, not a bill.
 //
+// Pricing overrides: on package startup, LoadPricingOverrides reads the optional
+// app data pricing.json file and prepends valid user rules to the built-in
+// Claude/Codex tables. Invalid or malformed override files are logged and
+// ignored so hardcoded pricing remains the fallback.
+//
 // All rates are per 1,000,000 tokens (USD).
 
-import "strings"
+import (
+	"encoding/json"
+	"log"
+	"os"
+	"strings"
+
+	"github.com/tt-a1i/tokenmeter/internal/appdir"
+)
 
 type modelPricing struct {
 	match              []string
@@ -22,7 +34,7 @@ type modelPricing struct {
 	cacheReadPerMill   float64
 }
 
-var claudePricingTable = []modelPricing{
+var defaultClaudePricingTable = []modelPricing{
 	// --- Claude 4.x generation. Specific sub-versions MUST come before
 	// their generic "opus"/"sonnet"/"haiku" fallbacks because matchPricing
 	// short-circuits on first match. ---
@@ -48,6 +60,8 @@ var claudePricingTable = []modelPricing{
 	{match: []string{"haiku"}, inputPerMillion: 0.25, outputPerMillion: 1.25, cacheCreatePerMill: 0.30, cacheReadPerMill: 0.025},
 }
 
+var claudePricingTable = clonePricingTable(defaultClaudePricingTable)
+
 // Codex/OpenAI pricing (Standard short-context tier, per 1M tokens).
 // Data source: OpenAI API pricing page. Cache read follows the listed
 // "cached input" rate when available. Pro variants do not list cached input,
@@ -55,7 +69,7 @@ var claudePricingTable = []modelPricing{
 //
 // Rules are ordered "most specific first" because matchPricing iterates in
 // declaration order and returns the first match.
-var codexPricingTable = []modelPricing{
+var defaultCodexPricingTable = []modelPricing{
 	// --- Pro variants (premium tier, 10-24x base pricing). ---
 	{match: []string{"gpt-5.5", "pro"}, inputPerMillion: 30.0, outputPerMillion: 180.0},
 	{match: []string{"gpt-5.4", "pro"}, inputPerMillion: 30.0, outputPerMillion: 180.0},
@@ -98,6 +112,96 @@ var codexPricingTable = []modelPricing{
 	{match: []string{"gpt-4o", "mini"}, inputPerMillion: 0.15, outputPerMillion: 0.60, cacheReadPerMill: 0.075},
 	// GPT-4o base + older gpt-4 variants fall into this rule.
 	{match: []string{"gpt-4"}, inputPerMillion: 2.50, outputPerMillion: 10.0, cacheReadPerMill: 1.25},
+}
+
+var codexPricingTable = clonePricingTable(defaultCodexPricingTable)
+
+type pricingOverridesFile struct {
+	Claude []pricingOverrideRule `json:"claude"`
+	Codex  []pricingOverrideRule `json:"codex"`
+}
+
+type pricingOverrideRule struct {
+	Match              []string `json:"match"`
+	InputPerMillion    float64  `json:"inputPerMillion"`
+	OutputPerMillion   float64  `json:"outputPerMillion"`
+	CacheCreatePerMill float64  `json:"cacheCreatePerMill"`
+	CacheReadPerMill   float64  `json:"cacheReadPerMill"`
+}
+
+func init() {
+	LoadPricingOverrides()
+}
+
+// LoadPricingOverrides resets pricing tables to the hardcoded defaults, then
+// prepends valid entries from the optional app data pricing.json file.
+func LoadPricingOverrides() {
+	claudePricingTable = clonePricingTable(defaultClaudePricingTable)
+	codexPricingTable = clonePricingTable(defaultCodexPricingTable)
+
+	path := appdir.PathFor("pricing.json", "pricing.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("pricing override: read %s: %v", path, err)
+		}
+		return
+	}
+
+	var overrides pricingOverridesFile
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		log.Printf("pricing override: parse %s: %v", path, err)
+		return
+	}
+
+	claudePricingTable = prependPricingOverrides("claude", path, overrides.Claude, defaultClaudePricingTable)
+	codexPricingTable = prependPricingOverrides("codex", path, overrides.Codex, defaultCodexPricingTable)
+}
+
+func prependPricingOverrides(platform, path string, overrides []pricingOverrideRule, defaults []modelPricing) []modelPricing {
+	table := clonePricingTable(defaults)
+	valid := make([]modelPricing, 0, len(overrides))
+	for i, override := range overrides {
+		pricing, ok := override.modelPricing(platform, path, i)
+		if ok {
+			valid = append(valid, pricing)
+		}
+	}
+	if len(valid) == 0 {
+		return table
+	}
+	return append(valid, table...)
+}
+
+func (r pricingOverrideRule) modelPricing(platform, path string, index int) (modelPricing, bool) {
+	match := make([]string, 0, len(r.Match))
+	for _, needle := range r.Match {
+		needle = strings.ToLower(strings.TrimSpace(needle))
+		if needle != "" {
+			match = append(match, needle)
+		}
+	}
+	if len(match) == 0 {
+		log.Printf("pricing override: skip %s[%d] in %s: match is required", platform, index, path)
+		return modelPricing{}, false
+	}
+	if r.InputPerMillion < 0 || r.OutputPerMillion < 0 || r.CacheCreatePerMill < 0 || r.CacheReadPerMill < 0 {
+		log.Printf("pricing override: skip %s[%d] in %s: rates must be non-negative", platform, index, path)
+		return modelPricing{}, false
+	}
+	return modelPricing{
+		match:              match,
+		inputPerMillion:    r.InputPerMillion,
+		outputPerMillion:   r.OutputPerMillion,
+		cacheCreatePerMill: r.CacheCreatePerMill,
+		cacheReadPerMill:   r.CacheReadPerMill,
+	}, true
+}
+
+func clonePricingTable(table []modelPricing) []modelPricing {
+	clone := make([]modelPricing, len(table))
+	copy(clone, table)
+	return clone
 }
 
 func matchPricing(model string, defaultPricing modelPricing, table []modelPricing) modelPricing {
