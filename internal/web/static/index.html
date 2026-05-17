@@ -390,6 +390,9 @@ tr:hover td{background:var(--bg-hover)}
      doesn't stack vertically and push the session list off-screen. */
   .tag-chips{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
   .tag-chip{flex-shrink:0}
+  /* Budget chips: same horizontal-scroll treatment. */
+  .budget-bar{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .budget-chip{flex-shrink:0}
   .dh-grid{grid-template-columns:repeat(2,1fr)}
   .qstats{grid-template-columns:repeat(3,1fr)}
   .tabs{flex-wrap:nowrap;overflow-x:auto}
@@ -455,6 +458,49 @@ tr:hover td{background:var(--bg-hover)}
 .compact .sr-meta{font-size:10px;gap:6px}
 .compact .sr-cost{font-size:13px}
 
+/* Budget bar — dashboard chips for monthly spend caps. Each chip shows
+   used/limit + percent + status dot. Background uses a linear-gradient
+   "fill" hint so the chip itself acts as a progress bar. Status colors
+   mirror server.go thresholds (ok / warn ≥80% / over ≥100%). */
+.budget-bar{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+.budget-bar:empty{display:none;margin-bottom:0}
+.budget-chip{display:inline-flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--text);position:relative;overflow:hidden;cursor:default;transition:border-color .15s}
+.budget-chip.clickable{cursor:pointer}
+.budget-chip.clickable:hover{border-color:var(--text-faint)}
+.budget-chip.active{border-color:var(--accent);background:var(--accent-bg)}
+.budget-chip-fill{position:absolute;inset:0;background:linear-gradient(90deg,color-mix(in srgb,var(--green) 18%,transparent),color-mix(in srgb,var(--green) 6%,transparent));pointer-events:none;z-index:0}
+.budget-chip.warn .budget-chip-fill{background:linear-gradient(90deg,color-mix(in srgb,var(--amber) 22%,transparent),color-mix(in srgb,var(--amber) 8%,transparent))}
+.budget-chip.over .budget-chip-fill{background:linear-gradient(90deg,color-mix(in srgb,var(--red) 28%,transparent),color-mix(in srgb,var(--red) 10%,transparent))}
+.budget-chip>*{position:relative;z-index:1}
+.budget-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--green)}
+.budget-chip.warn .budget-dot{background:var(--amber)}
+.budget-chip.over .budget-dot{background:var(--red)}
+.budget-name{font-weight:600;color:var(--text-strong)}
+.budget-usage{color:var(--text-muted);font-size:11px}
+.budget-pct{font-variant-numeric:tabular-nums;font-weight:600;color:var(--text-strong)}
+
+/* Budget settings: list rows + add/edit form. Uses same .settings-section
+   visual contract — only the inline form is local. */
+.budget-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.budget-list:empty{display:none}
+.budget-row{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px}
+.budget-row-name{flex:1;color:var(--text-strong);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.budget-row-meta{color:var(--text-muted);font-size:11px;flex-shrink:0}
+.budget-row-actions{display:flex;gap:4px}
+.budget-action{background:0;border:1px solid var(--border);border-radius:4px;padding:2px 8px;font:inherit;font-size:11px;font-weight:500;color:var(--text-muted);cursor:pointer;transition:all .1s}
+.budget-action:hover{color:var(--text);border-color:var(--text-faint)}
+.budget-action.danger:hover{color:var(--red);border-color:color-mix(in srgb,var(--red) 50%,transparent)}
+.budget-form{display:flex;flex-direction:column;gap:6px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:10px}
+.budget-input{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font:inherit;font-size:12px;color:var(--text-strong);outline:none}
+.budget-input:focus{border-color:var(--accent)}
+.budget-form-actions{display:flex;gap:6px;justify-content:flex-end;margin-top:4px}
+.budget-cancel{background:0;border:1px solid var(--border);border-radius:4px;padding:4px 12px;font:inherit;font-size:11px;font-weight:600;color:var(--text-muted);cursor:pointer}
+.budget-cancel:hover{color:var(--text)}
+.budget-save{background:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:4px 12px;font:inherit;font-size:11px;font-weight:600;color:#fff;cursor:pointer}
+.budget-save:hover{filter:brightness(1.08)}
+.budget-add{width:100%;background:0;border:1px dashed var(--border);border-radius:6px;padding:7px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
+.budget-add:hover{color:var(--text);border-color:var(--text-faint)}
+
 /* CWD column — render in sr-meta, hidden when user toggles off. */
 .sr-cwd{font-family:monospace;font-size:10px;color:var(--text-faint);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
 .hide-cwd .sr-cwd{display:none}
@@ -516,6 +562,7 @@ tr:hover td{background:var(--bg-hover)}
     <div class="metric"><div class="metric-label">Avg / Session</div><div class="metric-val" id="hAvg">—</div><div class="metric-sub" id="hAvgSub"></div></div>
   </div>
 
+  <div class="budget-bar" id="budgetBar"></div>
   <div class="insight" id="insight"></div>
   <div class="ops-strip" id="opsStrip"></div>
   <div class="chart-section">
@@ -620,6 +667,24 @@ tr:hover td{background:var(--bg-hover)}
         <button data-v="30">30s</button><button data-v="60">60s</button><button data-v="120">2m</button><button data-v="0">Off</button>
       </div></div>
       <div class="settings-row"><label for="prefShowCwd">Show project path (cwd) in session list</label><input type="checkbox" class="settings-check" id="prefShowCwd" data-pref="showCwd"></div>
+    </div>
+    <div class="settings-section">
+      <h4>Budgets</h4>
+      <div class="budget-list" id="budgetList"></div>
+      <div class="budget-form" id="budgetForm" hidden>
+        <input class="budget-input" id="budgetName" placeholder="Name (e.g. Claude monthly)" maxlength="64">
+        <input class="budget-input" id="budgetAmount" type="number" min="0" step="0.01" placeholder="Monthly USD limit">
+        <select class="budget-input" id="budgetPlatform">
+          <option value="">All platforms</option>
+          <option value="claude">Claude</option>
+          <option value="codex">Codex</option>
+        </select>
+        <div class="budget-form-actions">
+          <button class="budget-cancel" onclick="closeBudgetForm()">Cancel</button>
+          <button class="budget-save" onclick="submitBudgetForm()">Save</button>
+        </div>
+      </div>
+      <button class="budget-add" id="budgetAddBtn" onclick="openBudgetForm()">+ Add budget</button>
     </div>
     <div class="settings-footer">
       <button class="settings-reset" onclick="resetPreferences()">Reset to defaults</button>
@@ -1320,6 +1385,123 @@ function handleRoute(){
 window.addEventListener('hashchange',handleRoute);
 
 applyPreferences();
+
+// === Budget tracking ===
+// State: latest /api/budgets payload + last-known status per id (for
+// warn→over crossover toast). Status cache persists across reloads so we
+// don't re-toast the same crossover every page open.
+let budgets=[],budgetPollTimer=null,budgetEditId=null,budgetPlatformFilter=null;
+let budgetStatusCache={};
+try{budgetStatusCache=JSON.parse(localStorage.getItem('tokenmeter-budget-status'))||{}}catch(e){budgetStatusCache={}}
+
+async function fetchBudgets(){
+  try{
+    const r=await fetch('/api/budgets');if(!r.ok)return;
+    const list=await r.json();budgets=Array.isArray(list)?list:[];
+    // Detect status crossover (anything → over) to surface a one-shot
+    // toast. We only fire when prior status was NOT 'over' so a
+    // continuously-over budget doesn't spam on every poll.
+    const next={};
+    budgets.forEach(b=>{
+      const prev=budgetStatusCache[b.id];const cur=b.usage&&b.usage.status||'ok';
+      next[b.id]=cur;
+      if(cur==='over'&&prev&&prev!=='over'){
+        toast(`⚠ ${b.name} exceeded $${b.usage.limit.toFixed(2)} (now $${b.usage.used.toFixed(2)})`);
+      }
+    });
+    budgetStatusCache=next;
+    try{localStorage.setItem('tokenmeter-budget-status',JSON.stringify(next))}catch(e){}
+    renderBudgetBar();renderBudgetSettings();
+  }catch(e){console.warn('fetchBudgets failed:',e)}
+}
+
+function renderBudgetBar(){
+  const el=$('budgetBar');if(!el)return;
+  if(!budgets.length){el.innerHTML='';return}
+  el.innerHTML=budgets.map(b=>{
+    const u=b.usage||{used:0,limit:b.monthly_usd,percent:0,status:'ok'};
+    const pct=Math.min(100,Math.round(u.percent||0));
+    const platLabel=b.platform?` (${escHtml(b.platform)})`:'';
+    const clickable=b.platform?'clickable':'';
+    const active=b.platform&&budgetPlatformFilter===b.platform?' active':'';
+    return `<div class="budget-chip ${escAttr(u.status||'ok')} ${clickable}${active}" data-platform="${escAttr(b.platform||'')}" data-id="${b.id}"><div class="budget-chip-fill" style="width:${pct}%"></div><span class="budget-dot"></span><span class="budget-name">${escHtml(b.name)}${platLabel}</span><span class="budget-usage">$${u.used.toFixed(2)} / $${u.limit.toFixed(2)}</span><span class="budget-pct">${pct}%</span></div>`;
+  }).join('');
+}
+
+function renderBudgetSettings(){
+  const el=$('budgetList');if(!el)return;
+  if(!budgets.length){el.innerHTML='';return}
+  el.innerHTML=budgets.map(b=>{
+    const u=b.usage||{percent:0};
+    const plat=b.platform?b.platform:'all';
+    return `<div class="budget-row"><div class="budget-row-name">${escHtml(b.name)}</div><div class="budget-row-meta">$${b.monthly_usd.toFixed(2)} · ${escHtml(plat)} · ${Math.round(u.percent||0)}%</div><div class="budget-row-actions"><button class="budget-action" onclick="openBudgetForm(${b.id})">Edit</button><button class="budget-action danger" onclick="deleteBudget(${b.id})">Delete</button></div></div>`;
+  }).join('');
+}
+
+// Clicking a budget chip with non-empty platform filters the session list
+// to that platform, mirroring the existing #sessionPlatform segment.
+document.addEventListener('click',e=>{
+  const chip=e.target.closest('.budget-chip.clickable');
+  if(!chip)return;
+  const platform=chip.dataset.platform;if(!platform)return;
+  const wasActive=chip.classList.contains('active');
+  budgetPlatformFilter=wasActive?null:platform;
+  // Drive the existing platform-filter segment so the user sees both UIs sync.
+  const target=wasActive?'all':platform;
+  document.querySelectorAll('#sessionPlatform button').forEach(b=>{
+    if(b.dataset.platform===target){b.click()}
+  });
+  renderBudgetBar();
+});
+
+function openBudgetForm(id){
+  budgetEditId=id||null;
+  const f=$('budgetForm'),addBtn=$('budgetAddBtn');
+  f.hidden=false;addBtn.hidden=true;
+  if(id){
+    const b=budgets.find(x=>x.id===id);
+    if(b){$('budgetName').value=b.name;$('budgetAmount').value=b.monthly_usd;$('budgetPlatform').value=b.platform||''}
+  }else{
+    $('budgetName').value='';$('budgetAmount').value='';$('budgetPlatform').value='';
+  }
+  $('budgetName').focus();
+}
+function closeBudgetForm(){budgetEditId=null;$('budgetForm').hidden=true;$('budgetAddBtn').hidden=false}
+
+async function submitBudgetForm(){
+  const name=$('budgetName').value.trim(),amount=parseFloat($('budgetAmount').value);
+  const platform=$('budgetPlatform').value;
+  if(!name||!(amount>0)){toast('Name and a positive amount are required');return}
+  const body=JSON.stringify({name,monthly_usd:amount,platform});
+  const url=budgetEditId?`/api/budgets/${budgetEditId}`:'/api/budgets';
+  const method=budgetEditId?'PUT':'POST';
+  try{
+    const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body});
+    if(!r.ok){const t=await r.text();toast('Save failed: '+t.slice(0,80));return}
+    closeBudgetForm();fetchBudgets();
+    toast(budgetEditId?'Budget updated':'Budget created');
+  }catch(e){toast('Save failed: '+e.message)}
+}
+
+async function deleteBudget(id){
+  const b=budgets.find(x=>x.id===id);
+  if(!confirm(`Delete budget "${b?b.name:id}"?`))return;
+  try{
+    const r=await fetch(`/api/budgets/${id}`,{method:'DELETE'});
+    if(!r.ok&&r.status!==204){const t=await r.text();toast('Delete failed: '+t.slice(0,80));return}
+    // Drop from local status cache so a re-created budget starts fresh.
+    delete budgetStatusCache[id];try{localStorage.setItem('tokenmeter-budget-status',JSON.stringify(budgetStatusCache))}catch(e){}
+    fetchBudgets();toast('Budget deleted');
+  }catch(e){toast('Delete failed: '+e.message)}
+}
+
+// 30s polling — independent of SSE. Budget usage updates aren't part of
+// the SSE event stream, and the math is cheap server-side, so a slow
+// background fetch is enough to keep chips honest without driving extra
+// work in the daemon.
+function startBudgetPolling(){if(budgetPollTimer)return;budgetPollTimer=setInterval(fetchBudgets,30000)}
+fetchBudgets();startBudgetPolling();
+
 refresh();connectEvents();
 
 // PWA: register the service worker so the dashboard works offline and can be
