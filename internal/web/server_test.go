@@ -1158,6 +1158,96 @@ func TestHandleHealthIncludesVersion(t *testing.T) {
 	}
 }
 
+// ─── A11y tests: verify index.html accessibility structure ───────────────────
+
+func getStaticIndex(t *testing.T) string {
+	t.Helper()
+	db := testDB(t)
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("index status: got %d, want 200", w.Code)
+	}
+	return w.Body.String()
+}
+
+func TestStaticIndexHasA11yLandmarks(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		`role="banner"`,
+		`role="navigation"`,
+		`role="main"`,
+		`role="contentinfo"`,
+		`aria-label=`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing a11y landmark %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasSkipLink(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `href="#main-content"`) {
+		t.Error("index.html missing skip link with href='#main-content'")
+	}
+	if !strings.Contains(body, `class="skip-link"`) {
+		t.Error("index.html missing .skip-link class")
+	}
+}
+
+func TestStaticIndexHasToastContainer(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="toast-container"`) {
+		t.Error("index.html missing #toast-container")
+	}
+	if !strings.Contains(body, `aria-live="polite"`) {
+		t.Error("index.html toast-container missing aria-live='polite'")
+	}
+}
+
+func TestStaticIndexHasReducedMotionMedia(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `prefers-reduced-motion`) {
+		t.Error("index.html missing prefers-reduced-motion media query")
+	}
+}
+
+func TestStaticIndexHasFocusTrapHelper(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `function trapFocus`) {
+		t.Error("index.html missing function trapFocus")
+	}
+}
+
+func TestStaticIndexHasSafeFetch(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `async function safeFetch`) {
+		t.Error("index.html missing async function safeFetch")
+	}
+}
+
+func TestStaticIndexNoAlertCalls(t *testing.T) {
+	body := getStaticIndex(t)
+	// Strip comment blocks to avoid false matches in comments
+	stripped := body
+	count := strings.Count(stripped, "alert(")
+	if count > 0 {
+		t.Errorf("index.html still has %d alert() call(s); replace with showToast", count)
+	}
+}
+
+func TestStaticIndexHasColorSchemeMedia(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `prefers-color-scheme`) {
+		t.Error("index.html missing prefers-color-scheme media query")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 func TestHandleProjection(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().Add(-time.Hour)

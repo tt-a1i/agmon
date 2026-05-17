@@ -658,14 +658,36 @@ body.hide-workspace .workspace-bar{display:none}
 .offline-badge.hidden{display:none}
 .offline-badge button{background:var(--bg);border:1px solid var(--border);border-radius:999px;color:var(--text-muted);font:inherit;font-size:11px;font-weight:650;padding:4px 9px;cursor:pointer}
 .offline-badge button:hover{color:var(--text);border-color:var(--text-faint)}
+
+/* A11y: sr-only utility */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+/* A11y: skip link — visible on focus */
+.skip-link{position:absolute;top:-100%;left:0;padding:8px 16px;background:var(--accent);color:#fff;font-weight:600;border-radius:0 0 6px 0;z-index:200;text-decoration:none;transition:top .1s}
+.skip-link:focus{top:0}
+/* A11y: enhanced focus ring */
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* A11y: prefers-reduced-motion */
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+/* A11y: auto dark mode when no explicit data-theme override */
+@media(prefers-color-scheme:dark){:root:not([data-theme]){--bg:#0a0a0c;--bg2:#111113;--bg3:#1a1a1e;--bg-hover:#18181b;--text:#a1a1aa;--text-strong:#f4f4f5;--text-muted:#52525b;--text-faint:#3f3f46;--border:#27272a;--border-light:#1f1f23;--border-hover:#3f3f46;--accent:#818cf8;--accent-bg:rgba(99,102,241,.1);--accent-border:rgba(99,102,241,.25);--card-shadow:0 2px 8px rgba(0,0,0,.2);--nav-bg:#111113;--nav-border:#1f1f23;--badge-claude-bg:rgba(249,115,22,.1);--badge-claude:#fb923c;--badge-codex-bg:rgba(34,197,94,.1);--badge-codex:#4ade80;--green:#4ade80;--green-bg:rgba(34,197,94,.1);--amber:#facc15;--red:#f87171;--red-bg:rgba(239,68,68,.1);--cyan:#22d3ee;--chart-bg:#111113;--chart-grid:#1f1f23;--chart-line:#818cf8;--chart-fill:rgba(129,140,248,.12);--msg-alt:rgba(255,255,255,.02);--msg-fade:#111113;--code-bg:rgba(255,255,255,.06);--pre-bg:rgba(0,0,0,.2);--pre-border:#27272a;--sr-active-bg:rgba(99,102,241,.1)}}
+/* A11y: toast notification container (top-right ephemeral) */
+#toast-container{position:fixed;top:1rem;right:1rem;z-index:9999;display:flex;flex-direction:column;gap:.5rem;max-width:360px;pointer-events:none}
+.a11y-toast{padding:.75rem 1rem;border-radius:6px;background:var(--bg2);border-left:3px solid var(--accent);box-shadow:0 4px 12px rgba(0,0,0,.15);display:flex;align-items:flex-start;gap:.5rem;pointer-events:auto;font-size:13px;color:var(--text-strong);animation:fadeUp .2s ease}
+.a11y-toast.error{border-left-color:#d33}
+.a11y-toast.warning{border-left-color:#f93}
+.a11y-toast.success{border-left-color:#3a3}
+.toast-close{background:0;border:0;cursor:pointer;color:var(--text-muted);font-size:16px;line-height:1;padding:0;margin-left:auto;flex-shrink:0}
+.toast-close:hover{color:var(--text-strong)}
 </style>
 </head>
 <body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
 <div class="page">
 
-<nav>
+<header role="banner" style="display:contents">
+<nav role="navigation" aria-label="Main navigation">
   <div class="nav-l">
-    <button class="hamburger" id="hamburgerBtn" aria-label="Toggle menu" onclick="document.getElementById('navR').classList.toggle('open');this.classList.toggle('open')">☰</button>
+    <button class="hamburger" id="hamburgerBtn" aria-expanded="false" aria-controls="navR" aria-label="Open menu" onclick="toggleHamburger(this)">☰</button>
     <span class="brand">TokenMeter<span class="brand-dot">.</span></span>
   </div>
   <div class="nav-r" id="navR">
@@ -677,11 +699,13 @@ body.hide-workspace .workspace-bar{display:none}
     </div>
     <span class="updated" id="updated"></span>
     <button class="export-btn" id="exportBtn" onclick="toggleExportPop()" title="Export data" aria-label="Export">📥</button>
-    <button class="settings-btn" id="settingsBtn" onclick="document.getElementById('settingsModal').classList.add('show')" title="Settings" aria-label="Settings">⚙</button>
+    <button class="settings-btn" id="settingsBtn" onclick="openSettingsModal()" title="Settings" aria-label="Settings">⚙</button>
     <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
   </div>
 </nav>
+</header>
 
+<main id="main-content" tabindex="-1" role="main">
 <div id="skeleton">
   <div class="skel-metrics"><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div>
   <div class="skel skel-chart"></div>
@@ -781,6 +805,7 @@ body.hide-workspace .workspace-bar{display:none}
   </div>
   <div id="cmpBody"></div>
 </div>
+</main>
 
 <div class="export-pop" id="exportPop">
   <div class="export-pop-section">
@@ -802,10 +827,10 @@ body.hide-workspace .workspace-bar{display:none}
   <button class="export-pop-download" onclick="doExport()">Download</button>
 </div>
 
-<div class="footer">TokenMeter · Press <kbd>?</kbd> for keyboard shortcuts</div>
-<div class="kbd-modal" id="kbdModal" onclick="this.classList.remove('show')">
+<footer class="footer" role="contentinfo">TokenMeter · Press <kbd>?</kbd> for keyboard shortcuts</footer>
+<div class="kbd-modal" id="kbdModal" role="dialog" aria-modal="true" aria-labelledby="kbdModalTitle" onclick="if(event.target===this)closeKbdModal()">
   <div class="kbd-box" onclick="event.stopPropagation()">
-    <h3>Keyboard Shortcuts</h3>
+    <h3 id="kbdModalTitle">Keyboard Shortcuts</h3>
     <div class="kbd-row"><span class="kbd-desc">Navigate sessions</span><div class="kbd-key"><kbd>j</kbd><kbd>k</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Open session</span><div class="kbd-key"><kbd>Enter</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Focus search</span><div class="kbd-key"><kbd>/</kbd></div></div>
@@ -814,12 +839,12 @@ body.hide-workspace .workspace-bar{display:none}
     <div class="kbd-row"><span class="kbd-desc">Go back / Clear filter</span><div class="kbd-key"><kbd>Esc</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Toggle theme</span><div class="kbd-key"><kbd>t</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Show this help</span><div class="kbd-key"><kbd>?</kbd></div></div>
-    <button class="kbd-close" onclick="$('kbdModal').classList.remove('show')">Close</button>
+    <button class="kbd-close" onclick="closeKbdModal()">Close</button>
   </div>
 </div>
-<div class="settings-modal" id="settingsModal" onclick="this.classList.remove('show')">
+<div class="settings-modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle" onclick="if(event.target===this)closeSettingsModal()">
   <div class="settings-box" onclick="event.stopPropagation()">
-    <h3>Settings</h3>
+    <h3 id="settingsModalTitle">Settings</h3>
     <div class="settings-section">
       <h4>Appearance</h4>
       <div class="settings-row"><label>Theme</label><div class="settings-radio" data-pref="theme">
@@ -862,7 +887,7 @@ body.hide-workspace .workspace-bar{display:none}
     <div class="settings-footer">
       <button class="settings-reset" onclick="resetPreferences()">Reset to defaults</button>
       <button class="settings-reset" onclick="clearOfflineCache()">Clear offline cache</button>
-      <button class="settings-close" onclick="$('settingsModal').classList.remove('show')">Done</button>
+      <button class="settings-close" onclick="closeSettingsModal()">Done</button>
     </div>
   </div>
 </div>
@@ -871,6 +896,7 @@ body.hide-workspace .workspace-bar{display:none}
   <span>📡 Offline · showing cached data</span>
   <button onclick="window.location.reload()">Retry</button>
 </div>
+<div id="toast-container" role="region" aria-live="polite" aria-label="Notifications"></div>
 <div class="toast" id="toast"></div>
 </div>
 <script>
@@ -1006,7 +1032,7 @@ function sessionsPath(workspace){
 function renderMd(s){let h=escHtml(s);h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');h=h.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');return h}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
 function webAuthToken(){try{return localStorage.getItem('tokenmeter-web-token')||''}catch(e){return ''}}
-function authRequired(r){if(r.status!==401)return false;try{alert('Token required. Set token in localStorage: tokenmeter-web-token')}catch(e){}return true}
+function authRequired(r){if(r.status!==401)return false;showTokenModal();return true}
 function withAuthUrl(u){const token=webAuthToken();if(!token)return u;const url=new URL(u,location.href);url.searchParams.set('token',token);return url.pathname+url.search+url.hash}
 async function apiFetch(u,opts={}){
   const token=webAuthToken(),next={...opts},headers=new Headers(opts.headers||{});
@@ -1813,7 +1839,7 @@ document.addEventListener('keydown',e=>{
   }
   // ? for help, t for theme
   if(!inInput){
-    if(e.key==='?'){e.preventDefault();$('kbdModal').classList.toggle('show')}
+    if(e.key==='?'){e.preventDefault();$('kbdModal').classList.contains('show')?closeKbdModal():openKbdModal()}
     if(e.key==='t'&&!$('detail').classList.contains('show')){toggleTheme()}
   }
   if(!$('detail').classList.contains('show')&&!inInput){
@@ -2118,6 +2144,136 @@ if('serviceWorker' in navigator){
 updateOfflineBadge();
 window.addEventListener('offline',()=>{showOfflineBadge();toast('Offline — showing cached data')});
 window.addEventListener('online',()=>{hideOfflineBadge();toast('Back online');refreshActiveView()});
+
+// === A11y: Toast notification system ===
+function showToast(message,type='info',timeoutMs=5000){
+  const container=$('toast-container');if(!container)return;
+  const t=document.createElement('div');
+  t.className='a11y-toast '+(type||'info');
+  t.setAttribute('role',type==='error'?'alert':'status');
+  t.innerHTML='<span>'+escHtml(message)+'</span><button aria-label="Dismiss" class="toast-close">×</button>';
+  container.appendChild(t);
+  const remove=()=>{if(t.parentNode)t.remove()};
+  t.querySelector('.toast-close').addEventListener('click',remove);
+  if(timeoutMs>0)setTimeout(remove,timeoutMs);
+}
+
+// === A11y: Focus trap helper for modals ===
+function trapFocus(modal){
+  const focusable=modal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])');
+  const first=focusable[0],last=focusable[focusable.length-1];
+  const previouslyFocused=document.activeElement;
+  function handleKey(e){
+    if(e.key==='Escape'){e.preventDefault();modal._closeHandler&&modal._closeHandler();return}
+    if(e.key!=='Tab')return;
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last&&last.focus()}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first&&first.focus()}
+  }
+  modal.addEventListener('keydown',handleKey);
+  first&&first.focus();
+  return function cleanup(){
+    modal.removeEventListener('keydown',handleKey);
+    previouslyFocused&&previouslyFocused.focus&&previouslyFocused.focus();
+  };
+}
+
+// Modal open/close with focus trap
+let _kbdCleanup=null,_settingsCleanup=null,_tokenCleanup=null;
+function openKbdModal(){
+  const m=$('kbdModal');if(!m)return;
+  m.classList.add('show');
+  m._closeHandler=closeKbdModal;
+  _kbdCleanup=trapFocus(m);
+}
+function closeKbdModal(){
+  const m=$('kbdModal');if(!m)return;
+  m.classList.remove('show');
+  if(_kbdCleanup){_kbdCleanup();_kbdCleanup=null}
+}
+function openSettingsModal(){
+  const m=$('settingsModal');if(!m)return;
+  m.classList.add('show');
+  m._closeHandler=closeSettingsModal;
+  _settingsCleanup=trapFocus(m);
+}
+function closeSettingsModal(){
+  const m=$('settingsModal');if(!m)return;
+  m.classList.remove('show');
+  if(_settingsCleanup){_settingsCleanup();_settingsCleanup=null}
+}
+
+// === A11y: Token auth modal (replaces alert) ===
+function showTokenModal(){
+  let modal=$('tokenModal');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='tokenModal';
+    modal.setAttribute('role','dialog');
+    modal.setAttribute('aria-modal','true');
+    modal.setAttribute('aria-labelledby','tokenModalTitle');
+    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:grid;place-items:center;z-index:200';
+    modal.innerHTML=`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px 28px;max-width:400px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,.15)" onclick="event.stopPropagation()">
+      <h3 id="tokenModalTitle" style="font-size:15px;font-weight:700;color:var(--text-strong);margin-bottom:8px">Authentication Required</h3>
+      <p style="font-size:13px;color:var(--text);margin-bottom:16px">Set your bearer token to access the dashboard.</p>
+      <input id="tokenInput" type="password" placeholder="Bearer token" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font:inherit;font-size:13px;color:var(--text-strong);outline:none;margin-bottom:12px" autocomplete="current-password">
+      <div style="display:flex;gap:8px">
+        <button id="tokenSaveBtn" style="flex:1;background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:6px;padding:8px;font:inherit;font-size:12px;font-weight:600;cursor:pointer">Save token</button>
+        <button id="tokenCancelBtn" style="flex:1;background:0;border:1px solid var(--border);border-radius:6px;padding:8px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer">Cancel</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#tokenSaveBtn').addEventListener('click',()=>{
+      const val=modal.querySelector('#tokenInput').value.trim();
+      if(val){try{localStorage.setItem('tokenmeter-web-token',val)}catch(e){}}
+      closeTokenModal();showToast('Token saved — refreshing','success');
+      setTimeout(()=>refreshActiveView&&refreshActiveView(),300);
+    });
+    modal.querySelector('#tokenCancelBtn').addEventListener('click',closeTokenModal);
+    modal.addEventListener('click',e=>{if(e.target===modal)closeTokenModal()});
+  }
+  modal.style.display='grid';
+  modal._closeHandler=closeTokenModal;
+  _tokenCleanup=trapFocus(modal);
+}
+function closeTokenModal(){
+  const m=$('tokenModal');if(!m)return;
+  m.style.display='none';
+  if(_tokenCleanup){_tokenCleanup();_tokenCleanup=null}
+}
+
+// === A11y: safeFetch wrapper ===
+async function safeFetch(url,opts={}){
+  try{
+    const res=await fetch(url,opts);
+    if(res.status===401){showTokenModal();throw new Error('unauthorized')}
+    if(!res.ok){showToast('Request failed: '+res.status,'error');throw new Error('HTTP '+res.status)}
+    return res;
+  }catch(e){
+    if(e.message==='unauthorized')throw e;
+    if(!navigator.onLine){/* offline badge already shown */}
+    else{showToast('Network error: '+e.message,'error')}
+    throw e;
+  }
+}
+
+// === A11y: hamburger toggle with aria-expanded ===
+function toggleHamburger(btn){
+  const nav=$('navR');if(!nav)return;
+  const open=nav.classList.toggle('open');
+  btn.classList.toggle('open',open);
+  btn.setAttribute('aria-expanded',open?'true':'false');
+}
+
+// === A11y: global error handlers ===
+window.addEventListener('error',function(e){
+  console.error('Global error:',e.error||e.message);
+  showToast('Unexpected error: '+(e.message||'unknown'),'error',8000);
+});
+window.addEventListener('unhandledrejection',function(e){
+  console.error('Unhandled rejection:',e.reason);
+  const msg=e.reason instanceof Error?e.reason.message:String(e.reason||'unknown');
+  showToast('Unhandled error: '+msg,'error',8000);
+});
 </script>
 </body>
 </html>
