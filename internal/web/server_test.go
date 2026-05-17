@@ -1,7 +1,9 @@
 package web
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -142,6 +144,115 @@ func TestHandleStats(t *testing.T) {
 	}
 	if resp.ActiveCount != 1 {
 		t.Errorf("active count: got %d", resp.ActiveCount)
+	}
+}
+
+func TestHandleEventsUnavailable(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	w := httptest.NewRecorder()
+	srv.handleEvents(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleEventsStreamsHeartbeatAndEvents(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0", WithEventSocketPath("test.sock"))
+	srv.eventHeartbeat = 10 * time.Millisecond
+
+	events := make(chan event.Event, 1)
+	closed := make(chan struct{})
+	srv.subscribeRemote = func(sockPath string) (<-chan event.Event, func(), error) {
+		if sockPath != "test.sock" {
+			t.Fatalf("sock path: got %q, want test.sock", sockPath)
+		}
+		return events, func() { close(closed) }, nil
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(srv.handleEvents))
+	defer ts.Close()
+
+	resp, err := ts.Client().Get(ts.URL)
+	if err != nil {
+		t.Fatalf("get events: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type: got %q, want text/event-stream", ct)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read heartbeat: %v", err)
+	}
+	if !strings.HasPrefix(line, ": heartbeat") {
+		t.Fatalf("first SSE line: got %q, want heartbeat comment", line)
+	}
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("read heartbeat terminator: %v", err)
+	}
+
+	want := event.Event{
+		ID:        "evt-1",
+		Type:      event.EventTokenUsage,
+		SessionID: "session-1",
+		Platform:  event.PlatformCodex,
+		Timestamp: time.Unix(123, 0).UTC(),
+		Data:      event.EventData{InputTokens: 10, OutputTokens: 20, CostUSD: 0.001},
+	}
+	events <- want
+
+	var dataLine string
+	for {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read event: %v", err)
+		}
+		if strings.HasPrefix(line, "data: ") {
+			dataLine = strings.TrimSpace(strings.TrimPrefix(line, "data: "))
+			break
+		}
+	}
+
+	var got event.Event
+	if err := json.Unmarshal([]byte(dataLine), &got); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if got.Type != want.Type || got.SessionID != want.SessionID || got.Data.CostUSD != want.Data.CostUSD {
+		t.Fatalf("event: got %#v, want %#v", got, want)
+	}
+
+	resp.Body.Close()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("subscription close function was not called")
+	}
+}
+
+func TestHandleEventsSubscribeError(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0", WithEventSocketPath("missing.sock"))
+	srv.subscribeRemote = func(string) (<-chan event.Event, func(), error) {
+		return nil, nil, errors.New("missing daemon")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	w := httptest.NewRecorder()
+	srv.handleEvents(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusServiceUnavailable)
 	}
 }
 

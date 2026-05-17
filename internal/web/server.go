@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tt-a1i/tokenmeter/internal/collector"
+	"github.com/tt-a1i/tokenmeter/internal/daemon"
 	"github.com/tt-a1i/tokenmeter/internal/event"
 	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
@@ -21,13 +23,32 @@ var staticFiles embed.FS
 
 // Server serves the tokenmeter web dashboard.
 type Server struct {
-	db   *storage.DB
-	addr string
-	srv  *http.Server // built in NewServer so Shutdown is race-free vs Start
+	db              *storage.DB
+	addr            string
+	eventSockPath   string
+	eventHeartbeat  time.Duration
+	subscribeRemote func(string) (<-chan event.Event, func(), error)
+	srv             *http.Server // built in NewServer so Shutdown is race-free vs Start
 }
 
-func NewServer(db *storage.DB, port string) *Server {
-	s := &Server{db: db, addr: "127.0.0.1:" + port}
+type ServerOption func(*Server)
+
+func WithEventSocketPath(sockPath string) ServerOption {
+	return func(s *Server) {
+		s.eventSockPath = sockPath
+	}
+}
+
+func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
+	s := &Server{
+		db:              db,
+		addr:            "127.0.0.1:" + port,
+		eventHeartbeat:  30 * time.Second,
+		subscribeRemote: daemon.SubscribeRemote,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
 
 	mux := http.NewServeMux()
 	staticFS, _ := fs.Sub(staticFiles, "static")
@@ -35,6 +56,7 @@ func NewServer(db *storage.DB, port string) *Server {
 	mux.HandleFunc("/api/sessions", s.handleSessions)
 	mux.HandleFunc("/api/costs", s.handleCosts)
 	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/session/", s.handleSessionDetail)
 
 	s.srv = &http.Server{
@@ -80,6 +102,85 @@ func writeAPIError(w http.ResponseWriter, status int, publicMessage string) {
 func writeInternalError(w http.ResponseWriter, err error) {
 	log.Printf("web api error: %v", err)
 	writeAPIError(w, http.StatusInternalServerError, "internal server error")
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.eventSockPath == "" || s.subscribeRemote == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "event stream unavailable")
+		return
+	}
+
+	eventCh, closeFn, err := s.subscribeRemote(s.eventSockPath)
+	if err != nil {
+		log.Printf("web events subscribe: %v", err)
+		writeAPIError(w, http.StatusServiceUnavailable, "event stream unavailable")
+		return
+	}
+	defer closeFn()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeAPIError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	// This endpoint is intentionally long-lived; disable the server write
+	// deadline inherited from the dashboard's normal request timeout.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+
+	header := w.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+	header.Set("X-Accel-Buffering", "no")
+
+	sendHeartbeat := func() bool {
+		if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	sendEvent := func(ev event.Event) bool {
+		payload, err := json.Marshal(ev)
+		if err != nil {
+			log.Printf("web events marshal: %v", err)
+			return true
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	if !sendHeartbeat() {
+		return
+	}
+
+	ticker := time.NewTicker(s.eventHeartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, ok := <-eventCh:
+			if !ok {
+				return
+			}
+			if !sendEvent(ev) {
+				return
+			}
+		case <-ticker.C:
+			if !sendHeartbeat() {
+				return
+			}
+		}
+	}
 }
 
 type sessionJSON struct {

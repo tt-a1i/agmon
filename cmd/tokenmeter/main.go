@@ -778,7 +778,7 @@ func runWeb() error {
 		fmt.Println("daemon already running (connecting to existing)")
 	}
 
-	srv := web.NewServer(db, port)
+	srv := web.NewServer(db, port, web.WithEventSocketPath(sockPath))
 	fmt.Printf("TokenMeter web dashboard: http://localhost:%s\n", port)
 
 	sigCh := make(chan os.Signal, 2)

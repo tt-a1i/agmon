@@ -298,6 +298,9 @@ tr:hover td{background:var(--bg-hover)}
 .tl-time{font-size:11px;color:var(--text-muted)}
 .tl-params{font-size:11px;color:var(--text-muted);max-height:32px;overflow:hidden;cursor:pointer;line-height:1.4;margin-top:2px;word-break:break-all;transition:max-height .2s}
 .tl-params.open{max-height:none}
+.tl-result{font-size:11px;color:var(--text);max-height:48px;overflow:hidden;cursor:pointer;line-height:1.4;margin-top:4px;word-break:break-word;white-space:pre-wrap;transition:max-height .2s;background:var(--code-bg);padding:4px 8px;border-radius:4px;border-left:2px solid var(--green)}
+.tl-result.open{max-height:none}
+.tl-result.fail{border-left-color:var(--red)}
 .tl-dur{font-size:10px;color:var(--text-muted);margin-top:3px;display:flex;align-items:center;gap:6px}
 .tl-dur-bar{height:3px;border-radius:2px;background:var(--accent);opacity:.3}
 .tl-gap{text-align:center;font-size:10px;color:var(--text-faint);padding:4px 0}
@@ -519,6 +522,7 @@ tr:hover td{background:var(--bg-hover)}
     <div class="kbd-row"><span class="kbd-desc">Navigate sessions</span><div class="kbd-key"><kbd>j</kbd><kbd>k</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Open session</span><div class="kbd-key"><kbd>Enter</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Focus search</span><div class="kbd-key"><kbd>/</kbd></div></div>
+    <div class="kbd-row"><span class="kbd-desc">Go to dashboard / stats / messages</span><div class="kbd-key"><kbd>g</kbd> <kbd>d</kbd>/<kbd>s</kbd>/<kbd>m</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Previous / Next session</span><div class="kbd-key"><kbd>←</kbd><kbd>→</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Go back / Clear filter</span><div class="kbd-key"><kbd>Esc</kbd></div></div>
     <div class="kbd-row"><span class="kbd-desc">Toggle theme</span><div class="kbd-key"><kbd>t</kbd></div></div>
@@ -550,7 +554,7 @@ function toggleTheme(){
   if(isDark){document.documentElement.setAttribute('data-theme','dark');$('themeBtn').textContent='☀️'}
 })();
 let lastCostDays=null;
-let range=localStorage.getItem('tokenmeter-range')||'week',sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null;
+let range=localStorage.getItem('tokenmeter-range')||'week',sLim=20,allS=[],searchQ='',sessSort='time',sessionPlatform='all',kbIdx=-1,detailSid=null,detailActive=false,dayFilter=null,lastStats=null,lastCosts=null;
 document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r===range));
 
 const fc=v=>v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4);
@@ -829,8 +833,8 @@ async function openSession(id){
   let fh='';Object.keys(dirs).sort().forEach(dir=>{fh+=`<div class="fl-dir">${escHtml(dir)}/</div>`;dirs[dir].forEach(f=>{fh+=`<div class="fl-row"><div class="fl-ic ${escAttr(f.type)}">${f.type==='create'?'+':f.type==='delete'?'−':'~'}</div><span class="fl-path">${escHtml(f.name)}</span></div>`})});
   $('dFiles').innerHTML=fh}else{$('dFiles').innerHTML='<div class="empty"><span class="empty-icon">📄</span>No files changed</div>'}
 
-  // Agents
-  if(agentStats.length){$('dAgents').innerHTML=agentStats.map(a=>{const child=a.parent_id&&a.parent_id!=='';return`<div class="ag${child?' child':''}"><div class="ag-role">${escHtml(a.role||'main')}${child?'<span class="sub">subagent</span>':''}</div><div class="ag-stat"><span>${a.tool_calls} tools</span><span>${ft(a.input_tokens)} in</span><span>${fc(a.cost_usd)}</span></div></div>`}).join('')}else{$('dAgents').innerHTML='<div class="empty"><span class="empty-icon">🤖</span>No agent data</div>'}
+  // Agents — render parent_id hierarchy as a recursive tree.
+  $('dAgents').innerHTML=agentStats.length?renderAgentTree(agentStats):'<div class="empty"><span class="empty-icon">🤖</span>No agent data</div>';
   updateSessNav();
   }catch(renderErr){console.error('Detail render error:',renderErr);$('dHeader').innerHTML=`<div class="loading-card">Render error: ${escHtml(renderErr.message)}</div>`}
 }
@@ -864,7 +868,8 @@ function renderToolTimeline(tools,filter){
     const ic=t.status==='success'?'ok':t.status==='fail'||t.status==='error'?'fail':'pend';
     const durW=t.duration_ms?Math.max(8,(t.duration_ms/maxDur)*80):0;
     const tIcon=toolIcon(t.tool_name);
-    th+=`<div class="tl"><div class="tl-ic ${ic}" title="${escAttr(t.status)}">${tIcon}</div><div class="tl-body"><div class="tl-top"><span class="tl-name">${escHtml(t.tool_name)}</span><span class="tl-time">${ftime(t.start_time)}</span></div>${t.params?'<div class="tl-params" onclick="this.classList.toggle(\'open\')">'+escHtml(t.params)+'</div>':''}<div class="tl-dur">${t.duration_ms?fd(t.duration_ms):'—'} · <span style="color:${ic==='ok'?'var(--green)':ic==='fail'?'var(--red)':'var(--text-muted)'}">${escHtml(t.status)}</span>${durW?'<span class="tl-dur-bar" style="width:'+durW+'px"></span>':''}</div></div></div>`;
+    const resCls=ic==='fail'?'tl-result fail':'tl-result';
+    th+=`<div class="tl"><div class="tl-ic ${ic}" title="${escAttr(t.status)}">${tIcon}</div><div class="tl-body"><div class="tl-top"><span class="tl-name">${escHtml(t.tool_name)}</span><span class="tl-time">${ftime(t.start_time)}</span></div>${t.params?'<div class="tl-params" onclick="this.classList.toggle(\'open\')">'+escHtml(t.params)+'</div>':''}${t.result?'<div class="'+resCls+'" onclick="this.classList.toggle(\'open\')">'+escHtml(t.result)+'</div>':''}<div class="tl-dur">${t.duration_ms?fd(t.duration_ms):'—'} · <span style="color:${ic==='ok'?'var(--green)':ic==='fail'?'var(--red)':'var(--text-muted)'}">${escHtml(t.status)}</span>${durW?'<span class="tl-dur-bar" style="width:'+durW+'px"></span>':''}</div></div></div>`;
   });
   $('dTools').innerHTML=th;
 }
@@ -872,6 +877,23 @@ function renderToolTimeline(tools,filter){
 function filterTools(name){
   document.querySelectorAll('.tool-filter').forEach(b=>{b.classList.toggle('on',b.textContent.includes(name)||(!name&&b.textContent.startsWith('All')))});
   if(window._toolData)renderToolTimeline(window._toolData,name||null);
+}
+
+// Render agents as a parent_id-keyed tree. Roots have empty parent_id (or a
+// parent_id that doesn't appear in the agent set — defensive against orphans).
+// Each level adds 20px indent + accent left-border so nested subagents are
+// visually distinguishable from siblings.
+function renderAgentTree(agents){
+  const ids=new Set(agents.map(a=>a.agent_id));
+  const isRoot=a=>!a.parent_id||a.parent_id===''||!ids.has(a.parent_id);
+  function node(a,depth){
+    const childs=agents.filter(c=>c.parent_id===a.agent_id);
+    const indent=depth*20;
+    const sub=depth>0?'<span class="sub">subagent</span>':'';
+    const style=depth>0?` style="margin-left:${indent}px;border-left:2px solid var(--accent);padding-left:8px"`:'';
+    return `<div class="ag"${style}><div class="ag-role">${escHtml(a.role||'main')}${sub}</div><div class="ag-stat"><span>${a.tool_calls} tools</span><span>${ft(a.input_tokens)} in</span><span>${fc(a.cost_usd)}</span></div></div>`+childs.map(c=>node(c,depth+1)).join('');
+  }
+  return agents.filter(isRoot).map(r=>node(r,0)).join('');
 }
 
 function goBack(){$('detail').classList.remove('show');$('overview').classList.remove('hide');detailSid=null;detailActive=false;history.pushState(null,null,'#');refresh()}
@@ -935,8 +957,15 @@ function updateSessNav(){
 document.querySelectorAll('.tab').forEach(t=>{t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('show'));t.classList.add('on');$('panel-'+t.dataset.tab).classList.add('show')}});
 
 // Refresh
-async function refresh(){try{
-  const[stats,costs,sessions]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),api('/api/sessions')]);
+function showRefreshError(e){
+  console.error('refresh error:',e);
+  const s=$('skeleton');if(s){s.remove();$('overview').style.display=''}
+  $('webErrorText').textContent='Dashboard refresh failed: '+(e.message||'unknown error');
+  $('webError').classList.add('show');
+}
+
+function applyDashboardData(stats,costs,sessions){
+  lastStats=stats;lastCosts=costs;
   $('webError').classList.remove('show');
 
   // Show overview (hide skeleton on first load)
@@ -985,7 +1014,96 @@ async function refresh(){try{
   renderSessions(sessions);renderChart(costs.daily_costs);renderModels(costs.models);renderTools(stats.top_tools);
   // Sparklines in metric cards
   if(costs.daily_costs&&costs.daily_costs.length>1){drawSparkline('sparkCost',costs.daily_costs.map(d=>d.Cost))}
-}catch(e){console.error('refresh error:',e);const s=$('skeleton');if(s){s.remove();$('overview').style.display=''}$('webErrorText').textContent='Dashboard refresh failed: '+(e.message||'unknown error');$('webError').classList.add('show')}}
+}
+
+async function refresh(){try{
+  const[stats,costs,sessions]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range),api('/api/sessions')]);
+  applyDashboardData(stats,costs,sessions);
+}catch(e){showRefreshError(e)}}
+
+async function refreshSessions(){try{
+  const sessions=await api('/api/sessions');
+  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,sessions);else renderSessions(sessions);
+}catch(e){showRefreshError(e)}}
+
+async function refreshCosts(){try{
+  const[stats,costs]=await Promise.all([api('/api/stats'),api('/api/costs?range='+range)]);
+  applyDashboardData(stats,costs,allS);
+}catch(e){showRefreshError(e)}}
+
+async function refreshDetail(sid){if(sid)return openSession(sid)}
+
+async function refreshSessionSummary(id){if(!id)return;try{
+  const d=await api('/api/session/'+encodeURIComponent(id));
+  if(!d||!d.session)return;
+  const idx=allS.findIndex(s=>s.session_id===d.session.session_id);
+  if(idx>=0)allS[idx]=d.session;else allS.unshift(d.session);
+  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,allS);else renderSessions(allS);
+}catch(e){console.warn('session summary refresh failed:',e)}}
+
+function isSameLocalDay(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate()}
+function rangeStartDate(r,now){
+  if(r==='today')return new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  if(r==='week'){const wd=now.getDay()||7;return new Date(now.getFullYear(),now.getMonth(),now.getDate()-wd+1)}
+  if(r==='month')return new Date(now.getFullYear(),now.getMonth(),1);
+  return null;
+}
+function eventInCurrentRange(ev){
+  if(!ev||!ev.timestamp)return true;
+  if(range==='all')return true;
+  const ts=new Date(ev.timestamp),start=rangeStartDate(range,new Date());
+  return !start||ts>=start;
+}
+function bumpLiveTotals(ev){
+  const d=ev.data||{},cost=Number(d.cost_usd)||0,inTok=Number(d.input_tokens)||0,outTok=Number(d.output_tokens)||0;
+  const idx=allS.findIndex(s=>s.session_id===ev.session_id);
+  if(idx>=0){
+    allS[idx]={...allS[idx],input_tokens:(allS[idx].input_tokens||0)+inTok,output_tokens:(allS[idx].output_tokens||0)+outTok,cost_usd:(allS[idx].cost_usd||0)+cost,status:allS[idx].status||'active'};
+    if(d.model&&!allS[idx].model)allS[idx].model=d.model;
+  }
+  if(cost&&lastStats&&isSameLocalDay(ev.timestamp?new Date(ev.timestamp):new Date(),new Date()))lastStats.today_cost=(lastStats.today_cost||0)+cost;
+  if(cost&&lastCosts&&eventInCurrentRange(ev))lastCosts.total_cost=(lastCosts.total_cost||0)+cost;
+  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,allS);else renderSessions(allS);
+}
+
+let eventSource=null,fallbackPoll=null,slowPoll=null,sessionsTimer=null,totalsTimer=null,detailTimer=null,summaryTimers={};
+function refreshActiveView(){if(detailSid&&detailActive)openSession(detailSid);else refresh()}
+function scheduleSessionsRefresh(){clearTimeout(sessionsTimer);sessionsTimer=setTimeout(refreshSessions,250)}
+function scheduleTotalsRefresh(){clearTimeout(totalsTimer);totalsTimer=setTimeout(refreshCosts,500)}
+function scheduleDetailRefresh(id){if(!id||detailSid!==id)return;clearTimeout(detailTimer);detailTimer=setTimeout(()=>refreshDetail(id),250)}
+function scheduleSessionSummary(id){if(!id)return;clearTimeout(summaryTimers[id]);summaryTimers[id]=setTimeout(()=>{delete summaryTimers[id];refreshSessionSummary(id)},400)}
+function startFallbackPolling(){if(fallbackPoll)return;refreshActiveView();fallbackPoll=setInterval(refreshActiveView,5000)}
+function stopFallbackPolling(){if(!fallbackPoll)return;clearInterval(fallbackPoll);fallbackPoll=null}
+function startSlowPolling(){if(!slowPoll)slowPoll=setInterval(refreshActiveView,30000)}
+function handleRealtimeEvent(ev){
+  switch(ev.type){
+    case 'session_start':
+    case 'session_update':
+    case 'session_end':
+      scheduleSessionsRefresh();scheduleTotalsRefresh();
+      if(ev.session_id===detailSid)scheduleDetailRefresh(ev.session_id);
+      break;
+    case 'token_usage':
+      bumpLiveTotals(ev);scheduleSessionSummary(ev.session_id);
+      if(ev.session_id===detailSid)scheduleDetailRefresh(ev.session_id);
+      break;
+    case 'tool_call_start':
+    case 'tool_call_end':
+    case 'file_change':
+    case 'agent_start':
+    case 'agent_end':
+      if(ev.session_id===detailSid)scheduleDetailRefresh(ev.session_id);
+      break;
+  }
+}
+function connectEvents(){
+  if(!window.EventSource){startFallbackPolling();startSlowPolling();return}
+  eventSource=new EventSource('/api/events');
+  eventSource.onopen=()=>stopFallbackPolling();
+  eventSource.onmessage=e=>{try{handleRealtimeEvent(JSON.parse(e.data))}catch(err){console.warn('bad realtime event:',err)}};
+  eventSource.onerror=()=>startFallbackPolling();
+  startSlowPolling();
+}
 
 document.querySelectorAll('.rb').forEach(b=>{b.onclick=()=>{document.querySelectorAll('.rb').forEach(x=>x.classList.remove('on'));b.classList.add('on');range=b.dataset.r;localStorage.setItem('tokenmeter-range',range);
   const c=$('chartCanvas');if(c){c.style.opacity='0';setTimeout(()=>{refresh();setTimeout(()=>{c.style.opacity='1'},50)},150)}else{refresh()}
@@ -995,19 +1113,33 @@ document.querySelectorAll('.sort-btn').forEach(b=>{b.onclick=()=>{document.query
 document.querySelectorAll('#sessionPlatform button').forEach(b=>{b.onclick=()=>{document.querySelectorAll('#sessionPlatform button').forEach(x=>x.classList.remove('on'));b.classList.add('on');sessionPlatform=b.dataset.platform;sLim=20;kbIdx=-1;renderSessions(allS)}});
 
 // Keyboard
+let gPressed=false,gTimer=null;
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if($('detail').classList.contains('show')){goBack()}return}
+  const inInput=document.activeElement.matches('input');
+  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
+  // g-prefix sequence: g d → dashboard / g s → stats / g m → messages.
+  // First `g` arms for 1s; second key dispatches and consumes the prefix.
+  if(!inInput&&!$('kbdModal').classList.contains('show')){
+    if(gPressed){
+      gPressed=false;clearTimeout(gTimer);
+      if(e.key==='d'){e.preventDefault();if($('detail').classList.contains('show'))goBack();else window.scrollTo({top:0,behavior:'smooth'});return}
+      if(e.key==='s'){e.preventDefault();const t=document.querySelector('.g2')||document.querySelector('.plats');if(t)t.scrollIntoView({behavior:'smooth',block:'start'});return}
+      if(e.key==='m'){e.preventDefault();if($('detail').classList.contains('show')){const mt=document.querySelector('.tab[data-tab="msgs"]');if(mt)mt.click()}else{const sw=document.querySelector('.sess-wrap');if(sw)sw.scrollIntoView({behavior:'smooth',block:'start'})}return}
+      // any other key cancels the prefix; fall through to normal handling
+    }
+    if(e.key==='g'){gPressed=true;clearTimeout(gTimer);gTimer=setTimeout(()=>{gPressed=false},1000);e.preventDefault();return}
+  }
   // Left/right in detail view to navigate sessions
-  if($('detail').classList.contains('show')&&!document.activeElement.matches('input')){
+  if($('detail').classList.contains('show')&&!inInput){
     if(e.key==='ArrowLeft'){e.preventDefault();navSess(-1)}
     if(e.key==='ArrowRight'){e.preventDefault();navSess(1)}
   }
   // ? for help, t for theme
-  if(!document.activeElement.matches('input')){
+  if(!inInput){
     if(e.key==='?'){e.preventDefault();$('kbdModal').classList.toggle('show')}
     if(e.key==='t'&&!$('detail').classList.contains('show')){toggleTheme()}
   }
-  if(!$('detail').classList.contains('show')&&!document.activeElement.matches('input')){
+  if(!$('detail').classList.contains('show')&&!inInput){
     const rows=document.querySelectorAll('.sr');if(!rows.length)return;
     if(e.key==='j'||e.key==='ArrowDown'){e.preventDefault();kbIdx=Math.min(kbIdx+1,rows.length-1);rows.forEach((r,i)=>r.classList.toggle('kb-on',i===kbIdx));rows[kbIdx].scrollIntoView({block:'nearest'})}
     if(e.key==='k'||e.key==='ArrowUp'){e.preventDefault();kbIdx=Math.max(kbIdx-1,0);rows.forEach((r,i)=>r.classList.toggle('kb-on',i===kbIdx));rows[kbIdx].scrollIntoView({block:'nearest'})}
@@ -1032,7 +1164,7 @@ function handleRoute(){
 }
 window.addEventListener('hashchange',handleRoute);
 
-refresh();setInterval(()=>{if(detailSid&&detailActive)openSession(detailSid);else refresh()},5000);
+refresh();connectEvents();
 </script>
 </body>
 </html>
