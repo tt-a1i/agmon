@@ -146,7 +146,7 @@ func (d *Daemon) Start() error {
 	if err != nil {
 		log.Printf("load webhook config: %v", err)
 	} else {
-		d.webhooks = webhooks
+		d.setWebhookConfig(webhooks)
 	}
 
 	// Clean up sessions that never received a SessionEnd (e.g. process killed).

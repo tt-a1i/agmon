@@ -332,15 +332,28 @@ func runDaemon() {
 	fmt.Printf("tokenmeter daemon running (socket: %s)\n", sockPath)
 
 	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	for {
+		sig := <-sigCh
+		if sig == syscall.SIGHUP {
+			d.ReloadConfig()
+			continue
+		}
+		break
+	}
 	fmt.Fprintln(os.Stderr, "\nstopping daemon... (press Ctrl+C again to force quit)")
 
 	// Watchdog goroutine: if Stop hangs, a second signal force-exits.
 	go func() {
-		<-sigCh
-		fmt.Fprintln(os.Stderr, "force quit")
-		os.Exit(130)
+		for {
+			sig := <-sigCh
+			if sig == syscall.SIGHUP {
+				d.ReloadConfig()
+				continue
+			}
+			fmt.Fprintln(os.Stderr, "force quit")
+			os.Exit(130)
+		}
 	}()
 
 	// Stop watchers first so no new events are sent to the batch channel,
@@ -847,36 +860,52 @@ func runWeb() error {
 	fmt.Printf("TokenMeter web dashboard: http://localhost:%s\n", port)
 
 	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- srv.Start()
 	}()
 
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return fmt.Errorf("web server: %w", err)
-		}
-		return nil
-	case <-sigCh:
-		fmt.Println("\nshutting down web server... (press Ctrl+C again to force quit)")
-		// Watchdog: second signal force-quits if Shutdown hangs.
-		go func() {
-			<-sigCh
-			fmt.Fprintln(os.Stderr, "force quit")
-			os.Exit(130)
-		}()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-		if err := <-errCh; err != nil {
-			return fmt.Errorf("web server shutdown: %w", err)
+	for {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				return fmt.Errorf("web server: %w", err)
+			}
+			return nil
+		case sig := <-sigCh:
+			if sig == syscall.SIGHUP {
+				if d != nil {
+					d.ReloadConfig()
+				}
+				continue
+			}
+			fmt.Println("\nshutting down web server... (press Ctrl+C again to force quit)")
+			// Watchdog: second signal force-quits if Shutdown hangs.
+			go func() {
+				for {
+					sig := <-sigCh
+					if sig == syscall.SIGHUP {
+						if d != nil {
+							d.ReloadConfig()
+						}
+						continue
+					}
+					fmt.Fprintln(os.Stderr, "force quit")
+					os.Exit(130)
+				}
+			}()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(shutdownCtx)
+			if err := <-errCh; err != nil {
+				return fmt.Errorf("web server shutdown: %w", err)
+			}
+			fmt.Println("web server stopped")
+			return nil
 		}
 	}
-	fmt.Println("web server stopped")
-	return nil
 }
 
 func runStatus() {

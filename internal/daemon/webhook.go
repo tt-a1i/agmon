@@ -173,10 +173,11 @@ func budgetWebhookPayload(budget storage.BudgetRow, used, limit float64, percent
 }
 
 func (d *Daemon) dispatchWebhookEvent(ctx context.Context, event string, payload BudgetWebhookPayload) {
-	if d.webhooks == nil || len(d.webhooks.Endpoints) == 0 {
+	endpoints := d.webhookEndpointsSnapshot()
+	if len(endpoints) == 0 {
 		return
 	}
-	for _, ep := range d.webhooks.Endpoints {
+	for _, ep := range endpoints {
 		ep := ep
 		if !endpointWantsEvent(ep, event) {
 			continue
