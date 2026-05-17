@@ -12,7 +12,8 @@ import (
 
 func (m *Model) refreshFilteredViews() {
 	filter := strings.ToLower(m.filterText)
-	m.filteredSessionsCache = filterSessions(m.sessions, filter, m.platformFilter, m.dashboardSort)
+	m.normalizeTagFilter()
+	m.filteredSessionsCache = filterSessions(m.sessions, filter, m.platformFilter, m.dashboardSort, m.tagFilter)
 	m.filteredToolCallsCache = filterToolCalls(m.toolCalls, filter)
 	m.filteredMessagesCache = filterMessages(m.messages, filter)
 }
@@ -30,6 +31,37 @@ func (m *Model) resetFilter() {
 func (m *Model) resetListPosition() {
 	m.selectedRow = 0
 	m.viewOffset = 0
+}
+
+func (m *Model) cycleTagFilter() {
+	options := dashboardTagFilterOptions(m.sessions)
+	if len(options) == 0 {
+		m.tagFilter = tagFilterAll
+		return
+	}
+	idx := -1
+	for i, option := range options {
+		if option == m.tagFilter {
+			idx = i
+			break
+		}
+	}
+	m.tagFilter = options[(idx+1)%len(options)]
+	m.refreshFilteredViews()
+	m.resetListPosition()
+	m.syncSessionFromRow()
+}
+
+func (m *Model) normalizeTagFilter() {
+	if m.tagFilter == tagFilterAll {
+		return
+	}
+	for _, option := range dashboardTagFilterOptions(m.sessions) {
+		if option == m.tagFilter {
+			return
+		}
+	}
+	m.tagFilter = tagFilterAll
 }
 
 func messageExpansionKeyAt(index int, msg collector.UserMessage) string {
@@ -97,15 +129,19 @@ func (m *Model) pruneExpandedCalls() {
 	}
 }
 
-func filterSessions(sessions []storage.SessionRow, filter string, platform sessionPlatformFilter, order dashboardSort) []storage.SessionRow {
+func filterSessions(sessions []storage.SessionRow, filter string, platform sessionPlatformFilter, order dashboardSort, tagFilter string) []storage.SessionRow {
 	out := make([]storage.SessionRow, 0, len(sessions))
 	for _, s := range sessions {
 		if !matchesPlatformFilter(s, platform) {
 			continue
 		}
+		if !matchesTagFilter(s, tagFilter) {
+			continue
+		}
 		if filter == "" ||
 			strings.Contains(strings.ToLower(sessionDisplayName(s)), filter) ||
-			strings.Contains(strings.ToLower(s.Platform), filter) {
+			strings.Contains(strings.ToLower(s.Platform), filter) ||
+			strings.Contains(strings.ToLower(s.Tag), filter) {
 			out = append(out, s)
 		}
 	}
@@ -122,6 +158,46 @@ func matchesPlatformFilter(s storage.SessionRow, platform sessionPlatformFilter)
 	default:
 		return true
 	}
+}
+
+func matchesTagFilter(s storage.SessionRow, tagFilter string) bool {
+	switch tagFilter {
+	case tagFilterAll:
+		return true
+	case tagFilterUntagged:
+		return s.Tag == ""
+	default:
+		return s.Tag == tagFilter
+	}
+}
+
+func dashboardTagFilterOptions(sessions []storage.SessionRow) []string {
+	tags, hasUntagged := dashboardTags(sessions)
+	options := make([]string, 0, len(tags)+2)
+	options = append(options, tagFilterAll)
+	options = append(options, tags...)
+	if hasUntagged && len(tags) > 0 {
+		options = append(options, tagFilterUntagged)
+	}
+	return options
+}
+
+func dashboardTags(sessions []storage.SessionRow) ([]string, bool) {
+	seen := make(map[string]struct{})
+	hasUntagged := false
+	for _, s := range sessions {
+		if s.Tag == "" {
+			hasUntagged = true
+			continue
+		}
+		seen[s.Tag] = struct{}{}
+	}
+	tags := make([]string, 0, len(seen))
+	for tag := range seen {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	return tags, hasUntagged
 }
 
 func sortSessions(sessions []storage.SessionRow, order dashboardSort) {

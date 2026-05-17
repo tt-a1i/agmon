@@ -181,6 +181,75 @@ func TestRefreshFilteredViewsCachesCurrentFilterResults(t *testing.T) {
 	}
 }
 
+func TestViewDashboardRendersBudgetAndTagChips(t *testing.T) {
+	m := Model{
+		width:  120,
+		height: 40,
+		sessions: []storage.SessionRow{
+			{SessionID: "session-auth", Platform: "claude", Tag: "auth", StartTime: time.Now()},
+			{SessionID: "session-plain", Platform: "codex", StartTime: time.Now().Add(-time.Minute)},
+		},
+		budgetChips: []budgetChip{
+			{Name: "Claude monthly", Used: 42, Limit: 100, Percent: 42, Status: budgetStatusOK},
+		},
+	}
+	m.refreshFilteredViews()
+
+	out := m.viewDashboard(120)
+	for _, want := range []string{"Claude monthly", "$42/$100", "Tags:", "[all]", "[auth]", "[untagged]"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dashboard output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestModelRefreshLoadsBudgetChips(t *testing.T) {
+	db := testModelDB(t)
+	seedModelSession(t, db)
+	if _, err := db.InsertBudget("Claude monthly", 100, string(event.PlatformClaude)); err != nil {
+		t.Fatalf("insert budget: %v", err)
+	}
+
+	m := NewModel(db, make(chan EventMsg, 1))
+	m.refresh()
+
+	if len(m.budgetChips) != 1 {
+		t.Fatalf("expected one budget chip, got %#v", m.budgetChips)
+	}
+	chip := m.budgetChips[0]
+	if chip.Name != "Claude monthly" || chip.Limit != 100 || chip.Used <= 0 {
+		t.Fatalf("unexpected budget chip: %#v", chip)
+	}
+}
+
+func TestViewMessagesRendersModelBreakdownForMultipleModels(t *testing.T) {
+	m := Model{
+		width:  120,
+		height: 40,
+		sessions: []storage.SessionRow{
+			{SessionID: "session-1", Platform: "claude", CWD: "/tmp/project", StartTime: time.Now()},
+		},
+		modelBreakdown: []storage.ModelCostRow{
+			{Model: "claude-sonnet-4-6", InputTokens: 150000, OutputTokens: 50000, CostUSD: 1.20},
+			{Model: "claude-haiku-4-5", InputTokens: 80000, OutputTokens: 20000, CostUSD: 0.80},
+		},
+	}
+	m.refreshFilteredViews()
+
+	out := m.viewMessages(120)
+	for _, want := range []string{"By Model:", "claude-sonnet-4-6", "$1.20", "60%"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("model breakdown output missing %q:\n%s", want, out)
+		}
+	}
+
+	m.modelBreakdown = m.modelBreakdown[:1]
+	out = m.viewMessages(120)
+	if strings.Contains(out, "By Model:") {
+		t.Fatalf("single-model breakdown should not render:\n%s", out)
+	}
+}
+
 func TestPruneExpandedCallsDropsStaleEntries(t *testing.T) {
 	msgTime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	m := Model{

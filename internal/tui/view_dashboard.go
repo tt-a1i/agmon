@@ -20,6 +20,18 @@ func (m Model) viewDashboard(width int) string {
 		mutedStyle.Render("In"), headerStyle.Render(formatTokens(m.todayInput)),
 		mutedStyle.Render("Out"), headerStyle.Render(formatTokens(m.todayOutput))))
 
+	budgetLine := m.renderBudgetChips()
+	tagLine := m.renderTagChips()
+	if budgetLine != "" {
+		b.WriteString(budgetLine + "\n")
+	}
+	if tagLine != "" {
+		b.WriteString(tagLine + "\n")
+	}
+	if budgetLine != "" || tagLine != "" {
+		b.WriteString("\n")
+	}
+
 	filtered := m.filteredSessions()
 	if len(filtered) == 0 {
 		if len(m.sessions) == 0 {
@@ -32,6 +44,8 @@ func (m Model) viewDashboard(width int) string {
 			b.WriteString(mutedStyle.Render(msg))
 		} else if m.filterText != "" {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No sessions match %q", m.filterText)))
+		} else if m.tagFilter != tagFilterAll {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No sessions tagged %q", tagFilterDisplayName(m.tagFilter))))
 		} else if m.platformFilter != platformAll {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  No %s sessions", platformFilterNames[m.platformFilter])))
 		} else {

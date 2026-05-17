@@ -14,6 +14,9 @@ func (m Model) viewMessages(width int) string {
 
 	s := m.sessions[m.selectedSession]
 	b.WriteString(sessionHeader(s) + "\n")
+	if breakdown := m.renderModelBreakdown(width); breakdown != "" {
+		b.WriteString(breakdown + "\n")
+	}
 
 	filtered := m.filteredMessages()
 	if m.filterText != "" {

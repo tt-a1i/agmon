@@ -57,6 +57,29 @@ func TestTruncateTag(t *testing.T) {
 	}
 }
 
+func TestFilterSessionsAppliesTagFilter(t *testing.T) {
+	sessions := []storage.SessionRow{
+		{SessionID: "auth-1", Platform: "claude", Tag: "auth", StartTime: time.Now()},
+		{SessionID: "refactor-1", Platform: "codex", Tag: "refactor", StartTime: time.Now().Add(-time.Minute)},
+		{SessionID: "plain-1", Platform: "claude", StartTime: time.Now().Add(-2 * time.Minute)},
+	}
+
+	got := filterSessions(sessions, "", platformAll, sortRecent, "auth")
+	if len(got) != 1 || got[0].SessionID != "auth-1" {
+		t.Fatalf("auth tag filter returned %#v", got)
+	}
+
+	got = filterSessions(sessions, "", platformAll, sortRecent, tagFilterUntagged)
+	if len(got) != 1 || got[0].SessionID != "plain-1" {
+		t.Fatalf("untagged filter returned %#v", got)
+	}
+
+	got = filterSessions(sessions, "refactor", platformAll, sortRecent, "")
+	if len(got) != 1 || got[0].SessionID != "refactor-1" {
+		t.Fatalf("text filter should match tag text, got %#v", got)
+	}
+}
+
 func TestRenderTrendBoundaries(t *testing.T) {
 	// prev == 0 returns empty string
 	if got := renderTrend(5, 0); got != "" {

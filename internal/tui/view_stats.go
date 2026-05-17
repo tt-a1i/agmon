@@ -24,6 +24,9 @@ func (m Model) buildStatsLines(width int) []string {
 
 	s := m.sessions[m.selectedSession]
 	lines = append(lines, sessionHeader(s))
+	if breakdown := m.renderModelBreakdown(width); breakdown != "" {
+		lines = append(lines, strings.Split(breakdown, "\n")...)
+	}
 	lines = append(lines, "")
 
 	// --- Session overview ---

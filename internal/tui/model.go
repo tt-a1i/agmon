@@ -64,6 +64,25 @@ const (
 
 var dashboardSortNames = []string{"Recent", "Cost"}
 
+const (
+	tagFilterAll      = ""
+	tagFilterUntagged = "\x00untagged"
+)
+
+const (
+	budgetStatusOK   = "ok"
+	budgetStatusWarn = "warn"
+	budgetStatusOver = "over"
+)
+
+type budgetChip struct {
+	Name    string
+	Used    float64
+	Limit   float64
+	Percent float64
+	Status  string
+}
+
 // startOfCalendarWeek returns the Monday 00:00 UTC of the week containing t.
 func startOfCalendarWeek(t time.Time) time.Time {
 	wd := t.Weekday()
@@ -150,8 +169,10 @@ type Model struct {
 	fileChanges            []storage.FileChangeRow
 	toolStats              []storage.ToolStatRow
 	agentStats             []storage.AgentStatRow
+	modelBreakdown         []storage.ModelCostRow
 	messages               []collector.UserMessage
 	messagesCacheID        string // session ID for which messages were loaded
+	budgetChips            []budgetChip
 	filteredSessionsCache  []storage.SessionRow
 	filteredToolCallsCache []storage.ToolCallRow
 	filteredMessagesCache  []collector.UserMessage
@@ -162,8 +183,14 @@ type Model struct {
 	summaryRange           timeRange
 	platformFilter         sessionPlatformFilter
 	dashboardSort          dashboardSort
+	tagFilter              string
 	filterMode             bool
 	filterText             string
+	searchMode             bool
+	searchText             string
+	searchHits             []storage.SearchHit
+	searchSelected         int
+	searchErr              string
 	todayInput             int
 	todayOutput            int
 	todayCost              float64
@@ -265,6 +292,12 @@ func (m Model) tabVisibleRows() int {
 	switch m.activeTab {
 	case tabDashboard:
 		rows = base - 6 // summary + header + "more" hint + blank + preview bar
+		if len(m.budgetChips) > 0 {
+			rows--
+		}
+		if len(dashboardTagFilterOptions(m.sessions)) > 1 {
+			rows--
+		}
 	case tabMessages:
 		rows = base - 3
 	case tabToolCalls:
@@ -386,6 +419,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.searchMode {
+			return m.updateSearchInput(msg)
+		}
+		if handled, cmd := m.updateSearchPopup(msg); handled {
+			return m, cmd
+		}
+
 		// Filter mode: capture text input; only a few keys have special meaning.
 		if m.filterMode {
 			switch msg.Type {
@@ -594,6 +634,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case key.Matches(msg, key.NewBinding(key.WithKeys("T"))):
+			if m.activeTab == tabDashboard {
+				m.cycleTagFilter()
+			}
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("S"))):
+			if m.activeTab != tabDashboard {
+				m.startGlobalSearch()
+			}
+			return m, nil
+
 		case key.Matches(msg, key.NewBinding(key.WithKeys("p"))):
 			if m.activeTab == tabDashboard {
 				m.platformFilter = (m.platformFilter + 1) % platformFilterCount
@@ -646,6 +698,7 @@ func (m *Model) refresh() {
 	m.todayCost, _ = m.db.GetCostSince(cutoff)
 	m.prevCost = prevPeriodCost(m.db, m.summaryRange)
 	m.dailyCosts, _ = m.db.GetDailyCosts(7)
+	m.refreshBudgetChips()
 
 	if len(m.sessions) > 0 {
 		if m.selectedSession >= len(m.sessions) {
@@ -658,6 +711,7 @@ func (m *Model) refresh() {
 		m.fileChanges, _ = m.db.ListFileChanges(sid)
 		m.toolStats, _ = m.db.ListToolStats(sid)
 		m.agentStats, _ = m.db.ListAgentStats(sid)
+		m.modelBreakdown, _ = m.db.GetSessionModelBreakdown(sid)
 		m.statsLineCount = len(m.buildStatsLines(m.width - 4))
 		// Load user messages. Cache by session ID, but always reload for active sessions.
 		if m.messagesCacheID != sid || s.Status == "active" {
@@ -670,6 +724,7 @@ func (m *Model) refresh() {
 		m.fileChanges = nil
 		m.toolStats = nil
 		m.agentStats = nil
+		m.modelBreakdown = nil
 		m.statsLineCount = 0
 		m.messages = nil
 		m.messagesCacheID = ""
@@ -697,6 +752,45 @@ func (m *Model) refresh() {
 		}
 	}
 	m.adjustScroll()
+}
+
+func (m *Model) refreshBudgetChips() {
+	budgets, err := m.db.ListBudgets()
+	if err != nil {
+		m.budgetChips = nil
+		return
+	}
+
+	chips := make([]budgetChip, 0, len(budgets))
+	for _, budget := range budgets {
+		used, limit, err := m.db.GetBudgetUsage(budget.ID)
+		if err != nil {
+			continue
+		}
+		percent := 0.0
+		if limit > 0 {
+			percent = used / limit * 100
+		}
+		chips = append(chips, budgetChip{
+			Name:    budget.Name,
+			Used:    used,
+			Limit:   limit,
+			Percent: percent,
+			Status:  budgetStatusForPercent(percent),
+		})
+	}
+	m.budgetChips = chips
+}
+
+func budgetStatusForPercent(percent float64) string {
+	switch {
+	case percent >= 100:
+		return budgetStatusOver
+	case percent >= 80:
+		return budgetStatusWarn
+	default:
+		return budgetStatusOK
+	}
 }
 
 func sessionDisplayName(s storage.SessionRow) string {

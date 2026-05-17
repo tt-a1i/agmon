@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tt-a1i/tokenmeter/internal/collector"
+	"github.com/tt-a1i/tokenmeter/internal/event"
 	"github.com/tt-a1i/tokenmeter/internal/storage"
 )
 
@@ -230,6 +231,91 @@ func TestUpdateSCyclesDashboardSort(t *testing.T) {
 	m = sendKey(m, keyRunes('s'))
 	if m.dashboardSort == initial {
 		t.Errorf("s should cycle dashboardSort")
+	}
+}
+
+func TestUpdateUpperTCyclesTagFilter(t *testing.T) {
+	m, _ := modelHarness(t)
+	m.activeTab = tabDashboard
+	m.sessions = []storage.SessionRow{
+		{SessionID: "refactor", Platform: "claude", Tag: "refactor", StartTime: time.Now()},
+		{SessionID: "auth", Platform: "claude", Tag: "auth", StartTime: time.Now().Add(-time.Minute)},
+		{SessionID: "plain", Platform: "codex", StartTime: time.Now().Add(-2 * time.Minute)},
+	}
+	m.refreshFilteredViews()
+
+	m = sendKey(m, keyRunes('T'))
+	if m.tagFilter != "auth" {
+		t.Fatalf("first T should select sorted first tag auth, got %q", m.tagFilter)
+	}
+	if len(m.filteredSessions()) != 1 || m.filteredSessions()[0].SessionID != "auth" {
+		t.Fatalf("auth filter returned %#v", m.filteredSessions())
+	}
+
+	m = sendKey(m, keyRunes('T'))
+	if m.tagFilter != "refactor" {
+		t.Fatalf("second T should select refactor, got %q", m.tagFilter)
+	}
+
+	m = sendKey(m, keyRunes('T'))
+	if m.tagFilter != tagFilterUntagged {
+		t.Fatalf("third T should select untagged, got %q", m.tagFilter)
+	}
+
+	m = sendKey(m, keyRunes('T'))
+	if m.tagFilter != "" {
+		t.Fatalf("fourth T should return to all, got %q", m.tagFilter)
+	}
+}
+
+func TestUpdateUpperSGlobalSearchAndEnterOpensHit(t *testing.T) {
+	m, db := modelHarness(t)
+	now := time.Now().UTC()
+	if err := db.UpsertSession("search-hit", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if _, err := db.InsertToolCallStart("call-search", "", "search-hit", "Read", "needle params", now); err != nil {
+		t.Fatalf("insert tool call: %v", err)
+	}
+	m.sessions = append(m.sessions, storage.SessionRow{
+		SessionID: "search-hit",
+		Platform:  "claude",
+		StartTime: now,
+	})
+	m.activeTab = tabMessages
+	m.selectedSession = 0
+	m.refreshFilteredViews()
+
+	m = sendKey(m, keyRunes('S'))
+	if !m.searchMode {
+		t.Fatal("S should enter global search mode in detail view")
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("needle")})
+	m = updated.(Model)
+	if m.searchText != "needle" {
+		t.Fatalf("search text = %q, want needle", m.searchText)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.searchMode {
+		t.Fatal("Enter should leave search input mode")
+	}
+	if len(m.searchHits) != 1 || m.searchHits[0].SessionID != "search-hit" {
+		t.Fatalf("search hits = %#v", m.searchHits)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("opening a search hit should request a detail refresh")
+	}
+	if m.sessions[m.selectedSession].SessionID != "search-hit" {
+		t.Fatalf("selected session = %q, want search-hit", m.sessions[m.selectedSession].SessionID)
+	}
+	if m.searchHits != nil {
+		t.Fatalf("search popup should close after opening hit, got %#v", m.searchHits)
 	}
 }
 

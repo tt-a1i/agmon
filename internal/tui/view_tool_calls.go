@@ -10,7 +10,11 @@ func (m Model) viewToolCalls(width int) string {
 
 	if len(m.sessions) > 0 {
 		s := m.sessions[m.selectedSession]
-		b.WriteString(sessionHeader(s) + "\n\n")
+		b.WriteString(sessionHeader(s) + "\n")
+		if breakdown := m.renderModelBreakdown(width); breakdown != "" {
+			b.WriteString(breakdown + "\n")
+		}
+		b.WriteString("\n")
 	}
 
 	filtered := m.filteredToolCalls()

@@ -48,6 +48,10 @@ func (m Model) View() string {
 
 	b.WriteString(boxStyle.Width(contentWidth).Render(content))
 	b.WriteString("\n")
+	if popup := m.viewSearchPopup(contentWidth); popup != "" {
+		b.WriteString(popup)
+		b.WriteString("\n")
+	}
 	b.WriteString(m.footer())
 
 	return b.String()
@@ -58,6 +62,13 @@ func (m Model) footer() string {
 	switch {
 	case m.flashMsg != "" && time.Now().Before(m.flashExpire):
 		footer = " " + flashStyle.Render("✓ "+m.flashMsg)
+	case m.searchMode:
+		footer = fmt.Sprintf(" %s %s%s  %s  %s",
+			filterLabelStyle.Render("Search:"),
+			filterInputStyle.Render(m.searchText),
+			filterLabelStyle.Render("█"),
+			fmtKey("Esc", "cancel"),
+			fmtKey("Enter", "search"))
 	case m.filterMode:
 		footer = fmt.Sprintf(" %s %s%s  %s  %s",
 			filterLabelStyle.Render("Filter:"),
@@ -73,8 +84,9 @@ func (m Model) footer() string {
 			fmtKey("Tab", "view"),
 			fmtKey("q", "quit"))
 	case m.activeTab == tabDashboard:
-		footer = fmt.Sprintf(" %s  %s  %s  %s  %s  %s  %s  %s  %s  %s",
+		footer = fmt.Sprintf(" %s  %s  %s  %s  %s  %s  %s  %s  %s  %s  %s",
 			fmtKey("t", "range"),
+			fmtKey("T", "tag:"+tagFilterDisplayName(m.tagFilter)),
 			fmtKey("p", "plat:"+platformFilterNames[m.platformFilter]),
 			fmtKey("s", "sort:"+dashboardSortNames[m.dashboardSort]),
 			fmtKey("/", "filter"),
@@ -98,7 +110,8 @@ func (m Model) footer() string {
 		if m.activeTab != tabStats {
 			filterHint = fmt.Sprintf("  %s", fmtKey("/", "filter"))
 		}
-		footer = fmt.Sprintf(" %s  %s  %s  %s  %s%s%s  %s%s",
+		searchHint := fmt.Sprintf("  %s", fmtKey("S", "search"))
+		footer = fmt.Sprintf(" %s  %s  %s  %s  %s%s%s%s  %s%s",
 			fmtKey("Tab", "view"),
 			fmtKey("[/]", "session"),
 			fmtKey("j/k", "nav"),
@@ -106,6 +119,7 @@ func (m Model) footer() string {
 			fmtKey("r", "report"),
 			enterHint,
 			filterHint,
+			searchHint,
 			fmtKey("q", "quit"),
 			pos)
 	}
