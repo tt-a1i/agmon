@@ -1512,6 +1512,72 @@ func TestStaticIndexHasDateInputA11y(t *testing.T) {
 	}
 }
 
+func TestStaticIndexHasOnboardingTour(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="onboarding"`) {
+		t.Error("index.html missing id=\"onboarding\"")
+	}
+	if !strings.Contains(body, `role="dialog"`) {
+		t.Error("index.html missing role=\"dialog\" on onboarding")
+	}
+	if !strings.Contains(body, `aria-modal="true"`) {
+		t.Error("index.html missing aria-modal=\"true\" on onboarding")
+	}
+}
+
+func TestStaticIndexHasOnboardingSteps(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `onboardingSteps`) {
+		t.Error("index.html missing onboardingSteps array")
+	}
+	if !strings.Contains(body, `showStep`) {
+		t.Error("index.html missing showStep function")
+	}
+	if !strings.Contains(body, `startOnboarding`) {
+		t.Error("index.html missing startOnboarding function")
+	}
+	if !strings.Contains(body, `endOnboarding`) {
+		t.Error("index.html missing endOnboarding function")
+	}
+}
+
+func TestStaticIndexHasOnboardingDismissPersist(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `tokenmeter-onboarding-done`) {
+		t.Error("index.html missing localStorage key tokenmeter-onboarding-done")
+	}
+}
+
+func TestStaticIndexHasKbdSearch(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="kbd-search"`) {
+		t.Error("index.html missing id=\"kbd-search\" search input in kbdModal")
+	}
+	if !strings.Contains(body, `filterKbdShortcuts`) {
+		t.Error("index.html missing filterKbdShortcuts function")
+	}
+}
+
+func TestStaticIndexHasKbdPrintButton(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, `id="kbd-print"`) {
+		t.Error("index.html missing id=\"kbd-print\" print button")
+	}
+	if !strings.Contains(body, `window.print()`) {
+		t.Error("index.html missing window.print() call")
+	}
+}
+
+func TestStaticIndexHasKbdGroups(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, group := range []string{"Navigation", "View", "Filter", "Actions", "Onboarding"} {
+		needle := `data-group="` + group + `"`
+		if !strings.Contains(body, needle) {
+			t.Errorf("index.html missing kbd section data-group=%q", group)
+		}
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestHandleProjection(t *testing.T) {
@@ -1707,5 +1773,213 @@ func TestAnalyticsAuthRequired(t *testing.T) {
 				t.Fatalf("%s without token: got %d, want 401", path, w.Code)
 			}
 		})
+	}
+}
+
+// ── Analytics filter + drilldown tests ───────────────────────────────────────
+
+func TestAnalyticsRespectsWorkspaceFilter(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	// Two sessions in different workspaces.
+	for _, tc := range []struct {
+		id  string
+		cwd string
+		src string
+	}{
+		{"ws-sess-a", "/home/user/proj-alpha", "src-ws-a"},
+		{"ws-sess-b", "/home/user/proj-beta", "src-ws-b"},
+	} {
+		if err := db.UpsertSession(tc.id, event.PlatformClaude, now); err != nil {
+			t.Fatalf("upsert %s: %v", tc.id, err)
+		}
+		if err := db.UpdateSessionMeta(tc.id, tc.cwd, "main"); err != nil {
+			t.Fatalf("meta %s: %v", tc.id, err)
+		}
+		if err := db.InsertTokenUsage("agent1", tc.id, 100, 50, 0, 0,
+			"claude-sonnet-4-6", 0.01, now, tc.src); err != nil {
+			t.Fatalf("usage %s: %v", tc.id, err)
+		}
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/analytics?range=all&workspace=/home/user/proj-alpha", nil)
+	w := httptest.NewRecorder()
+	srv.handleAnalytics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d — %s", w.Code, w.Body.String())
+	}
+	var resp analyticsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, s := range resp.TopExpensiveSessions {
+		if s.ID == "ws-sess-b" {
+			t.Errorf("workspace filter: session from proj-beta leaked into proj-alpha results")
+		}
+	}
+	found := false
+	for _, s := range resp.TopExpensiveSessions {
+		if s.ID == "ws-sess-a" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("workspace filter: expected ws-sess-a in results but it was absent")
+	}
+}
+
+func TestAnalyticsRespectsTagFilter(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	for _, tc := range []struct {
+		id  string
+		tag string
+		src string
+	}{
+		{"tag-sess-a", "my-project", "src-tag-a"},
+		{"tag-sess-b", "other-project", "src-tag-b"},
+	} {
+		if err := db.UpsertSession(tc.id, event.PlatformClaude, now); err != nil {
+			t.Fatalf("upsert %s: %v", tc.id, err)
+		}
+		if err := db.SetSessionTag(tc.id, tc.tag); err != nil {
+			t.Fatalf("tag %s: %v", tc.id, err)
+		}
+		if err := db.InsertTokenUsage("agent1", tc.id, 100, 50, 0, 0,
+			"claude-sonnet-4-6", 0.01, now, tc.src); err != nil {
+			t.Fatalf("usage %s: %v", tc.id, err)
+		}
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/analytics?range=all&tag=my-project", nil)
+	w := httptest.NewRecorder()
+	srv.handleAnalytics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d — %s", w.Code, w.Body.String())
+	}
+	var resp analyticsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, s := range resp.TopExpensiveSessions {
+		if s.ID == "tag-sess-b" {
+			t.Errorf("tag filter: other-project session leaked into my-project results")
+		}
+	}
+}
+
+func TestAnalyticsRespectsModelFilter(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+
+	if err := db.UpsertSession("model-sess", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := db.InsertTokenUsage("agent1", "model-sess", 100, 50, 0, 0,
+		"claude-sonnet-4-6", 0.01, now, "src-model-sonnet"); err != nil {
+		t.Fatalf("usage sonnet: %v", err)
+	}
+	if err := db.InsertTokenUsage("agent1", "model-sess", 200, 100, 0, 0,
+		"claude-opus-4-7", 0.05, now, "src-model-opus"); err != nil {
+		t.Fatalf("usage opus: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/analytics?range=all&model=claude-sonnet-4-6", nil)
+	w := httptest.NewRecorder()
+	srv.handleAnalytics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d — %s", w.Code, w.Body.String())
+	}
+	var resp analyticsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	models := (resp.ModelMixDaily[0]).Models
+	for _, m := range models {
+		if m.Model == "claude-opus-4-7" {
+			t.Errorf("model filter: claude-opus-4-7 should be excluded but appeared in response")
+		}
+	}
+	found := false
+	for _, m := range models {
+		if m.Model == "claude-sonnet-4-6" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("model filter: claude-sonnet-4-6 should appear in filtered results")
+	}
+}
+
+func TestAnalyticsCompareReturnsBothPeriods(t *testing.T) {
+	db := testDB(t)
+	seedAnalyticsData(t, db)
+	srv := NewServer(db, "0")
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/analytics?range=week&compare=prev_period", nil)
+	w := httptest.NewRecorder()
+	srv.handleAnalytics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d — %s", w.Code, w.Body.String())
+	}
+	var resp analyticsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.PreviousPeriod == nil {
+		t.Fatal("compare=prev_period: previous_period field is nil")
+	}
+	// Previous period must contain the 4 cards.
+	pp := resp.PreviousPeriod
+	if pp.TopExpensiveSessions == nil {
+		t.Error("previous_period missing top_expensive_sessions")
+	}
+	if pp.ToolBreakdown == nil {
+		t.Error("previous_period missing tool_breakdown")
+	}
+	if pp.ModelMixDaily == nil || len(pp.ModelMixDaily) == 0 {
+		t.Error("previous_period missing model_mix_daily")
+	}
+	// Anomalies may be nil for sparse data — not checked.
+}
+
+func TestStaticIndexHasAnalyticsFilters(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"ac-filter-workspace",
+		"ac-filter-tag",
+		"ac-filter-model",
+		"ac-filter-compare",
+		"applyAnalyticsFilters",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing analytics filter element/function: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasAnalyticsDrilldownClick(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"openSession",
+		"ac-top-body",
+		"ac-anomalies-list",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing drilldown identifier: %q", want)
+		}
 	}
 }

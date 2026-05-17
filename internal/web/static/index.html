@@ -459,15 +459,54 @@ body.hide-workspace .workspace-bar{display:none}
 /* Keyboard help modal */
 .kbd-modal{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;z-index:100;place-items:center}
 .kbd-modal.show{display:grid}
-.kbd-box{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px 28px;max-width:400px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,.15);animation:fadeUp .15s ease}
-.kbd-box h3{font-size:15px;font-weight:700;color:var(--text-strong);margin-bottom:16px}
-.kbd-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-light)}
+.kbd-box{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px 28px;max-width:480px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.15);animation:fadeUp .15s ease}
+.kbd-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.kbd-box h3{font-size:15px;font-weight:700;color:var(--text-strong);flex:1;margin:0}
+#kbd-search{flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font:inherit;font-size:12px;color:var(--text);outline:none}
+#kbd-search:focus{border-color:var(--accent)}
+.kbd-sections{display:flex;flex-direction:column;gap:12px}
+.kbd-group-label{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin:0 0 6px}
+.kbd-dl{margin:0;padding:0}
+.kbd-row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border-light)}
 .kbd-row:last-child{border-bottom:0}
 .kbd-key{display:flex;gap:4px}
 .kbd-key kbd{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-family:inherit;font-size:11px;font-weight:600;color:var(--text-muted);min-width:22px;text-align:center}
-.kbd-desc{font-size:12px;color:var(--text);font-weight:500}
-.kbd-close{margin-top:16px;width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
+.kbd-desc{font-size:12px;color:var(--text);font-weight:500;margin:0}
+.kbd-no-match{font-size:12px;color:var(--text-muted);text-align:center;padding:12px 0;margin:0}
+.kbd-footer{display:flex;gap:8px;margin-top:16px}
+.kbd-close{flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
 .kbd-close:hover{background:var(--border);color:var(--text-strong)}
+.kbd-print-btn{background:0;border:1px solid var(--border);border-radius:6px;padding:7px 12px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
+.kbd-print-btn:hover{background:var(--bg3);color:var(--text-strong)}
+
+/* Onboarding tour overlay */
+#onboarding{position:fixed;inset:0;z-index:9000;pointer-events:none}
+#onboarding:not([hidden]){pointer-events:auto}
+.ob-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9001}
+.ob-tooltip{position:fixed;z-index:9003;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px 22px;max-width:320px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2);animation:fadeUp .18s ease}
+.ob-step-count{font-size:11px;color:var(--text-muted);margin-bottom:4px}
+.ob-title{font-size:14px;font-weight:700;color:var(--text-strong);margin:0 0 8px}
+.ob-body{font-size:12px;color:var(--text);margin:0 0 14px;line-height:1.5}
+.ob-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ob-skip{background:0;border:0;font:inherit;font-size:11px;color:var(--text-muted);cursor:pointer;padding:4px 0;text-decoration:underline}
+.ob-nav{display:flex;gap:6px}
+.ob-prev,.ob-next{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font:inherit;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;transition:all .1s}
+.ob-prev:hover,.ob-next:hover{background:var(--border)}
+.ob-next.ob-done{background:var(--accent);border-color:var(--accent);color:#fff}
+.ob-next.ob-done:hover{opacity:.9}
+#ob-spotlight{position:fixed;z-index:9002;border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,.01);outline:3px solid var(--accent);outline-offset:3px;pointer-events:none;transition:all .25s ease}
+@media(prefers-reduced-motion:reduce){.ob-tooltip{animation:none}#ob-spotlight{transition:none}}
+
+/* Print optimization for keyboard cheat-sheet */
+@media print{
+  body>*:not(.kbd-modal){display:none!important}
+  .kbd-modal{display:block!important;position:static!important;background:none!important}
+  .kbd-box{box-shadow:none!important;max-width:100%!important;animation:none!important}
+  .kbd-header{margin-bottom:8px}
+  #kbd-search,.kbd-footer{display:none!important}
+  .kbd-group-label{break-after:avoid}
+  .kbd-sections{gap:16px}
+}
 
 /* Settings panel — same shell as kbd-modal but wider with form sections. */
 .settings-btn{background:0;border:0;width:32px;height:32px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;color:var(--text-muted);transition:background .1s,color .1s}
@@ -960,6 +999,13 @@ body.hide-workspace .workspace-bar{display:none}
     <div class="back" onclick="closeAnalyticsView()">← Back</div>
     <div style="font-size:13px;font-weight:600">Analytics</div>
   </div>
+  <div class="analytics-filters" id="ac-filters" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border-light);align-items:center">
+    <input id="ac-filter-workspace" type="text" placeholder="Workspace path…" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
+    <input id="ac-filter-tag" type="text" placeholder="Tag…" style="width:110px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
+    <input id="ac-filter-model" type="text" placeholder="Model…" style="width:130px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ac-filter-compare"> Compare prev period</label>
+    <button onclick="applyAnalyticsFilters()" style="padding:5px 14px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;cursor:pointer;white-space:nowrap">Apply</button>
+  </div>
   <div class="analytics-loading" id="analyticsLoading" style="padding:32px;text-align:center;color:var(--text-muted)">Loading analytics…</div>
   <div class="analytics-grid" id="analyticsGrid" style="display:none">
     <div class="analytics-card" id="ac-top">
@@ -1038,16 +1084,56 @@ body.hide-workspace .workspace-bar{display:none}
 <footer class="footer" role="contentinfo">TokenMeter · Press <kbd>?</kbd> for keyboard shortcuts</footer>
 <div class="kbd-modal" id="kbdModal" role="dialog" aria-modal="true" aria-labelledby="kbdModalTitle" onclick="if(event.target===this)closeKbdModal()">
   <div class="kbd-box" onclick="event.stopPropagation()">
-    <h3 id="kbdModalTitle">Keyboard Shortcuts</h3>
-    <div class="kbd-row"><span class="kbd-desc">Navigate sessions</span><div class="kbd-key"><kbd>j</kbd><kbd>k</kbd></div></div>
-    <div class="kbd-row"><span class="kbd-desc">Open session</span><div class="kbd-key"><kbd>Enter</kbd></div></div>
-    <div class="kbd-row"><span class="kbd-desc">Focus search</span><div class="kbd-key"><kbd>/</kbd></div></div>
-    <div class="kbd-row"><span class="kbd-desc">Go to dashboard / stats / messages</span><div class="kbd-key"><kbd>g</kbd> <kbd>d</kbd>/<kbd>s</kbd>/<kbd>m</kbd></div></div>
-    <div class="kbd-row"><span class="kbd-desc">Previous / Next session</span><div class="kbd-key"><kbd>←</kbd><kbd>→</kbd></div></div>
-    <div class="kbd-row"><span class="kbd-desc">Go back / Clear filter</span><div class="kbd-key"><kbd>Esc</kbd></div></div>
-    <div class="kbd-row"><span class="kbd-desc">Toggle theme</span><div class="kbd-key"><kbd>t</kbd></div></div>
-    <div class="kbd-row"><span class="kbd-desc">Show this help</span><div class="kbd-key"><kbd>?</kbd></div></div>
-    <button class="kbd-close" onclick="closeKbdModal()">Close</button>
+    <div class="kbd-header">
+      <h3 id="kbdModalTitle">Keyboard Shortcuts</h3>
+      <input id="kbd-search" type="search" placeholder="Filter shortcuts…" aria-label="Filter keyboard shortcuts" autocomplete="off" oninput="filterKbdShortcuts(this.value)">
+    </div>
+    <div class="kbd-sections" id="kbd-sections">
+      <section data-group="Navigation">
+        <h4 class="kbd-group-label">Navigation</h4>
+        <dl class="kbd-dl">
+          <div class="kbd-row"><dt class="kbd-desc">Navigate sessions</dt><dd class="kbd-key"><kbd>j</kbd><kbd>k</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Previous / Next session</dt><dd class="kbd-key"><kbd>←</kbd><kbd>→</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Open session</dt><dd class="kbd-key"><kbd>Enter</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Go back</dt><dd class="kbd-key"><kbd>Esc</kbd></dd></div>
+        </dl>
+      </section>
+      <section data-group="View">
+        <h4 class="kbd-group-label">View</h4>
+        <dl class="kbd-dl">
+          <div class="kbd-row"><dt class="kbd-desc">Go to dashboard</dt><dd class="kbd-key"><kbd>g</kbd><kbd>d</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Go to stats</dt><dd class="kbd-key"><kbd>g</kbd><kbd>s</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Go to messages</dt><dd class="kbd-key"><kbd>g</kbd><kbd>m</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Toggle theme</dt><dd class="kbd-key"><kbd>t</kbd></dd></div>
+        </dl>
+      </section>
+      <section data-group="Filter">
+        <h4 class="kbd-group-label">Filter</h4>
+        <dl class="kbd-dl">
+          <div class="kbd-row"><dt class="kbd-desc">Focus search</dt><dd class="kbd-key"><kbd>/</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Clear filter</dt><dd class="kbd-key"><kbd>Esc</kbd></dd></div>
+        </dl>
+      </section>
+      <section data-group="Actions">
+        <h4 class="kbd-group-label">Actions</h4>
+        <dl class="kbd-dl">
+          <div class="kbd-row"><dt class="kbd-desc">Show this help</dt><dd class="kbd-key"><kbd>?</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Open settings</dt><dd class="kbd-key"><kbd>,</kbd></dd></div>
+          <div class="kbd-row"><dt class="kbd-desc">Export data</dt><dd class="kbd-key"><kbd>e</kbd></dd></div>
+        </dl>
+      </section>
+      <section data-group="Onboarding">
+        <h4 class="kbd-group-label">Onboarding</h4>
+        <dl class="kbd-dl">
+          <div class="kbd-row"><dt class="kbd-desc">Start guided tour</dt><dd class="kbd-key"><kbd>F1</kbd></dd></div>
+        </dl>
+      </section>
+    </div>
+    <p class="kbd-no-match" id="kbd-no-match" hidden>No shortcuts match your search.</p>
+    <div class="kbd-footer">
+      <button id="kbd-print" class="kbd-print-btn" onclick="window.print()" aria-label="Print keyboard shortcuts">Print</button>
+      <button class="kbd-close" onclick="closeKbdModal()">Close</button>
+    </div>
   </div>
 </div>
 <div class="settings-modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle" onclick="if(event.target===this)closeSettingsModal()">
@@ -1096,6 +1182,7 @@ body.hide-workspace .workspace-bar{display:none}
     <div class="settings-footer">
       <button class="settings-reset" onclick="resetPreferences()">Reset to defaults</button>
       <button class="settings-reset" onclick="clearOfflineCache()">Clear offline cache</button>
+      <button class="settings-reset" onclick="closeSettingsModal();startOnboarding()" id="restartOnboarding">Show onboarding tour</button>
       <button class="settings-close" onclick="closeSettingsModal()">Done</button>
     </div>
   </div>
@@ -2130,7 +2217,7 @@ document.querySelectorAll('#sessionPlatform button').forEach(b=>{b.onclick=()=>{
 let gPressed=false,gTimer=null;
 document.addEventListener('keydown',e=>{
   const inInput=document.activeElement.matches('input');
-  if(e.key==='Escape'){if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if($('exportPop')&&$('exportPop').classList.contains('show')){$('exportPop').classList.remove('show')}else if($('cmpView')&&$('cmpView').classList.contains('show')){closeCompare()}else if(compareSet.size>0){clearCompareSelect()}else if($('navR')&&$('navR').classList.contains('open')){$('navR').classList.remove('open');$('hamburgerBtn').classList.remove('open')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if(tagFilter!==null){tagFilter=null;renderSessions(allS)}else if($('session-detail-view')&&!$('session-detail-view').hidden){closeSessionDetailView()}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
+  if(e.key==='Escape'){if($('onboarding')&&!$('onboarding').hidden){endOnboarding()}else if($('kbdModal').classList.contains('show')){$('kbdModal').classList.remove('show')}else if($('exportPop')&&$('exportPop').classList.contains('show')){$('exportPop').classList.remove('show')}else if($('cmpView')&&$('cmpView').classList.contains('show')){closeCompare()}else if(compareSet.size>0){clearCompareSelect()}else if($('navR')&&$('navR').classList.contains('open')){$('navR').classList.remove('open');$('hamburgerBtn').classList.remove('open')}else if(dayFilter){dayFilter=null;renderSessions(allS)}else if(tagFilter!==null){tagFilter=null;renderSessions(allS)}else if($('session-detail-view')&&!$('session-detail-view').hidden){closeSessionDetailView()}else if($('detail').classList.contains('show')){goBack()}gPressed=false;return}
   // g-prefix sequence: g d → dashboard / g s → stats / g m → messages.
   // First `g` arms for 1s; second key dispatches and consumes the prefix.
   if(!inInput&&!$('kbdModal').classList.contains('show')){
@@ -3096,6 +3183,175 @@ window.doExportReport=function(){
   window.location='/api/export-report?range='+encodeURIComponent(r);
 };
 })();
+
+// === Keyboard cheat-sheet search filter ===
+window.filterKbdShortcuts = function(q) {
+  const term = q.trim().toLowerCase();
+  const sections = document.querySelectorAll('#kbd-sections section[data-group]');
+  let anyVisible = false;
+  sections.forEach(sec => {
+    const rows = sec.querySelectorAll('.kbd-row');
+    let secVisible = false;
+    rows.forEach(row => {
+      const text = row.textContent.toLowerCase();
+      const match = !term || text.includes(term);
+      row.hidden = !match;
+      if (match) secVisible = true;
+    });
+    sec.hidden = !secVisible;
+    if (secVisible) anyVisible = true;
+  });
+  const noMatch = document.getElementById('kbd-no-match');
+  if (noMatch) noMatch.hidden = anyVisible;
+};
+
+// === Onboarding tour ===
+var onboardingSteps = [
+  {
+    title: 'Welcome to TokenMeter',
+    body: 'This 5-step tour shows you the key parts of the dashboard. Press Next to continue, or Skip to dismiss.',
+    target: null
+  },
+  {
+    title: 'Navigation',
+    body: 'Use the top nav to switch workspaces and access settings. The hamburger menu (☰) opens the sidebar on mobile.',
+    target: 'hamburgerBtn'
+  },
+  {
+    title: 'Charts & Analytics',
+    body: 'The chart cards show your cost trend, top tools, and model mix. Hover for details, or click a day bar to drill down.',
+    target: 'chartsSection'
+  },
+  {
+    title: 'Search & Filter',
+    body: 'Type in the search box to filter sessions. Press / to focus search, or use the workspace chips to filter by project.',
+    target: 'searchBox'
+  },
+  {
+    title: 'Settings',
+    body: 'Open Settings (⚙) to configure themes, budgets, and preferences. You can restart this tour anytime from there.',
+    target: 'settingsBtn'
+  }
+];
+
+var _obStep = 0;
+var _obSpotlight = null;
+var _obCleanup = null;
+
+function _obPositionTooltip(targetEl) {
+  var tip = document.getElementById('ob-tooltip');
+  if (!tip) return;
+  if (!targetEl) {
+    tip.style.top = '50%';
+    tip.style.left = '50%';
+    tip.style.transform = 'translate(-50%, -50%)';
+    return;
+  }
+  var r = targetEl.getBoundingClientRect();
+  var tw = tip.offsetWidth || 320;
+  var th = tip.offsetHeight || 160;
+  var left = Math.max(8, Math.min(r.left, window.innerWidth - tw - 8));
+  var top = r.bottom + 12;
+  if (top + th > window.innerHeight - 8) top = r.top - th - 12;
+  if (top < 8) top = 8;
+  tip.style.top = top + 'px';
+  tip.style.left = left + 'px';
+  tip.style.transform = '';
+}
+
+function _obPositionSpotlight(targetEl) {
+  if (!_obSpotlight) return;
+  if (!targetEl) { _obSpotlight.hidden = true; return; }
+  _obSpotlight.hidden = false;
+  var r = targetEl.getBoundingClientRect();
+  _obSpotlight.style.top = (r.top - 4) + 'px';
+  _obSpotlight.style.left = (r.left - 4) + 'px';
+  _obSpotlight.style.width = (r.width + 8) + 'px';
+  _obSpotlight.style.height = (r.height + 8) + 'px';
+}
+
+window.showStep = function(idx) {
+  var step = onboardingSteps[idx];
+  if (!step) return;
+  var el = step.target ? document.getElementById(step.target) : null;
+  var cnt = document.getElementById('ob-step-count');
+  var titleEl = document.getElementById('ob-title');
+  var bodyEl = document.getElementById('ob-body');
+  var nextBtn = document.getElementById('ob-next');
+  var prevBtn = document.getElementById('ob-prev');
+  if (cnt) { cnt.textContent = 'Step ' + (idx + 1) + ' of ' + onboardingSteps.length; cnt.setAttribute('aria-label', cnt.textContent); }
+  if (titleEl) titleEl.textContent = step.title;
+  if (bodyEl) bodyEl.textContent = step.body;
+  var isLast = idx === onboardingSteps.length - 1;
+  if (nextBtn) { nextBtn.textContent = isLast ? 'Done' : 'Next →'; nextBtn.className = 'ob-next' + (isLast ? ' ob-done' : ''); }
+  if (prevBtn) prevBtn.hidden = idx === 0;
+  _obPositionSpotlight(el);
+  _obPositionTooltip(el);
+};
+
+window.obNext = function() {
+  if (_obStep >= onboardingSteps.length - 1) { endOnboarding(); return; }
+  _obStep++;
+  showStep(_obStep);
+};
+
+window.obPrev = function() {
+  if (_obStep <= 0) return;
+  _obStep--;
+  showStep(_obStep);
+};
+
+window.startOnboarding = function() {
+  var ob = document.getElementById('onboarding');
+  if (!ob) return;
+  _obStep = 0;
+  ob.hidden = false;
+  if (!_obSpotlight) {
+    _obSpotlight = document.createElement('div');
+    _obSpotlight.id = 'ob-spotlight';
+    document.body.appendChild(_obSpotlight);
+  }
+  showStep(0);
+  _obCleanup = trapFocus(ob);
+  ob.focus && ob.focus();
+};
+
+window.endOnboarding = function() {
+  var ob = document.getElementById('onboarding');
+  if (ob) ob.hidden = true;
+  if (_obSpotlight) { _obSpotlight.hidden = true; }
+  if (_obCleanup) { _obCleanup(); _obCleanup = null; }
+  try { localStorage.setItem('tokenmeter-onboarding-done', '1'); } catch(e) {}
+};
+
+function initOnboarding() {
+  var done = false;
+  try { done = localStorage.getItem('tokenmeter-onboarding-done') === '1'; } catch(e) {}
+  if (!done) { setTimeout(startOnboarding, 600); }
+}
+
+// F1 key starts onboarding
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'F1') { e.preventDefault(); startOnboarding(); }
+});
+
+initOnboarding();
 </script>
+
+<div id="onboarding" role="dialog" aria-modal="true" aria-labelledby="ob-title" hidden tabindex="-1">
+  <div class="ob-overlay" onclick="endOnboarding()"></div>
+  <div id="ob-tooltip" class="ob-tooltip" onclick="event.stopPropagation()">
+    <div class="ob-step-count" id="ob-step-count"></div>
+    <h3 id="ob-title" class="ob-title"></h3>
+    <p id="ob-body" class="ob-body"></p>
+    <div class="ob-footer">
+      <button class="ob-skip" id="ob-skip" onclick="endOnboarding()">Skip</button>
+      <div class="ob-nav">
+        <button class="ob-prev" id="ob-prev" onclick="obPrev()" hidden>← Back</button>
+        <button class="ob-next" id="ob-next" onclick="obNext()">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
