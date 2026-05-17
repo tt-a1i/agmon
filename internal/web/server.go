@@ -1087,6 +1087,10 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "missing session id")
 		return
 	}
+	if strings.HasSuffix(path, "/tag") {
+		s.handleSessionTagUpdate(w, r)
+		return
+	}
 	idPrefix := path[len(prefix):]
 
 	sess, found, err := s.db.GetSessionByIDPrefix(idPrefix)
@@ -1244,5 +1248,58 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		"tool_stats":  tsj,
 		"agent_stats": asj,
 		"models":      mb,
+	})
+}
+
+func (s *Server) handleSessionTagUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodPut)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	const prefix = "/api/session/"
+	const suffix = "/tag"
+	path := r.URL.Path
+	if len(path) <= len(prefix)+len(suffix) || !strings.HasSuffix(path, suffix) {
+		writeAPIError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+	idPrefix := strings.TrimSuffix(path[len(prefix):], suffix)
+	if idPrefix == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing session id")
+		return
+	}
+
+	var req struct {
+		Tag string `json:"tag"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+	tag := strings.TrimSpace(req.Tag)
+
+	sess, found, err := s.db.GetSessionByIDPrefix(idPrefix)
+	if err != nil {
+		if errors.Is(err, storage.ErrAmbiguousSessionPrefix) {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeInternalError(w, err)
+		return
+	}
+	if !found {
+		writeAPIError(w, http.StatusNotFound, "session not found")
+		return
+	}
+
+	if err := s.db.SetSessionTag(sess.SessionID, tag); err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	writeJSON(w, map[string]string{
+		"session_id": sess.SessionID,
+		"tag":        tag,
 	})
 }

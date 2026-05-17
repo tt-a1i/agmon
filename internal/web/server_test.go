@@ -763,6 +763,98 @@ func TestHandleSessionDetail(t *testing.T) {
 	t.Logf("Full response:\n%s", w.Body.String())
 }
 
+func TestHandleSessionTagUpdate(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	if err := db.UpsertSession("tag-session-abcdef", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodPut, "/api/session/tag-session/tag", strings.NewReader(`{"tag":"refactor auth"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		SessionID string `json:"session_id"`
+		Tag       string `json:"tag"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.SessionID != "tag-session-abcdef" || resp.Tag != "refactor auth" {
+		t.Fatalf("response: got %#v", resp)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/session/tag-session", nil)
+	getW := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("detail status: got %d, want 200. body: %s", getW.Code, getW.Body.String())
+	}
+	var detail struct {
+		Session sessionJSON `json:"session"`
+	}
+	if err := json.Unmarshal(getW.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("unmarshal detail: %v", err)
+	}
+	if detail.Session.Tag != "refactor auth" {
+		t.Fatalf("detail tag: got %q, want refactor auth", detail.Session.Tag)
+	}
+}
+
+func TestHandleSessionTagClear(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	if err := db.UpsertSession("clear-tag-session", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := db.SetSessionTag("clear-tag-session", "temporary"); err != nil {
+		t.Fatalf("set initial tag: %v", err)
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodPut, "/api/session/clear-tag/tag", strings.NewReader(`{"tag":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200. body: %s", w.Code, w.Body.String())
+	}
+	sess, found, err := db.GetSessionByIDPrefix("clear-tag")
+	if err != nil || !found {
+		t.Fatalf("get session: found=%v err=%v", found, err)
+	}
+	if sess.Tag != "" {
+		t.Fatalf("tag should be cleared, got %q", sess.Tag)
+	}
+}
+
+func TestHandleSessionTagAmbiguousPrefix(t *testing.T) {
+	db := testDB(t)
+	now := time.Now().UTC()
+	for _, id := range []string{"tag-ambiguous-one", "tag-ambiguous-two"} {
+		if err := db.UpsertSession(id, event.PlatformClaude, now); err != nil {
+			t.Fatalf("upsert %s: %v", id, err)
+		}
+	}
+
+	srv := NewServer(db, "0")
+	req := httptest.NewRequest(http.MethodPut, "/api/session/tag-ambiguous/tag", strings.NewReader(`{"tag":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400. body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestStaticFileServing(t *testing.T) {
 	db := testDB(t)
 	srv := NewServer(db, "0")

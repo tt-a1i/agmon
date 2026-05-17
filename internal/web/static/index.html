@@ -222,6 +222,17 @@ tr:hover td{background:var(--bg-hover)}
 .dh-id{font-size:11px;color:var(--text-muted);margin-top:14px;padding-top:12px;border-top:1px solid var(--border-light);display:flex;align-items:center;gap:6px}
 .copy-btn{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font:inherit;font-size:10px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .1s}
 .copy-btn:hover{background:var(--border);color:var(--text)}
+.d-tag-block{display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:12px}
+.d-tag-label{color:var(--text-muted);font-weight:650}
+.d-tag-display{padding:2px 8px;background:var(--accent-bg);color:var(--accent);border-radius:12px;font-size:12px;font-weight:600}
+.d-tag-display.empty{background:var(--bg3);color:var(--text-muted);font-weight:500}
+.d-tag-edit{width:24px;height:24px;display:inline-grid;place-items:center;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font:inherit;font-size:12px;cursor:pointer;transition:all .1s}
+.d-tag-edit:hover{background:var(--border);color:var(--text)}
+.d-tag-input{height:26px;min-width:220px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:12px;padding:0 8px;outline:none}
+.d-tag-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg)}
+.d-tag-action{background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font:inherit;font-size:11px;font-weight:650;padding:4px 8px;cursor:pointer}
+.d-tag-action:hover{color:var(--text);border-color:var(--text-faint)}
+.d-tag-action.primary{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
 
 /* Token bar card */
 .token-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:16px}
@@ -925,6 +936,12 @@ const SEARCH_KIND_ICONS={tool_param:'🔧',tool_result:'📤',file:'📁'};
 function searchKindIcon(kind){return SEARCH_KIND_ICONS[kind]||'🔎'}
 function renderMd(s){let h=escHtml(s);h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');h=h.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');return h}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)}
+function renderDetailTagDisplay(s){
+  const tag=(s&&s.tag||'').trim();
+  const display=tag?`<span class="d-tag-display">${escHtml(tag)}</span>`:`<span class="d-tag-display empty">— none —</span>`;
+  return `<span class="d-tag-label">Tag:</span>${display}<button class="d-tag-edit" onclick="editTag()" title="Edit tag" aria-label="Edit tag">✏️</button>`;
+}
+function renderDetailTagBlock(s){return `<div class="d-tag-block" id="dTagBlock">${renderDetailTagDisplay(s)}</div>`}
 
 // Mini sparkline
 function drawSparkline(canvasId,values,color){
@@ -1230,7 +1247,8 @@ async function openSession(id){
   const liveTag=s.status==='active'?'<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--green);background:var(--badge-codex-bg);padding:2px 8px;border-radius:4px;margin-left:8px"><span style="width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite"></span>LIVE</span>':'';
   $('dHeader').innerHTML=`<div class="dh-top"><div class="dh-name"><span class="sr-dot ${s.status==='active'?'active':'ended'}"></span>${sname(s)} <span class="badge ${escAttr(s.platform)}">${escHtml(s.platform)}</span>${liveTag}</div><div class="dh-cost">${fc(s.cost_usd)}</div></div>
   <div class="dh-grid"><div class="dh-item"><div class="dt">Started</div><div class="dv">${ftime(s.start_time)}</div></div>${durS?'<div class="dh-item"><div class="dt">Duration</div><div class="dv">'+escHtml(durS)+'</div></div>':''}<div class="dh-item"><div class="dt">Model</div><div class="dv">${escHtml(s.model||'-')}</div></div><div class="dh-item"><div class="dt">Input</div><div class="dv">${ft(s.input_tokens)}</div></div><div class="dh-item"><div class="dt">Output</div><div class="dv">${ft(s.output_tokens)}</div></div>${s.cwd?'<div class="dh-item"><div class="dt">Directory</div><div class="dv" style="font-family:monospace;font-size:11px">'+escHtml(s.cwd)+'</div></div>':''}</div>
-  <div class="dh-id">ID: ${escHtml(s.session_id.substring(0,8))} <button class="copy-btn" data-copy="${escAttr(s.session_id)}">Copy</button></div>`;
+  <div class="dh-id">ID: ${escHtml(s.session_id.substring(0,8))} <button class="copy-btn" data-copy="${escAttr(s.session_id)}">Copy</button></div>
+  ${renderDetailTagBlock(s)}`;
 
   // Tokens
   const total=s.input_tokens+s.output_tokens;
@@ -1285,6 +1303,41 @@ async function openSession(id){
   $('dAgents').innerHTML=agentStats.length?renderAgentTree(agentStats):'<div class="empty"><span class="empty-icon">🤖</span>No agent data</div>';
   updateSessNav();
   }catch(renderErr){console.error('Detail render error:',renderErr);$('dHeader').innerHTML=`<div class="loading-card">Render error: ${escHtml(renderErr.message)}</div>`}
+}
+
+function editTag(){
+  if(!lastDetail||!lastDetail.session)return;
+  const block=$('dTagBlock');if(!block)return;
+  const tag=(lastDetail.session.tag||'').trim();
+  block.innerHTML=`<span class="d-tag-label">Tag:</span><input class="d-tag-input" id="dTagInput" type="text" placeholder="Add a note..." value="${escAttr(tag)}"><button class="d-tag-action primary" onclick="saveTag()">Save</button><button class="d-tag-action" onclick="cancelTag()">Cancel</button>`;
+  const input=$('dTagInput');
+  input.focus();input.select();
+  input.onkeydown=e=>{
+    if(e.key==='Enter'){e.preventDefault();e.stopPropagation();saveTag()}
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();cancelTag()}
+  };
+}
+
+function cancelTag(){
+  const block=$('dTagBlock');if(!block||!lastDetail||!lastDetail.session)return;
+  block.innerHTML=renderDetailTagDisplay(lastDetail.session);
+}
+
+async function saveTag(){
+  if(!lastDetail||!lastDetail.session)return;
+  const input=$('dTagInput');if(!input)return;
+  const sid=lastDetail.session.session_id;
+  const tag=input.value.trim();
+  try{
+    const r=await fetch('/api/session/'+encodeURIComponent(sid)+'/tag',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({tag})});
+    if(!r.ok){const text=await r.text();toast('Tag save failed: '+text.slice(0,80));return}
+    const resp=await r.json();
+    lastDetail.session.tag=resp.tag||'';
+    cancelTag();
+    toast('Tag saved');
+    await refreshSessionSummary(resp.session_id);
+    await openSession(resp.session_id);
+  }catch(e){toast('Tag save failed: '+e.message)}
 }
 
 function filterMsgs(){
