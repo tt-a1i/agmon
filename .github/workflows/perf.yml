@@ -1,0 +1,78 @@
+name: Performance
+
+on:
+  pull_request:
+    paths:
+      - 'internal/**/*.go'
+      - 'cmd/**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Run PR benchmarks
+        run: |
+          go test ./internal/storage ./internal/web ./internal/daemon ./internal/collector \
+            -bench=. -benchmem -run=^\$ -count=5 -timeout=20m \
+            > bench-pr.txt 2>&1 || (cat bench-pr.txt; exit 1)
+
+      - name: Checkout main base
+        run: |
+          git fetch origin main:base-main --depth=1
+          git checkout base-main -- .
+
+      - name: Run base benchmarks
+        run: |
+          go test ./internal/storage ./internal/web ./internal/daemon ./internal/collector \
+            -bench=. -benchmem -run=^\$ -count=5 -timeout=20m \
+            > bench-base.txt 2>&1 || (cat bench-base.txt; exit 1)
+
+      - name: Restore PR working tree
+        run: |
+          git checkout ${{ github.event.pull_request.head.sha }} -- .
+
+      - name: Compare with benchstat
+        id: bench
+        run: |
+          benchstat bench-base.txt bench-pr.txt > bench-diff.txt 2>&1 || true
+          echo "### Benchmark comparison" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat bench-diff.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat bench-diff.txt
+
+      - name: Detect regressions
+        run: |
+          if grep -E '\+[1-9][0-9]+\.[0-9]+%' bench-diff.txt; then
+            echo "::warning::Performance regression > 10% detected. Review benchmark output."
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmarks
+          path: |
+            bench-pr.txt
+            bench-base.txt
+            bench-diff.txt
+          retention-days: 14

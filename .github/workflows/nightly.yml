@@ -1,0 +1,141 @@
+name: Nightly Stability
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  flaky-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      flaky_found: ${{ steps.flaky.outputs.failed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Run flaky detection (ROUNDS=20)
+        id: flaky
+        run: |
+          ROUNDS=20 bash scripts/find_flaky.sh 2>&1 | tee flaky-output.txt || true
+          if grep -E '^\s*[0-9]+/20' flaky-output.txt | grep -v '^\s*0/20'; then
+            echo "failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "failed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flaky-report
+          path: flaky-output.txt
+
+  race-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Run race detection (count=5)
+        run: |
+          make race 2>&1 | tee race-output.txt
+          if grep -E 'DATA RACE|FAIL' race-output.txt > /dev/null; then
+            echo "::error::Race condition detected"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: race-report
+          path: race-output.txt
+
+  fuzz-short:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzz_target:
+          - FuzzParseClaudeJSONL
+          - FuzzParseCodexJSONL
+          - FuzzParseClaudeHookEvent
+          - FuzzEstimateClaudeCost
+          - FuzzParseTimestamp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Fuzz ${{ matrix.fuzz_target }}
+        run: |
+          go test ./internal/collector \
+            -run=^\$ -fuzz=${{ matrix.fuzz_target }} \
+            -fuzztime=120s -timeout=300s 2>&1 | tee fuzz-output.txt
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-crash-${{ matrix.fuzz_target }}
+          path: |
+            fuzz-output.txt
+            internal/collector/testdata/fuzz/
+
+  report:
+    runs-on: ubuntu-latest
+    needs: [flaky-check, race-check, fuzz-short]
+    if: failure() || needs.flaky-check.outputs.flaky_found == 'true'
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            const title = `Nightly stability check failed (${today})`;
+            const body = [
+              `Nightly run on ${today} found stability issues:`,
+              '',
+              `- flaky_found: ${{ needs.flaky-check.outputs.flaky_found }}`,
+              `- race: see job logs`,
+              `- fuzz: see matrix job logs`,
+              '',
+              `Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+            ].join('\n');
+
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'nightly-failure',
+              state: 'open',
+            });
+            if (existing.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['nightly-failure', 'bug'],
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing[0].number,
+                body: `Additional failure on ${today}: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+              });
+            }
