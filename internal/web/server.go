@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tt-a1i/tokenmeter/internal/collector"
@@ -61,6 +62,8 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux.HandleFunc("/api/events", s.handleEvents)
 	mux.HandleFunc("/api/export", s.handleExport)
 	mux.HandleFunc("/api/compare", s.handleCompare)
+	mux.HandleFunc("/api/budgets", s.handleBudgets)
+	mux.HandleFunc("/api/budgets/", s.handleBudgetByID)
 	mux.HandleFunc("/api/session/", s.handleSessionDetail)
 
 	s.srv = &http.Server{
@@ -524,6 +527,186 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		TopTools:      topTools,
 		TopSessions:   topSessions,
 	})
+}
+
+type budgetRequest struct {
+	Name       string  `json:"name"`
+	MonthlyUSD float64 `json:"monthly_usd"`
+	Platform   string  `json:"platform"`
+}
+
+type budgetUsageJSON struct {
+	Used    float64 `json:"used"`
+	Limit   float64 `json:"limit"`
+	Percent float64 `json:"percent"`
+	Status  string  `json:"status"`
+}
+
+type budgetJSON struct {
+	ID         int64           `json:"id"`
+	Name       string          `json:"name"`
+	MonthlyUSD float64         `json:"monthly_usd"`
+	Platform   string          `json:"platform"`
+	CreatedAt  string          `json:"created_at"`
+	UpdatedAt  string          `json:"updated_at"`
+	Usage      budgetUsageJSON `json:"usage"`
+}
+
+func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.listBudgets(w)
+	case http.MethodPost:
+		var req budgetRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		id, err := s.db.InsertBudget(req.Name, req.MonthlyUSD, req.Platform)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		budget, ok, err := s.findBudget(id)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		if !ok {
+			writeInternalError(w, fmt.Errorf("created budget %d not found", id))
+			return
+		}
+		s.writeBudgetWithStatus(w, budget, http.StatusCreated)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) handleBudgetByID(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseBudgetID(r.URL.Path)
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "invalid budget id")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		var req budgetRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if err := s.db.UpdateBudget(id, req.Name, req.MonthlyUSD, req.Platform); err != nil {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		budget, ok, err := s.findBudget(id)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		if !ok {
+			writeAPIError(w, http.StatusNotFound, "budget not found")
+			return
+		}
+		s.writeBudgetWithStatus(w, budget, http.StatusOK)
+	case http.MethodDelete:
+		if err := s.db.DeleteBudget(id); err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "PUT, DELETE")
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func parseBudgetID(path string) (int64, bool) {
+	raw := strings.TrimPrefix(path, "/api/budgets/")
+	if raw == "" || strings.Contains(raw, "/") {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	return id, err == nil && id > 0
+}
+
+func (s *Server) listBudgets(w http.ResponseWriter) {
+	budgets, err := s.db.ListBudgets()
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	result := make([]budgetJSON, 0, len(budgets))
+	for _, budget := range budgets {
+		row, err := s.budgetJSON(budget)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		result = append(result, row)
+	}
+	writeJSON(w, result)
+}
+
+func (s *Server) findBudget(id int64) (storage.BudgetRow, bool, error) {
+	budgets, err := s.db.ListBudgets()
+	if err != nil {
+		return storage.BudgetRow{}, false, err
+	}
+	for _, budget := range budgets {
+		if budget.ID == id {
+			return budget, true, nil
+		}
+	}
+	return storage.BudgetRow{}, false, nil
+}
+
+func (s *Server) writeBudget(w http.ResponseWriter, budget storage.BudgetRow) {
+	s.writeBudgetWithStatus(w, budget, http.StatusOK)
+}
+
+func (s *Server) writeBudgetWithStatus(w http.ResponseWriter, budget storage.BudgetRow, status int) {
+	row, err := s.budgetJSON(budget)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(row)
+}
+
+func (s *Server) budgetJSON(budget storage.BudgetRow) (budgetJSON, error) {
+	used, limit, err := s.db.GetBudgetUsage(budget.ID)
+	if err != nil {
+		return budgetJSON{}, err
+	}
+	percent := 0.0
+	if limit > 0 {
+		percent = used / limit * 100
+	}
+	status := "ok"
+	if percent >= 100 {
+		status = "over"
+	} else if percent >= 80 {
+		status = "warn"
+	}
+	return budgetJSON{
+		ID:         budget.ID,
+		Name:       budget.Name,
+		MonthlyUSD: budget.MonthlyUSD,
+		Platform:   budget.Platform,
+		CreatedAt:  budget.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:  budget.UpdatedAt.Format(time.RFC3339),
+		Usage: budgetUsageJSON{
+			Used:    used,
+			Limit:   limit,
+			Percent: percent,
+			Status:  status,
+		},
+	}, nil
 }
 
 type compareToolDiff struct {

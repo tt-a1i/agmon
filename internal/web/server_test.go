@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -252,6 +253,101 @@ func TestHandleStats(t *testing.T) {
 	}
 	if resp.ActiveCount != 1 {
 		t.Errorf("active count: got %d", resp.ActiveCount)
+	}
+}
+
+func TestHandleBudgetsEndpoints(t *testing.T) {
+	db := testDB(t)
+	srv := NewServer(db, "0")
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/budgets", nil)
+	getRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("empty get status: got %d, want 200. body: %s", getRec.Code, getRec.Body.String())
+	}
+	var empty []budgetJSON
+	if err := json.Unmarshal(getRec.Body.Bytes(), &empty); err != nil {
+		t.Fatalf("unmarshal empty budgets: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty budgets len: got %d, want 0", len(empty))
+	}
+
+	now := time.Now()
+	if err := db.UpsertSession("claude-budget-session", event.PlatformClaude, now); err != nil {
+		t.Fatalf("upsert claude session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a1", "claude-budget-session", 100, 50, 0, 0, "sonnet", 85, now, "budget-claude"); err != nil {
+		t.Fatalf("insert claude tokens: %v", err)
+	}
+	if err := db.UpsertSession("codex-budget-session", event.PlatformCodex, now); err != nil {
+		t.Fatalf("upsert codex session: %v", err)
+	}
+	if err := db.InsertTokenUsage("a2", "codex-budget-session", 100, 50, 0, 0, "gpt-5", 15, now, "budget-codex"); err != nil {
+		t.Fatalf("insert codex tokens: %v", err)
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/budgets", strings.NewReader(`{"name":"Claude monthly","monthly_usd":100,"platform":"claude"}`))
+	postRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusCreated {
+		t.Fatalf("post status: got %d, want 201. body: %s", postRec.Code, postRec.Body.String())
+	}
+	var created budgetJSON
+	if err := json.Unmarshal(postRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal created budget: %v", err)
+	}
+	if created.ID == 0 || created.Name != "Claude monthly" || created.MonthlyUSD != 100 || created.Platform != "claude" {
+		t.Fatalf("created budget: got %#v", created)
+	}
+	if created.Usage.Used != 85 || created.Usage.Limit != 100 || created.Usage.Percent != 85 || created.Usage.Status != "warn" {
+		t.Fatalf("created usage: got %#v", created.Usage)
+	}
+
+	getRec = httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status: got %d, want 200. body: %s", getRec.Code, getRec.Body.String())
+	}
+	var budgets []budgetJSON
+	if err := json.Unmarshal(getRec.Body.Bytes(), &budgets); err != nil {
+		t.Fatalf("unmarshal budgets: %v", err)
+	}
+	if len(budgets) != 1 || budgets[0].ID != created.ID {
+		t.Fatalf("budgets after create: got %#v", budgets)
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/budgets/"+strconv.FormatInt(created.ID, 10), strings.NewReader(`{"name":"All monthly","monthly_usd":80,"platform":""}`))
+	putRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("put status: got %d, want 200. body: %s", putRec.Code, putRec.Body.String())
+	}
+	var updated budgetJSON
+	if err := json.Unmarshal(putRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("unmarshal updated budget: %v", err)
+	}
+	if updated.Name != "All monthly" || updated.MonthlyUSD != 80 || updated.Platform != "" {
+		t.Fatalf("updated budget: got %#v", updated)
+	}
+	if updated.Usage.Used != 100 || updated.Usage.Limit != 80 || updated.Usage.Percent != 125 || updated.Usage.Status != "over" {
+		t.Fatalf("updated usage: got %#v", updated.Usage)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/budgets/"+strconv.FormatInt(created.ID, 10), nil)
+	deleteRec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusNoContent {
+		t.Fatalf("delete status: got %d, want 204. body: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+	getRec = httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(getRec, getReq)
+	if err := json.Unmarshal(getRec.Body.Bytes(), &budgets); err != nil {
+		t.Fatalf("unmarshal budgets after delete: %v", err)
+	}
+	if len(budgets) != 0 {
+		t.Fatalf("budgets after delete: got %#v", budgets)
 	}
 }
 

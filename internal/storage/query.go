@@ -590,6 +590,20 @@ func (s *DB) GetCostBetween(from, to time.Time) (float64, error) {
 	return cost, err
 }
 
+func (s *DB) GetCostBetweenForPlatform(from, to time.Time, platform string) (float64, error) {
+	if platform == "" {
+		return s.GetCostBetween(from, to)
+	}
+	var cost float64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(t.cost_usd), 0)
+		FROM token_usage t
+		JOIN sessions s ON t.session_id = s.session_id
+		WHERE t.timestamp >= ? AND t.timestamp < ? AND s.platform = ?
+	`, formatQueryTime(from), formatQueryTime(to), platform).Scan(&cost)
+	return cost, err
+}
+
 func (s *DB) GetTodayCost() (float64, error) {
 	t := startOfToday()
 	return s.GetCostSince(&t)

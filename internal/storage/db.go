@@ -188,6 +188,15 @@ func (s *DB) migrate() error {
 				source_id   TEXT NOT NULL DEFAULT ''
 			);
 
+			CREATE TABLE IF NOT EXISTS budgets (
+				id          INTEGER PRIMARY KEY AUTOINCREMENT,
+				name        TEXT NOT NULL,
+				monthly_usd REAL NOT NULL,
+				platform    TEXT NOT NULL DEFAULT '',
+				created_at  TEXT NOT NULL,
+				updated_at  TEXT NOT NULL
+			);
+
 		CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id);
 		CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
 		CREATE INDEX IF NOT EXISTS idx_tool_calls_agent ON tool_calls(agent_id);
@@ -196,6 +205,7 @@ func (s *DB) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_token_usage_ts ON token_usage(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_file_changes_session ON file_changes(session_id);
 		CREATE INDEX IF NOT EXISTS idx_file_changes_ts ON file_changes(timestamp);
+		CREATE INDEX IF NOT EXISTS idx_budgets_platform ON budgets(platform);
 	`)
 	if err != nil {
 		return err
