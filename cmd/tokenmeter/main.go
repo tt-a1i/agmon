@@ -274,6 +274,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "completion":
+		if err := runCompletion(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "backup":
 		if err := runBackup(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1286,6 +1291,7 @@ Usage:
   tokenmeter top [--once]       Minimal live usage dashboard
   tokenmeter healthcheck [--json] Liveness check for scripts/probes
   tokenmeter logs [--follow]    Show daemon logs
+  tokenmeter completion <shell> Generate shell completion script
   tokenmeter backup [path]      Back up the local database
   tokenmeter restore <path>     Restore database from backup
   tokenmeter doctor [--json]    Run installation diagnostics
