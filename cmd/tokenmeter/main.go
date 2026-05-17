@@ -316,7 +316,10 @@ func main() {
 	case "update":
 		runUpdate()
 	case "version", "-v", "--version":
-		fmt.Printf("tokenmeter v%s\n", version)
+		if err := runVersion(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "help", "-h", "--help":
 		printHelp()
 	default:

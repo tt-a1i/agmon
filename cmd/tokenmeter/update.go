@@ -22,8 +22,9 @@ import (
 var releaseAPI = "https://api.github.com/repos/tt-a1i/tokenmeter/releases/latest"
 
 type ghRelease struct {
-	TagName string    `json:"tag_name"`
-	Assets  []ghAsset `json:"assets"`
+	TagName     string    `json:"tag_name"`
+	PublishedAt time.Time `json:"published_at"`
+	Assets      []ghAsset `json:"assets"`
 }
 
 type ghAsset struct {
@@ -113,6 +114,7 @@ func runUpdate() {
 }
 
 var updateClient = &http.Client{Timeout: 5 * time.Second}
+var fetchLatestReleaseFunc = fetchLatestRelease
 
 func fetchLatestRelease() (*ghRelease, error) {
 	resp, err := updateClient.Get(releaseAPI)
