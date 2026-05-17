@@ -250,6 +250,24 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SSEBuffer coalesces token_usage events within a 50ms window so that
+	// high-frequency token streams don't flood the SSE client with redundant
+	// snapshots. Other event types pass through immediately.
+	buf := daemon.NewSSEBuffer(50 * time.Millisecond)
+	buf.Start()
+	defer buf.Stop()
+
+	// drainBuffer stops the buffer and flushes any pending coalesced events so
+	// the final token_usage snapshot reaches the client before the stream closes.
+	drainBuffer := func() {
+		buf.Stop()
+		for batch := range buf.Out() {
+			for _, bev := range batch {
+				sendEvent(bev)
+			}
+		}
+	}
+
 	ticker := time.NewTicker(s.eventHeartbeat)
 	defer ticker.Stop()
 	for {
@@ -258,10 +276,24 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case ev, ok := <-eventCh:
 			if !ok {
+				drainBuffer()
 				return
 			}
-			if !sendEvent(ev) {
+			if ev.Type == event.EventTokenUsage {
+				buf.Add(ev)
+			} else {
+				if !sendEvent(ev) {
+					return
+				}
+			}
+		case batch, ok := <-buf.Out():
+			if !ok {
 				return
+			}
+			for _, bev := range batch {
+				if !sendEvent(bev) {
+					return
+				}
 			}
 		case <-ticker.C:
 			if !sendHeartbeat() {
@@ -1546,6 +1578,13 @@ type analyticsAnomaly struct {
 	ZScore    float64 `json:"z_score"`
 }
 
+type analyticsPeriodData struct {
+	TopExpensiveSessions []analyticsTopSession    `json:"top_expensive_sessions"`
+	ToolBreakdown        []analyticsToolBreakdown `json:"tool_breakdown"`
+	ModelMixDaily        []analyticsModelMixDay   `json:"model_mix_daily"`
+	Anomalies            []analyticsAnomaly       `json:"anomalies"`
+}
+
 type analyticsResponse struct {
 	Range                string                   `json:"range"`
 	GeneratedAt          string                   `json:"generated_at"`
@@ -1553,29 +1592,64 @@ type analyticsResponse struct {
 	ToolBreakdown        []analyticsToolBreakdown `json:"tool_breakdown"`
 	ModelMixDaily        []analyticsModelMixDay   `json:"model_mix_daily"`
 	Anomalies            []analyticsAnomaly       `json:"anomalies"`
+	PreviousPeriod       *analyticsPeriodData     `json:"previous_period,omitempty"`
 }
 
-// handleAnalytics serves /api/analytics?range=week with 4 analytics cards.
-func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	rangeLabel, from, to, err := s.exportRange(r.URL.Query().Get("range"))
+// buildTagMap returns a sessionID→tag map built from the most recent 2000 sessions.
+func (s *Server) buildTagMap() (map[string]string, error) {
+	sessions, err := s.db.ListSessionsLimit(2000)
 	if err != nil {
-		writeInternalError(w, err)
-		return
+		return nil, err
+	}
+	m := make(map[string]string, len(sessions))
+	for _, sess := range sessions {
+		m[sess.SessionID] = sess.Tag
+	}
+	return m, nil
+}
+
+// buildAnalyticsPeriod computes the 4 analytics cards for a given time range with
+// optional workspace / tag / model filters.
+//
+// Tool breakdown is NOT filtered by workspace or tag because AllToolStats
+// aggregates at the range level with no per-session join — filtering there would
+// require N+1 queries per session, which is not worth the added complexity.
+func (s *Server) buildAnalyticsPeriod(label string, from, to time.Time, workspace, tag, model string) (analyticsPeriodData, error) {
+	var pd analyticsPeriodData
+
+	// Fetch up to 500 sessions for both the top-10 display and anomaly detection.
+	allRows, err := s.db.GetTopSessionsByCost(from, to, 500)
+	if err != nil {
+		return pd, err
 	}
 
-	// Card 1: top expensive sessions
-	topRows, err := s.db.GetTopSessionsByCost(from, to, 10)
-	if err != nil {
-		writeInternalError(w, err)
-		return
+	// Build tag map once, only when needed.
+	var tagMap map[string]string
+	if tag != "" {
+		tagMap, err = s.buildTagMap()
+		if err != nil {
+			return pd, err
+		}
 	}
-	topJSON := make([]analyticsTopSession, len(topRows))
-	for i, row := range topRows {
+
+	// Apply workspace and tag filters.
+	filtered := allRows[:0:0]
+	for _, row := range allRows {
+		if workspace != "" && row.CWD != workspace && !strings.HasPrefix(row.CWD, workspace+"/") {
+			continue
+		}
+		if tag != "" && tagMap[row.SessionID] != tag {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+
+	top10 := filtered
+	if len(top10) > 10 {
+		top10 = top10[:10]
+	}
+	topJSON := make([]analyticsTopSession, len(top10))
+	for i, row := range top10 {
 		ws := row.CWD
 		if ws == "" {
 			ws = row.GitBranch
@@ -1588,12 +1662,12 @@ func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 			Platform:  row.Platform,
 		}
 	}
+	pd.TopExpensiveSessions = topJSON
 
-	// Card 2: tool breakdown
+	// Tool breakdown — unfiltered (range-level only).
 	toolStats, err := s.db.AllToolStats(from, to)
 	if err != nil {
-		writeInternalError(w, err)
-		return
+		return pd, err
 	}
 	toolJSON := make([]analyticsToolBreakdown, len(toolStats))
 	for i, ts := range toolStats {
@@ -1604,40 +1678,82 @@ func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
 			FailCount:     ts.FailCount,
 		}
 	}
+	pd.ToolBreakdown = toolJSON
 
-	// Card 3: model mix (range-level, returned as single entry)
+	// Model mix — filtered by model name when requested.
 	modelRows, err := s.db.GetModelCostBreakdown(from, to)
 	if err != nil {
-		writeInternalError(w, err)
-		return
+		return pd, err
 	}
-	modelEntries := make([]analyticsModelEntry, len(modelRows))
-	for i, m := range modelRows {
-		modelEntries[i] = analyticsModelEntry{
+	modelEntries := make([]analyticsModelEntry, 0, len(modelRows))
+	for _, m := range modelRows {
+		if model != "" && m.Model != model {
+			continue
+		}
+		modelEntries = append(modelEntries, analyticsModelEntry{
 			Model:        m.Model,
 			InputTokens:  m.InputTokens,
 			OutputTokens: m.OutputTokens,
 			CostUSD:      m.CostUSD,
-		}
+		})
 	}
-	modelMixDaily := []analyticsModelMixDay{{Date: rangeLabel, Models: modelEntries}}
+	pd.ModelMixDaily = []analyticsModelMixDay{{Date: label, Models: modelEntries}}
 
-	// Card 4: anomalies — sessions with cost z-score > 2
-	allForAnomalies, err := s.db.GetTopSessionsByCost(from, to, 500)
+	// Anomalies derived from workspace/tag-filtered sessions.
+	pd.Anomalies = computeCostAnomalies(filtered)
+
+	return pd, nil
+}
+
+// handleAnalytics serves /api/analytics with 4 analytics cards.
+// Query params: range, workspace, tag, model, compare=prev_period.
+func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAPIError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	q := r.URL.Query()
+	rangeLabel, from, to, err := s.exportRange(q.Get("range"))
 	if err != nil {
 		writeInternalError(w, err)
 		return
 	}
-	anomalies := computeCostAnomalies(allForAnomalies)
 
-	writeJSON(w, analyticsResponse{
+	workspace := q.Get("workspace")
+	tag := q.Get("tag")
+	model := q.Get("model")
+	compare := q.Get("compare")
+
+	pd, err := s.buildAnalyticsPeriod(rangeLabel, from, to, workspace, tag, model)
+	if err != nil {
+		writeInternalError(w, err)
+		return
+	}
+
+	resp := analyticsResponse{
 		Range:                rangeLabel,
 		GeneratedAt:          time.Now().UTC().Format(time.RFC3339),
-		TopExpensiveSessions: topJSON,
-		ToolBreakdown:        toolJSON,
-		ModelMixDaily:        modelMixDaily,
-		Anomalies:            anomalies,
-	})
+		TopExpensiveSessions: pd.TopExpensiveSessions,
+		ToolBreakdown:        pd.ToolBreakdown,
+		ModelMixDaily:        pd.ModelMixDaily,
+		Anomalies:            pd.Anomalies,
+	}
+
+	if compare == "prev_period" {
+		dur := to.Sub(from)
+		prevTo := from
+		prevFrom := from.Add(-dur)
+		prevLabel := prevFrom.Format("2006-01-02") + " to " + prevTo.Format("2006-01-02")
+		prevPD, err := s.buildAnalyticsPeriod(prevLabel, prevFrom, prevTo, workspace, tag, model)
+		if err != nil {
+			writeInternalError(w, err)
+			return
+		}
+		resp.PreviousPeriod = &prevPD
+	}
+
+	writeJSON(w, resp)
 }
 
 func computeCostAnomalies(sessions []storage.TopSessionRow) []analyticsAnomaly {
