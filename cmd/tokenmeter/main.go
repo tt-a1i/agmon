@@ -1270,46 +1270,105 @@ func checkAndNotifyUpdate(p *tea.Program) {
 	}
 }
 
-func printHelp() {
-	fmt.Printf(`TokenMeter v%s - AI coding agent usage meter
+type helpSection struct {
+	title    string
+	commands []helpCommand
+}
 
-Usage:
-  tokenmeter                    Start TUI (auto-starts daemon)
-  tokenmeter --all              Start TUI without workspace filtering
-  tokenmeter --workspace PATH   Start TUI scoped to a workspace path
-  tokenmeter daemon             Start daemon only
-  tokenmeter reload             Reload daemon config via SIGHUP
-  tokenmeter emit               Emit event from hook (reads stdin)
-  tokenmeter setup              Configure Claude Code hooks
-  tokenmeter init               Interactive setup wizard
-  tokenmeter uninstall          Remove hooks and stop daemon
-  tokenmeter status             Show active sessions summary
-  tokenmeter report [session]   Detailed session report
-  tokenmeter report --weekly    Weekly cost report (Markdown)
-  tokenmeter report --monthly   Monthly cost report (Markdown)
-  tokenmeter share [session]    Shareable session recap (Markdown)
-  tokenmeter cost [today|week]  Token usage statistics
-  tokenmeter export             Export usage data as CSV or JSON
-  tokenmeter compare <a> <b>    Compare two sessions
-  tokenmeter search <query>     Search tools, results, and files
-  tokenmeter budget <command>   Manage monthly budgets
-  tokenmeter webhook <command>  Manage webhook endpoints
-  tokenmeter analyze [--json]   Usage insights summary
-  tokenmeter watch [session]    Live event stream from daemon
-  tokenmeter top [--once]       Minimal live usage dashboard
-  tokenmeter healthcheck [--json] Liveness check for scripts/probes
-  tokenmeter logs [--follow]    Show daemon logs
-  tokenmeter checkpoint         Run a WAL checkpoint
-  tokenmeter completion <shell> Generate shell completion script
-  tokenmeter backup [path]      Back up the local database
-  tokenmeter restore <path>     Restore database from backup
-  tokenmeter doctor [--json]    Run installation diagnostics
-  tokenmeter compact [--full]   Analyze or VACUUM the local database
-  tokenmeter web [--port N]     Start web dashboard (default port: 8370)
-  tokenmeter clean [days]       Remove sessions older than N days (default: 7)
-  tokenmeter tag <id> [text]    Tag a session with a note (omit text to clear)
-  tokenmeter update             Update to the latest version
-  tokenmeter version            Show version
-  tokenmeter help               Show this help
-`, version)
+type helpCommand struct {
+	name string
+	desc string
+}
+
+var helpSections = []helpSection{
+	{"Setup & installation", []helpCommand{
+		{"setup", "Configure Claude Code hooks"},
+		{"uninstall", "Remove hooks and stop daemon"},
+		{"init", "Interactive setup wizard"},
+		{"doctor [--fix]", "Self-diagnostic and auto-repair"},
+		{"completion <shell>", "Generate shell completion (bash|zsh|fish)"},
+		{"update", "Update to latest release"},
+		{"version [--check]", "Show version (and check for updates)"},
+		{"help", "Show this help"},
+	}},
+	{"Run modes", []helpCommand{
+		{"daemon", "Run daemon (foreground)"},
+		{"web [--port N]", "Web dashboard at http://localhost:N"},
+		{"watch [opts]", "Stream live events to stdout"},
+		{"top [--once]", "Live dashboard snapshot"},
+	}},
+	{"Daily commands", []helpCommand{
+		{"status", "Active session summary"},
+		{"cost <period>", "Token/cost stats (today|week|month|3month|year|all)"},
+		{"report [session]", "Detailed session report"},
+		{"report --weekly", "Weekly Markdown cost report"},
+		{"report --monthly", "Monthly Markdown cost report"},
+		{"share [session]", "Shareable Markdown session recap"},
+	}},
+	{"Analysis", []helpCommand{
+		{"analyze [--range]", "Usage insights with heatmap"},
+		{"search <query>", "Search tool calls and file paths"},
+		{"compare <a> <b>", "Diff two sessions"},
+		{"export [opts]", "CSV/JSON export"},
+	}},
+	{"Maintenance", []helpCommand{
+		{"clean [days]", "Remove sessions older than N days (default 7)"},
+		{"compact [--full]", "PRAGMA optimize (or full VACUUM)"},
+		{"checkpoint", "WAL truncate immediately"},
+		{"backup [path]", "Snapshot database via VACUUM INTO"},
+		{"restore <path>", "Restore from snapshot"},
+		{"reload", "Send SIGHUP to running daemon"},
+		{"logs [--follow]", "Tail daemon log"},
+		{"healthcheck", "DB + daemon liveness probe"},
+		{"emit", "Emit event from hook (reads stdin)"},
+	}},
+	{"Configuration", []helpCommand{
+		{"tag <id> [text]", "Set/clear session note"},
+		{"budget <subcommand>", "Manage budgets: list, set, delete, usage"},
+		{"webhook <subcommand>", "Manage webhooks: list, test, replay"},
+	}},
+}
+
+func printHelp() {
+	fmt.Printf("TokenMeter v%s — AI coding agent usage meter\n\n", version)
+	fmt.Println("Usage: tokenmeter <command> [args...]")
+	fmt.Println("Or:    tokenmeter                  Launch TUI (auto-starts daemon)")
+	fmt.Println("       tokenmeter --all            Launch TUI without workspace filtering")
+	fmt.Println("       tokenmeter --workspace PATH Launch TUI scoped to a workspace path")
+	fmt.Println()
+
+	width := helpCommandWidth(helpSections)
+	for _, section := range helpSections {
+		fmt.Printf("▎%s\n", section.title)
+		for _, cmd := range section.commands {
+			fmt.Printf("  %-*s  %s\n", width, cmd.name, cmd.desc)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("▎Examples")
+	for _, example := range []helpCommand{
+		{"tokenmeter", "Launch TUI"},
+		{"tokenmeter cost today", "Show today's tokens"},
+		{"tokenmeter export --range week", "Export this week as CSV"},
+		{"tokenmeter compare abc def", "Diff sessions by ID prefix"},
+		{`tokenmeter budget set "Monthly" 100 --platform claude`, "Create a Claude monthly budget"},
+	} {
+		fmt.Printf("  %-*s  # %s\n", width, example.name, example.desc)
+	}
+	fmt.Println()
+	fmt.Println("Run 'tokenmeter <command> --help' for command-specific options (if available).")
+	fmt.Println("Source: https://github.com/tt-a1i/tokenmeter")
+}
+
+func helpCommandWidth(sections []helpSection) int {
+	width := 0
+	for _, section := range sections {
+		for _, cmd := range section.commands {
+			if len(cmd.name) > width {
+				width = len(cmd.name)
+			}
+		}
+	}
+	return width
 }
