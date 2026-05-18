@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -137,6 +138,9 @@ func TestOpenHandlesEmptyFile(t *testing.T) {
 // permission error (not a panic) when the directory does not allow file
 // creation.
 func TestOpenHandlesReadOnlyDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod cannot make a directory non-writable on Windows (ACL-based permissions)")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("root bypasses permission checks")
 	}

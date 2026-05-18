@@ -3,6 +3,7 @@ package collector
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -234,6 +235,9 @@ func TestParseClaudeFileEventsContract(t *testing.T) {
 // TestAddColumnIfMissingViaPragma verifies the PRAGMA-based existence check
 // doesn't depend on the SQLite driver's error wording.
 func TestAddColumnIfMissingViaPragma(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("modernc sqlite WAL release timing causes TempDir RemoveAll race on Windows")
+	}
 	dir := t.TempDir()
 	db, err := storage.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
