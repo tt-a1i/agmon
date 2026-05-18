@@ -33,6 +33,7 @@ brews:
       owner: tt-a1i
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    skip_upload: '{{ if not (index .Env "HOMEBREW_TAP_GITHUB_TOKEN") }}true{{ else }}false{{ end }}'
     homepage: "https://github.com/tt-a1i/tokenmeter"
     description: "Real-time observability for AI coding agents"
     install: |
