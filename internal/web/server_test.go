@@ -1499,6 +1499,102 @@ func TestStaticIndexHasSunburstSRFallback(t *testing.T) {
 	}
 }
 
+// ─── 波 2 视觉升级 (glassmorphism / hover lift / ambient / typography) ──────
+
+func TestStaticIndexHasGlassmorphism(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "backdrop-filter:blur(12px)") {
+		t.Error("index.html missing backdrop-filter glass effect on cards")
+	}
+	if !strings.Contains(body, "-webkit-backdrop-filter:blur(12px)") {
+		t.Error("index.html missing -webkit-backdrop-filter for Safari")
+	}
+	if !strings.Contains(body, "@supports not (backdrop-filter:blur(1px))") {
+		t.Error("index.html missing @supports fallback for backdrop-filter")
+	}
+	// Glass uses color-mix to fade bg2 instead of hardcoded alpha
+	if !strings.Contains(body, "color-mix(in srgb,var(--bg2) 82%,transparent)") {
+		t.Error("index.html missing color-mix glass background blend")
+	}
+}
+
+func TestStaticIndexHasCardHoverLift(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"translateY(-2px)",
+		"cubic-bezier(0.34,1.56,0.64,1)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing hover-lift marker: %q", want)
+		}
+	}
+	// Hover glow uses accent color via color-mix
+	if !strings.Contains(body, "color-mix(in srgb,var(--accent) 15%,transparent)") {
+		t.Error("index.html missing hover accent glow box-shadow")
+	}
+}
+
+func TestStaticIndexHasAmbientGradient(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"body::before",
+		"radial-gradient(60vw 60vh",
+		"radial-gradient(50vw 50vh",
+		"pointer-events:none",
+		// High-contrast must hide the gradient so it doesn't break a11y contrast
+		`[data-theme="high-contrast"] body::before{display:none}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing ambient gradient marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasReducedMotionGate(t *testing.T) {
+	body := getStaticIndex(t)
+	count := strings.Count(body, "prefers-reduced-motion")
+	if count < 3 {
+		t.Errorf("index.html should reference prefers-reduced-motion at least 3 times for the visual polish layer, got %d", count)
+	}
+}
+
+func TestStaticIndexHasTabularNums(t *testing.T) {
+	body := getStaticIndex(t)
+	hasTnum := strings.Contains(body, `font-feature-settings:"tnum"`) ||
+		strings.Contains(body, `font-feature-settings: "tnum"`) ||
+		strings.Contains(body, `font-feature-settings:"tnum","ss01"`)
+	if !hasTnum {
+		t.Error("index.html missing font-feature-settings tnum for metric values")
+	}
+	if !strings.Contains(body, "font-variant-numeric:tabular-nums") {
+		t.Error("index.html missing font-variant-numeric:tabular-nums fallback")
+	}
+	// Display + mono font tokens
+	if !strings.Contains(body, "--font-display:") {
+		t.Error("index.html missing --font-display CSS variable")
+	}
+	if !strings.Contains(body, "--font-mono:") {
+		t.Error("index.html missing --font-mono CSS variable")
+	}
+}
+
+func TestStaticIndexHasMetricFlashAnimation(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"@keyframes metricFlash",
+		".metric-val.tweening",
+		".metric-val.flash",
+		"classList.add('tweening')",
+		"classList.add('flash')",
+		// Force reflow so back-to-back tweens restart the animation
+		"void el.offsetWidth",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing flash animation marker: %q", want)
+		}
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestStaticIndexHasSessionDetailView(t *testing.T) {

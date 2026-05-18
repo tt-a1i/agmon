@@ -868,6 +868,115 @@ body.hide-workspace .workspace-bar{display:none}
 #range-custom input[type=date]{background:var(--bg);border:1px solid var(--border);color:var(--text-strong);border-radius:4px;padding:2px 5px;font:inherit;font-size:11px;color-scheme:light dark;cursor:pointer;max-width:130px}
 #range-custom label{font-size:10px;color:var(--text-muted)}
 #range-apply{background:var(--accent);border:0;color:#fff;border-radius:4px;padding:3px 9px;font:inherit;font-size:11px;font-weight:600;cursor:pointer}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Visual Polish — Glassmorphism, hover lift, ambient gradient, micro-animation.
+   Layered as the final cascade block so it overrides earlier card transitions
+   and backgrounds without touching the original rule definitions. Every visual
+   effect respects prefers-reduced-motion and high-contrast theme overrides.
+   ════════════════════════════════════════════════════════════════════════════ */
+:root{
+  --font-display:-apple-system,"SF Pro Display",BlinkMacSystemFont,"Inter","Segoe UI",system-ui,sans-serif;
+  --font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+body{font-family:var(--font-display);font-feature-settings:'cv01','ss03';line-height:1.55;position:relative}
+/* Tabular numerals on every number that tweens or might shift width during
+   live SSE updates. Keeps columns rock-steady when totals flicker. */
+.metric-val,#hCost,#hToday,#hSess,#hAvg,#hProjection,.sr-cost,.dh-cost,.cmp-col-cost,.qs-num,.op-v,.sunburst-total,.budget-pct,.ic-donut-total{font-feature-settings:"tnum","ss01";font-variant-numeric:tabular-nums}
+.sr-cwd,code,kbd,.fl-path{font-family:var(--font-mono)}
+
+/* Ambient gradient — two large radial light spots that track --accent. Fixed
+   to the viewport, behind everything, no pointer events. Opacity dialed back
+   for dark + auto-dark themes and disabled entirely for high-contrast. */
+body::before{
+  content:'';
+  position:fixed;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+  background:
+    radial-gradient(60vw 60vh at 20% 10%,color-mix(in srgb,var(--accent) 8%,transparent),transparent 60%),
+    radial-gradient(50vw 50vh at 80% 90%,color-mix(in srgb,var(--accent) 6%,transparent),transparent 60%);
+  opacity:.7;
+}
+[data-theme="dark"] body::before{opacity:.45}
+[data-theme="high-contrast"] body::before{display:none}
+@media(prefers-color-scheme:dark){:root:not([data-theme]) body::before{opacity:.45}}
+@media(prefers-reduced-motion:reduce){body::before{display:none}}
+/* Lift all interactive content above the gradient layer. Nav already has its
+   own sticky stacking context (z-index 50), but adding :z-index:1 to the
+   `.page` shell guarantees scroll-top, toasts, and overlays still win. */
+.page,main,.overview,.detail,.cmp-view,#analytics-view,#session-detail-view,nav,footer{position:relative;z-index:1}
+
+/* Glassmorphism — frosted card surfaces. color-mix mutes the solid bg so the
+   ambient gradient and any sibling content shows through the blur. */
+.metric,.chart-section,.heatmap-section,.sunburst-card,.ic-card,.g2-card,.sess-wrap,.op-card,.dh,.token-card,.qs,.panel-card,.d-models{
+  background:color-mix(in srgb,var(--bg2) 82%,transparent);
+  backdrop-filter:blur(12px) saturate(180%);
+  -webkit-backdrop-filter:blur(12px) saturate(180%);
+  border-color:color-mix(in srgb,var(--border) 70%,transparent);
+}
+/* Hero metric keeps its accent tint but blends with bg for the glass effect. */
+.metric.hero-metric{background:color-mix(in srgb,var(--accent-bg) 80%,transparent)}
+/* High-contrast theme: glass mutes color a11y; revert to opaque surfaces. */
+[data-theme="high-contrast"] .metric,
+[data-theme="high-contrast"] .chart-section,
+[data-theme="high-contrast"] .heatmap-section,
+[data-theme="high-contrast"] .sunburst-card,
+[data-theme="high-contrast"] .ic-card,
+[data-theme="high-contrast"] .g2-card,
+[data-theme="high-contrast"] .sess-wrap,
+[data-theme="high-contrast"] .op-card,
+[data-theme="high-contrast"] .dh,
+[data-theme="high-contrast"] .token-card,
+[data-theme="high-contrast"] .qs,
+[data-theme="high-contrast"] .panel-card,
+[data-theme="high-contrast"] .d-models{
+  background:var(--bg2);
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+  border-color:var(--border);
+}
+/* Fallback for browsers without backdrop-filter support (old Safari < 14,
+   Firefox < 103). Drop the transparency so cards don't look washed out. */
+@supports not (backdrop-filter:blur(1px)){
+  .metric,.chart-section,.heatmap-section,.sunburst-card,.ic-card,.g2-card,.sess-wrap,.op-card,.dh,.token-card,.qs,.panel-card,.d-models{background:var(--bg2)}
+  .metric.hero-metric{background:var(--accent-bg)}
+}
+
+/* Hover lift + accent glow. Spring-overshoot easing (the cubic-bezier curve)
+   gives a tiny bounce that reads as "alive" without feeling cartoonish. */
+.metric,.chart-section,.heatmap-section,.sunburst-card,.ic-card,.g2-card,.sess-wrap,.op-card{
+  transition:transform .18s cubic-bezier(0.34,1.56,0.64,1),box-shadow .18s ease,border-color .18s ease,background .2s ease;
+}
+.metric:hover,.chart-section:hover,.heatmap-section:hover,.sunburst-card:hover,.ic-card:hover,.g2-card:hover,.sess-wrap:hover,.op-card:hover{
+  transform:translateY(-2px);
+  box-shadow:0 8px 24px color-mix(in srgb,var(--accent) 15%,transparent),0 2px 8px rgba(0,0,0,.08);
+  border-color:color-mix(in srgb,var(--accent) 30%,var(--border));
+}
+@media(prefers-reduced-motion:reduce){
+  .metric,.chart-section,.heatmap-section,.sunburst-card,.ic-card,.g2-card,.sess-wrap,.op-card{transition:none}
+  .metric:hover,.chart-section:hover,.heatmap-section:hover,.sunburst-card:hover,.ic-card:hover,.g2-card:hover,.sess-wrap:hover,.op-card:hover{transform:none}
+}
+
+/* Metric value tween polish — accent glow while the counter is mid-tween,
+   then a brief scale pulse on completion. animCount() in JS toggles the
+   class names; the @keyframes ensures the pulse plays each time. */
+.metric-val.tweening{
+  color:var(--accent);
+  text-shadow:0 0 12px color-mix(in srgb,var(--accent) 40%,transparent);
+  transition:color .1s ease,text-shadow .1s ease;
+}
+.metric-val.flash{animation:metricFlash .4s ease}
+@keyframes metricFlash{
+  0%{transform:scale(1)}
+  30%{transform:scale(1.08);color:var(--accent);text-shadow:0 0 12px color-mix(in srgb,var(--accent) 50%,transparent)}
+  100%{transform:scale(1);text-shadow:none}
+}
+@media(prefers-reduced-motion:reduce){
+  .metric-val.tweening{text-shadow:none;color:inherit}
+  .metric-val.flash{animation:none}
+}
 </style>
 </head>
 <body>
@@ -1406,18 +1515,33 @@ document.querySelectorAll('.rb').forEach(b=>b.classList.toggle('on',b.dataset.r=
 const fc=v=>v>=100?'$'+v.toFixed(0):v>=1?'$'+v.toFixed(2):'$'+v.toFixed(4);
 const cc=v=>v>=10?'c-red':v>=1?'c-amber':'c-green';
 
-// Animated counter
+// Animated counter — tween 500ms with ease-out cubic; .tweening class adds an
+// accent glow during the tween, .flash triggers a brief scale pulse at the end.
+// Both classes are restarted cleanly on every call so coalesced SSE bursts
+// (~200ms window) re-trigger the pulse rather than getting stuck mid-animation.
 function animCount(el,end,prefix='$'){
   const start=parseFloat(el.dataset.v||'0');
   el.dataset.v=end;
   if(Math.abs(end-start)<0.005){el.textContent=prefix+(end>=100?end.toFixed(0):end>=1?end.toFixed(2):end.toFixed(4));return}
+  if(el.classList){
+    el.classList.remove('flash');
+    el.classList.add('tweening');
+  }
   const t0=performance.now(),dur=500;
   (function tick(now){
     const p=Math.min((now-t0)/dur,1);
     const ease=1-Math.pow(1-p,3);
     const cur=start+(end-start)*ease;
     el.textContent=prefix+(cur>=100?cur.toFixed(0):cur>=1?cur.toFixed(2):cur.toFixed(4));
-    if(p<1)requestAnimationFrame(tick);
+    if(p<1){requestAnimationFrame(tick);return}
+    if(el.classList){
+      el.classList.remove('tweening');
+      // Force reflow so adding .flash always restarts the keyframe animation
+      // even if it was left on the element by a previous tween within 400ms.
+      void el.offsetWidth;
+      el.classList.add('flash');
+      setTimeout(function(){el.classList.remove('flash')},420);
+    }
   })(t0);
 }
 const ft=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':''+n;
