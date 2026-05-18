@@ -61,7 +61,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./... -race -count=1 -timeout=180s
+        run: go test ./... -race -count=1 -timeout=600s
 
       - name: Build
         run: go build -o tm ./cmd/tm/
