@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,12 +154,22 @@ func TestRemoteSubscriberCleanupOnSlowConsumer(t *testing.T) {
 
 	// Spam events so the writer fills the socket buffer and hits the
 	// 200ms write deadline.
+	//
+	// The payload is intentionally large because unix-socket sndbuf
+	// defaults differ by platform: macOS is ~8 KB and a handful of
+	// ~150-byte events overflow it, but Linux's default is ~208 KB
+	// (sysctl net.core.wmem_default). Without padding, 200 events
+	// fit comfortably in the Linux buffer, every write returns before
+	// its 200ms deadline, removeRemoteSub never fires, and the test
+	// fails with "slow remote subscriber not cleaned up" on Linux CI.
+	// 200 events × ~4.5 KB = ~900 KB guarantees overflow on both.
 	ev := event.Event{
 		ID:        "spam",
 		Type:      event.EventTokenUsage,
 		SessionID: "s",
 		Platform:  event.PlatformClaude,
 		Timestamp: time.Now().UTC(),
+		Data:      event.EventData{ToolParams: strings.Repeat("x", 4096)},
 	}
 	for i := 0; i < 200; i++ {
 		d.broadcast(ev)
