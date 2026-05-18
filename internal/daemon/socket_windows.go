@@ -14,8 +14,12 @@ import (
 // On Windows, use TCP localhost instead of Unix socket.
 // The "socket path" is repurposed to store the port file location.
 
-const listenAddr = "127.0.0.1:19847"
-const subscriberListenAddr = "127.0.0.1:19848"
+// Use OS-assigned ports (":0") to avoid bind collisions when multiple
+// daemons run on the same Windows host (tests, parallel installs).
+// The actual port is written to the port file by listenSocket and
+// resolved by dialSocket, so callers never depend on a fixed number.
+const listenAddr = "127.0.0.1:0"
+const subscriberListenAddr = "127.0.0.1:0"
 
 func DefaultSocketPath() string {
 	return appdir.PathFor("tokenmeter.port", "agmon.port")
