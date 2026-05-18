@@ -67,7 +67,7 @@ jobs:
             echo "::warning::Performance regression > 10% detected. Review benchmark output."
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: benchmarks
