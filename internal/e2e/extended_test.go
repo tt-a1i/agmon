@@ -357,7 +357,7 @@ func TestE2EServiceWorkerHeaders(t *testing.T) {
 		t.Fatalf("read sw.js: %v", err)
 	}
 	swContent := string(swBody)
-	for _, want := range []string{"API_CACHE", "tokenmeter-static", "tokenmeter-api-v1"} {
+	for _, want := range []string{"tm-v2-static", "tm-v2-api"} {
 		if !strings.Contains(swContent, want) {
 			t.Errorf("sw.js missing %q", want)
 		}
