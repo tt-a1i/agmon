@@ -977,6 +977,50 @@ body::before{
   .metric-val.tweening{text-shadow:none;color:inherit}
   .metric-val.flash{animation:none}
 }
+
+/* ─── Insight Cards — consumes /api/insights, 1-5 cards in a responsive row ── */
+.insights-section{margin:16px 0 24px}
+.insights-section[hidden]{display:none}
+.insights-title{font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin:0 0 10px}
+.insights-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.insight-card{
+  position:relative;
+  padding:14px 16px;
+  border-radius:10px;
+  background:color-mix(in srgb,var(--bg2) 82%,transparent);
+  backdrop-filter:blur(12px) saturate(180%);
+  -webkit-backdrop-filter:blur(12px) saturate(180%);
+  border:1px solid color-mix(in srgb,var(--border) 70%,transparent);
+  transition:transform .18s cubic-bezier(0.34,1.56,0.64,1),box-shadow .18s ease,border-color .18s ease,opacity .2s ease;
+  display:flex;gap:12px;align-items:flex-start;
+}
+.insight-card:hover{
+  transform:translateY(-2px);
+  box-shadow:0 8px 24px color-mix(in srgb,var(--accent) 15%,transparent),0 2px 8px rgba(0,0,0,.06);
+  border-color:color-mix(in srgb,var(--accent) 30%,var(--border));
+}
+.insight-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.insight-icon{font-size:24px;flex-shrink:0;line-height:1.1}
+.insight-text{flex:1;min-width:0;padding-right:18px}
+.insight-title{font-weight:600;font-size:13px;color:var(--text-strong);margin-bottom:3px;line-height:1.3}
+.insight-body{font-size:12px;color:var(--text);line-height:1.45}
+.insight-dismiss{
+  position:absolute;top:6px;right:8px;
+  background:0;border:0;cursor:pointer;
+  font-size:16px;line-height:1;color:var(--text-muted);
+  opacity:0;transition:opacity .15s,color .1s,background .1s;
+  padding:4px 6px;border-radius:5px;
+}
+.insight-card:hover .insight-dismiss,.insight-card:focus-within .insight-dismiss{opacity:.7}
+.insight-dismiss:hover,.insight-dismiss:focus-visible{opacity:1;color:var(--text-strong);background:var(--bg3);outline:none}
+.insight-card.dismissing{opacity:0;transform:translateY(-2px) scale(.98);pointer-events:none}
+@supports not (backdrop-filter:blur(1px)){.insight-card{background:var(--bg2)}}
+[data-theme="high-contrast"] .insight-card{background:var(--bg2);backdrop-filter:none;-webkit-backdrop-filter:none;border-color:var(--border)}
+@media(prefers-reduced-motion:reduce){
+  .insight-card{transition:opacity .2s ease,border-color .15s ease}
+  .insight-card:hover{transform:none}
+  .insight-card.dismissing{transform:none}
+}
 </style>
 </head>
 <body>
@@ -1029,6 +1073,13 @@ body::before{
     <div class="metric"><div class="metric-label">Sessions</div><div class="metric-val" id="hSess">—</div><div class="metric-sub" id="hSessSub"></div></div>
     <div class="metric"><div class="metric-label">Avg / Session</div><div class="metric-val" id="hAvg">—</div><div class="metric-sub" id="hAvgSub"></div></div>
   </div>
+
+  <!-- Auto-generated insight cards from /api/insights. Hidden until cards arrive
+       so an empty/erroring endpoint doesn't leave an empty heading. -->
+  <section id="insights-section" class="insights-section" aria-labelledby="insights-title" hidden>
+    <h2 id="insights-title" class="insights-title">Today's insights</h2>
+    <div id="insights-row" class="insights-row" role="list"></div>
+  </section>
 
   <div class="budget-bar" id="budgetBar"></div>
   <div class="insight" id="insight"></div>
@@ -2351,6 +2402,7 @@ function applyDashboardData(stats,costs,sessions,projection,catalog){
   renderInteractiveCharts(costs.daily_costs,stats.top_tools,costs.models);
   renderCalendarHeatmap(costs.daily_costs,sessions);
   renderCostSunburst(sessions);
+  scheduleInsightsRefresh();
   // Sparklines in metric cards
   if(costs.daily_costs&&costs.daily_costs.length>1){const sparkData=costs.daily_costs.map(d=>d.Cost);(window.requestIdleCallback||setTimeout)(()=>drawSparkline('sparkCost',sparkData),{timeout:500})}
 }
@@ -3626,6 +3678,87 @@ function renderCostSunburst(sessions){
   var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var draw=function(){drawCostSunburst(sessions)};
   if(reduced){draw()}else{(window.requestIdleCallback||setTimeout)(draw,{timeout:400})}
+}
+
+// === Insight Cards — consumes /api/insights ===
+// Server returns up to 5 self-describing cards (peak_day, top_tool,
+// model_mix_shift, cost_anomaly, rhythm). We render whatever shows up; the
+// kind→icon map is the only client-side mapping.
+var INSIGHT_ICONS={peak_day:'📈',top_tool:'🔧',model_mix_shift:'🔀',cost_anomaly:'⚠️',rhythm:'⏰'};
+// Dismiss state is keyed by insight id (= kind). We store the value the user
+// dismissed against, so when the underlying number changes the card returns
+// — "dismiss" means "I see this number, don't show it again", not "mute kind".
+function isInsightDismissed(i){
+  if(!i||!i.id)return false;
+  try{
+    var v=localStorage.getItem('tokenmeter-insight-dismissed-'+i.id);
+    if(!v)return false;
+    var stored=JSON.parse(v);
+    return Number(stored.value)===Number(i.value||0);
+  }catch(e){return false}
+}
+function dismissInsight(i){
+  if(!i||!i.id)return;
+  try{localStorage.setItem('tokenmeter-insight-dismissed-'+i.id,JSON.stringify({value:Number(i.value||0),at:Date.now()}))}catch(e){}
+}
+async function refreshInsights(){
+  var section=$('insights-section'),row=$('insights-row');
+  if(!section||!row)return;
+  try{
+    // Use apiFetch directly so a failure here doesn't flash the global offline
+    // badge — insights are nice-to-have, not a blocker for the dashboard.
+    var rangeParam=range==='custom'?'all':range;
+    var r=await apiFetch(withAuthUrl('/api/insights?range='+encodeURIComponent(rangeParam)));
+    if(!r.ok){section.hidden=true;return}
+    var data=await r.json();
+    var cards=(data.insights||[]).filter(function(i){return !isInsightDismissed(i)});
+    if(!cards.length){section.hidden=true;row.innerHTML='';return}
+    section.hidden=false;
+    row.innerHTML='';
+    cards.forEach(function(i){
+      var card=document.createElement('article');
+      card.className='insight-card';
+      card.setAttribute('role','listitem');
+      card.setAttribute('data-id',i.id);
+      card.setAttribute('data-value',String(i.value||0));
+      card.tabIndex=0;
+      var icon=INSIGHT_ICONS[i.kind]||'💡';
+      card.innerHTML='<div class="insight-icon" aria-hidden="true">'+escHtml(icon)+'</div>'+
+        '<div class="insight-text"><div class="insight-title">'+escHtml(i.title||'')+'</div>'+
+        '<div class="insight-body">'+escHtml(i.body||'')+'</div></div>'+
+        '<button class="insight-dismiss" type="button" aria-label="Dismiss this insight">×</button>';
+      var btn=card.querySelector('.insight-dismiss');
+      var doDismiss=function(){
+        dismissInsight(i);
+        card.classList.add('dismissing');
+        setTimeout(function(){
+          card.remove();
+          if(!row.children.length)section.hidden=true;
+        },220);
+      };
+      btn.addEventListener('click',function(e){e.stopPropagation();doDismiss()});
+      card.addEventListener('keydown',function(e){
+        // Enter / Space on the card or button dismisses; Esc on focused card
+        // also dismisses for keyboard parity with the close button.
+        if((e.key==='Enter'||e.key===' '||e.key==='Escape')&&(e.target===card||e.target===btn)){
+          e.preventDefault();
+          doDismiss();
+        }
+      });
+      row.appendChild(card);
+    });
+  }catch(e){
+    section.hidden=true;
+    console.warn('insights fetch failed:',e);
+  }
+}
+// Debounced wrapper — applyDashboardData runs on every SSE coalesce (200ms),
+// but the insights endpoint is comparatively expensive (full Analyze() pass),
+// so we throttle to one fire per 800ms regardless of dashboard re-render rate.
+var _insightsTimer=null;
+function scheduleInsightsRefresh(){
+  if(_insightsTimer)return;
+  _insightsTimer=setTimeout(function(){_insightsTimer=null;refreshInsights()},800);
 }
 
 // === A11y: global error handlers ===

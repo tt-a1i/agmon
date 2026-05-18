@@ -1595,6 +1595,111 @@ func TestStaticIndexHasMetricFlashAnimation(t *testing.T) {
 	}
 }
 
+// ─── 波 3 Insight Cards UI (/api/insights consumer) ─────────────────────────
+
+func TestStaticIndexHasInsightsSection(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		`id="insights-section"`,
+		`aria-labelledby="insights-title"`,
+		`id="insights-title"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing insights section marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasInsightsRow(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		`id="insights-row"`,
+		`role="list"`,
+		// Card rows get role="listitem" via setAttribute in refreshInsights.
+		`setAttribute('role','listitem')`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing insights row marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasInsightsRefreshFunction(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"async function refreshInsights",
+		"/api/insights?range=",
+		"scheduleInsightsRefresh",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing refreshInsights marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasInsightDismissPersistence(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"tokenmeter-insight-dismissed-",
+		"function dismissInsight",
+		"function isInsightDismissed",
+		`localStorage.getItem('tokenmeter-insight-dismissed-'`,
+		`localStorage.setItem('tokenmeter-insight-dismissed-'`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing dismiss persistence marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasInsightIcons(t *testing.T) {
+	body := getStaticIndex(t)
+	// INSIGHT_ICONS must map every kind the API can return to a glyph.
+	for _, pair := range [][2]string{
+		{"peak_day", "📈"},
+		{"top_tool", "🔧"},
+		{"model_mix_shift", "🔀"},
+		{"cost_anomaly", "⚠️"},
+		{"rhythm", "⏰"},
+	} {
+		kind, icon := pair[0], pair[1]
+		if !strings.Contains(body, kind+":'"+icon+"'") {
+			t.Errorf("index.html missing INSIGHT_ICONS mapping %s → %s", kind, icon)
+		}
+	}
+}
+
+func TestStaticIndexInsightCardGlassmorphism(t *testing.T) {
+	body := getStaticIndex(t)
+	// .insight-card must inherit the same glass tokens as 波 2 cards.
+	for _, want := range []string{
+		".insight-card",
+		"@supports not (backdrop-filter:blur(1px)){.insight-card{background:var(--bg2)}}",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing insight glass marker: %q", want)
+		}
+	}
+	// The card rule itself must declare backdrop-filter — verify both prefixed
+	// and standard property show up alongside the class.
+	cardIdx := strings.Index(body, ".insight-card{")
+	if cardIdx < 0 {
+		t.Fatal("index.html missing .insight-card{ block")
+	}
+	cardBlock := body[cardIdx:]
+	if endIdx := strings.Index(cardBlock, "}"); endIdx > 0 {
+		cardBlock = cardBlock[:endIdx]
+	}
+	for _, want := range []string{
+		"backdrop-filter:blur(12px) saturate(180%)",
+		"-webkit-backdrop-filter:blur(12px) saturate(180%)",
+	} {
+		if !strings.Contains(cardBlock, want) {
+			t.Errorf("index.html .insight-card block missing: %q", want)
+		}
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestStaticIndexHasSessionDetailView(t *testing.T) {
