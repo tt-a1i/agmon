@@ -1669,6 +1669,174 @@ func TestStaticIndexHasInsightIcons(t *testing.T) {
 	}
 }
 
+// ─── 波 4 audit Top-10 + PWA update banner ─────────────────────────────────
+
+func TestStaticIndexSetPrefThemeOnlyRenderChart(t *testing.T) {
+	body := getStaticIndex(t)
+	// setPref must guard renderChart behind k==='theme' so unrelated prefs
+	// (compact/showCwd/poll) don't trigger a chart repaint.
+	if !strings.Contains(body, "if (k === 'theme' && typeof renderChart === 'function' && lastCostDays) renderChart(lastCostDays)") {
+		t.Error("index.html missing setPref theme-only renderChart guard")
+	}
+	// And setTheme itself must NOT call renderChart any more — that line is
+	// the audit A2 finding and must be removed.
+	if strings.Contains(body, "function setTheme(mode){") {
+		setThemeIdx := strings.Index(body, "function setTheme(mode){")
+		end := strings.Index(body[setThemeIdx:], "\n}")
+		block := body[setThemeIdx : setThemeIdx+end]
+		if strings.Contains(block, "renderChart(lastCostDays)") {
+			t.Error("index.html setTheme still calls renderChart — A2 not addressed")
+		}
+	}
+}
+
+func TestStaticIndexHasInputAriaLabels(t *testing.T) {
+	body := getStaticIndex(t)
+	// Each input id must appear with an aria-label on the same element.
+	pairs := [][2]string{
+		{`id="sessSearch"`, "Filter sessions or search tool calls"},
+		{`id="msgSearch"`, "Search messages in this session"},
+		{`id="dTagInput"`, "Session tag"},
+		{`id="ac-filter-workspace"`, "Filter analytics by workspace path"},
+		{`id="ac-filter-tag"`, "Filter analytics by tag"},
+		{`id="ac-filter-model"`, "Filter analytics by model name"},
+		{`id="budgetName"`, "Budget name"},
+		{`id="budgetAmount"`, "Budget monthly USD limit"},
+		{`id="tokenInput"`, "Bearer token for API authentication"},
+	}
+	for _, p := range pairs {
+		idStr, label := p[0], p[1]
+		if !strings.Contains(body, idStr) {
+			t.Errorf("index.html missing input %s", idStr)
+			continue
+		}
+		// Find the input tag containing this id and verify aria-label is on it.
+		idx := strings.Index(body, idStr)
+		tagStart := strings.LastIndex(body[:idx], "<input")
+		tagEnd := strings.Index(body[idx:], ">")
+		if tagStart < 0 || tagEnd < 0 {
+			t.Errorf("index.html could not bracket <input ...> for %s", idStr)
+			continue
+		}
+		inputTag := body[tagStart : idx+tagEnd+1]
+		if !strings.Contains(inputTag, `aria-label="`+label+`"`) {
+			t.Errorf("input %s missing aria-label %q", idStr, label)
+		}
+	}
+}
+
+func TestStaticIndexHasSessionScrollPersist(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"tm-list-scroll",
+		"sessionStorage.setItem('tm-list-scroll'",
+		"sessionStorage.getItem('tm-list-scroll'",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing scroll-persist marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasGlobalFocusVisible(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, ":where(button, a, input, select, textarea, [tabindex]):focus-visible") {
+		t.Error("index.html missing :where()-based global focus-visible outline")
+	}
+}
+
+func TestStaticIndexHasApplyDashboardRIC(t *testing.T) {
+	body := getStaticIndex(t)
+	// The chart trio (renderChart / renderModels / renderTools) must defer via
+	// requestIdleCallback so they don't block first paint after data refresh.
+	if !strings.Contains(body, "window.requestIdleCallback||function(cb){return setTimeout(cb,16)}") {
+		t.Error("index.html missing requestIdleCallback shim in applyDashboardData")
+	}
+	idx := strings.Index(body, "renderSessions(sessions);")
+	if idx < 0 {
+		t.Fatal("index.html missing renderSessions call site")
+	}
+	block := body[idx : idx+600]
+	// Inside the idle block, the three render functions should appear.
+	if !strings.Contains(block, "renderChart(costs.daily_costs)") ||
+		!strings.Contains(block, "renderModels(costs.models)") ||
+		!strings.Contains(block, "renderTools(stats.top_tools)") {
+		t.Error("index.html applyDashboardData not wrapping chart trio in idle callback")
+	}
+}
+
+func TestStaticIndexHasContentVisibility(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "content-visibility:auto") {
+		t.Error("index.html missing content-visibility:auto declaration")
+	}
+	if !strings.Contains(body, "contain-intrinsic-size:auto 320px") {
+		t.Error("index.html missing contain-intrinsic-size placeholder")
+	}
+}
+
+func TestStaticIndexHasTouchTargetMinHeight(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "min-height:36px") {
+		t.Error("index.html missing min-height:36px touch-target rule")
+	}
+	// Desktop-only override keeps .sort-btn compact
+	if !strings.Contains(body, "@media (min-width:768px)") {
+		t.Error("index.html missing desktop-width touch-target override")
+	}
+}
+
+func TestStaticIndexHasMobileHeroSpan(t *testing.T) {
+	body := getStaticIndex(t)
+	// Find the @media (max-width: 640px) block containing the hero-metric span.
+	if !strings.Contains(body, ".metric.hero-metric{grid-column: 1 / -1}") {
+		t.Error("index.html missing mobile hero-metric grid-column span")
+	}
+	if !strings.Contains(body, "@media (max-width: 640px)") {
+		t.Error("index.html missing the @media (max-width: 640px) block for hero span")
+	}
+}
+
+func TestStaticIndexHasUpdateBannerHandler(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		"function showUpdateBanner",
+		"controllerchange",
+		"reg.addEventListener('updatefound'",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing update-banner handler marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasUpdateBannerSkipWaiting(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "postMessage({type:'SKIP_WAITING'})") {
+		t.Error("index.html missing SKIP_WAITING postMessage from update banner")
+	}
+}
+
+func TestStaticIndexHasSWRegister(t *testing.T) {
+	body := getStaticIndex(t)
+	if !strings.Contains(body, "navigator.serviceWorker.register('/sw.js')") {
+		t.Error("index.html missing serviceWorker.register call")
+	}
+}
+
+func TestStaticIndexHasUpdateBannerStyles(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		".update-banner{",
+		"#update-now",
+		"#update-later",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing update-banner CSS marker: %q", want)
+		}
+	}
+}
+
 func TestStaticIndexInsightCardGlassmorphism(t *testing.T) {
 	body := getStaticIndex(t)
 	// .insight-card must inherit the same glass tokens as 波 2 cards.

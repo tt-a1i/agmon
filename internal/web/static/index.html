@@ -1021,6 +1021,71 @@ body::before{
   .insight-card:hover{transform:none}
   .insight-card.dismissing{transform:none}
 }
+
+/* ─── Audit Top-10 follow-up: a11y / perf / mobile polish ─────────────────── */
+
+/* C4: Global :focus-visible outline for every interactive element. :where()
+   keeps specificity 0,1,0 so existing element-specific styles still win when
+   they want to. Element-specific outline:none rules elsewhere drop the
+   default focus ring; this rule re-establishes it under keyboard nav only. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:2px;
+  border-radius:4px;
+}
+
+/* E3+A5: content-visibility lets the browser skip layout/paint for chart
+   sections that scroll off-screen. contain-intrinsic-size reserves a vertical
+   placeholder so the scrollbar doesn't jump as content materialises. */
+.heatmap-section,
+.sunburst-card,
+.ic-charts-section{
+  content-visibility:auto;
+  contain-intrinsic-size:auto 320px;
+}
+
+/* B7: Touch-target minimum height of 36px for tappy controls. Desktop
+   tightens .sort-btn back to 28px because the dense row would otherwise grow
+   noticeably on viewport widths where finger taps aren't expected. */
+.rb, .tab, .sort-btn, .qs button, .insight-dismiss,
+.analytics-filters button, .ac-filter button, .tag-chip,
+.workspace-chip, .seg button, .tool-filter, .msg-act{
+  min-height:36px;
+}
+@media (min-width:768px){
+  .sort-btn{min-height:28px}
+  .tag-chip,.workspace-chip{min-height:24px}
+}
+
+/* B6: On phones, give the hero metric its own full-width row so it doesn't
+   get crushed alongside the 4 normal metrics. The remaining four wrap into
+   the existing 2×2 grid below. */
+@media (max-width: 640px){
+  .metric.hero-metric{grid-column: 1 / -1}
+}
+
+/* PWA update banner — fixed bottom-right, glass shell consistent with波 2,
+   never blocks more than ~60px of viewport. */
+.update-banner{
+  position:fixed;right:16px;bottom:16px;z-index:120;
+  background:color-mix(in srgb,var(--bg2) 92%,transparent);
+  backdrop-filter:blur(12px) saturate(180%);
+  -webkit-backdrop-filter:blur(12px) saturate(180%);
+  border:1px solid var(--accent-border);
+  border-radius:10px;
+  padding:10px 14px;
+  display:flex;align-items:center;gap:12px;
+  box-shadow:0 4px 16px color-mix(in srgb,var(--accent) 20%,transparent);
+  font-size:13px;color:var(--text-strong);
+  animation:fadeUp .2s ease;
+}
+.update-banner button{padding:4px 12px;cursor:pointer;min-height:32px;font:inherit;font-size:12px;font-weight:600}
+.update-banner #update-now{background:var(--accent);color:#fff;border:0;border-radius:6px}
+.update-banner #update-now:hover{filter:brightness(1.08)}
+.update-banner #update-later{background:0;border:0;color:var(--text-muted);font-size:18px;line-height:1;padding:4px 8px;border-radius:5px}
+.update-banner #update-later:hover{color:var(--text-strong);background:var(--bg3)}
+@supports not (backdrop-filter:blur(1px)){.update-banner{background:var(--bg2)}}
+[data-theme="high-contrast"] .update-banner{background:var(--bg2);backdrop-filter:none;-webkit-backdrop-filter:none}
 </style>
 </head>
 <body>
@@ -1215,7 +1280,7 @@ body::before{
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-title">📋 Sessions</span><span class="section-sub" id="sCnt"></span></div>
     <div id="dayFilter"></div>
     <div class="search-shell">
-      <input class="sess-search" id="sessSearch" placeholder="Filter sessions or search all tool calls..." autocomplete="off">
+      <input class="sess-search" id="sessSearch" placeholder="Filter sessions or search all tool calls..." aria-label="Filter sessions or search tool calls" autocomplete="off">
       <div class="search-dropdown" id="searchDropdown" hidden></div>
     </div>
     <div class="workspace-bar" id="workspaceChips"></div>
@@ -1278,9 +1343,9 @@ body::before{
     <div style="font-size:13px;font-weight:600">Analytics</div>
   </div>
   <div class="analytics-filters" id="ac-filters" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border-light);align-items:center">
-    <input id="ac-filter-workspace" type="text" placeholder="Workspace path…" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
-    <input id="ac-filter-tag" type="text" placeholder="Tag…" style="width:110px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
-    <input id="ac-filter-model" type="text" placeholder="Model…" style="width:130px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
+    <input id="ac-filter-workspace" type="text" placeholder="Workspace path…" aria-label="Filter analytics by workspace path" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
+    <input id="ac-filter-tag" type="text" placeholder="Tag…" aria-label="Filter analytics by tag" style="width:110px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
+    <input id="ac-filter-model" type="text" placeholder="Model…" aria-label="Filter analytics by model name" style="width:130px;padding:5px 8px;border:1px solid var(--border-light);border-radius:6px;background:var(--bg2);color:var(--text);font-size:12px">
     <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ac-filter-compare"> Compare prev period</label>
     <button onclick="applyAnalyticsFilters()" style="padding:5px 14px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;cursor:pointer;white-space:nowrap">Apply</button>
   </div>
@@ -1444,8 +1509,8 @@ body::before{
       <h4>Budgets</h4>
       <div class="budget-list" id="budgetList"></div>
       <div class="budget-form" id="budgetForm" hidden>
-        <input class="budget-input" id="budgetName" placeholder="Name (e.g. Claude monthly)" maxlength="64">
-        <input class="budget-input" id="budgetAmount" type="number" min="0" step="0.01" placeholder="Monthly USD limit">
+        <input class="budget-input" id="budgetName" placeholder="Name (e.g. Claude monthly)" aria-label="Budget name" maxlength="64">
+        <input class="budget-input" id="budgetAmount" type="number" min="0" step="0.01" placeholder="Monthly USD limit" aria-label="Budget monthly USD limit">
         <select class="budget-input" id="budgetPlatform">
           <option value="">All platforms</option>
           <option value="claude">Claude</option>
@@ -1503,14 +1568,20 @@ const $=id=>document.getElementById(id);
 // Preferences — all persist to localStorage under 'tokenmeter-<key>'.
 const PREFS_DEFAULTS={theme:'auto',range:'week',compact:'0',poll:'30',showCwd:'1',showSpark:'1',showProjection:'1',showWorkspace:'1',highlightAnomalies:'1',showCharts:'1'};
 function getPref(k){const v=localStorage.getItem('tokenmeter-'+k);return v==null?PREFS_DEFAULTS[k]:v}
-function setPref(k,v){localStorage.setItem('tokenmeter-'+k,v);applyPreferences()}
+function setPref(k,v){
+  localStorage.setItem('tokenmeter-'+k,v);
+  applyPreferences();
+  // A2: only re-paint the chart when the theme changed — other prefs
+  // (compact/showCwd/poll/etc.) just toggle classList and shouldn't kick
+  // off a full canvas redraw.
+  if (k === 'theme' && typeof renderChart === 'function' && lastCostDays) renderChart(lastCostDays);
+}
 
 // Theme respects 'auto' by following prefers-color-scheme.
 function setTheme(mode){
   const isDark=mode==='dark'||(mode==='auto'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches);
   document.documentElement.setAttribute('data-theme',isDark?'dark':'');
   const btn=$('themeBtn');if(btn)btn.textContent=isDark?'☀️':'🌙';
-  if(typeof renderChart==='function'&&lastCostDays)renderChart(lastCostDays);
 }
 // Legacy toggle button: cycle light ↔ dark (skips auto so a click is always
 // a deterministic visible change). Setting persists.
@@ -2100,6 +2171,8 @@ document.addEventListener('click',e=>{const btn=e.target.closest('[data-copy]');
 // Detail
 async function openSession(id){
   const isReopen=detailSid===id;
+  // B1: remember dashboard scroll position so goBack() can restore it.
+  if(!isReopen){try{sessionStorage.setItem('tm-list-scroll',String(window.scrollY))}catch(e){}}
   $('overview').classList.add('hide');$('detail').classList.add('show');detailSid=id;
   const encodedId=encodeURIComponent(id);
   if(location.hash!=='#session/'+encodedId)history.pushState(null,null,'#session/'+encodedId);
@@ -2143,7 +2216,7 @@ async function openSession(id){
   if(msgs.length){
     const totalChars=msgs.reduce((a,m)=>a+m.content.length,0);
     const charStr=totalChars>1000?(totalChars/1000).toFixed(1)+'k':totalChars;
-    $('msgToolbar').innerHTML=`<input class="msg-search" id="msgSearch" placeholder="Search messages..." oninput="filterMsgs()"><div class="msg-actions"><button class="msg-act" onclick="toggleAllMsgs(true)">Expand all</button><button class="msg-act" onclick="toggleAllMsgs(false)">Collapse</button></div><span class="msg-stat">${msgs.length} msgs · ${charStr} chars</span>`;
+    $('msgToolbar').innerHTML=`<input class="msg-search" id="msgSearch" placeholder="Search messages..." aria-label="Search messages in this session" oninput="filterMsgs()"><div class="msg-actions"><button class="msg-act" onclick="toggleAllMsgs(true)">Expand all</button><button class="msg-act" onclick="toggleAllMsgs(false)">Collapse</button></div><span class="msg-stat">${msgs.length} msgs · ${charStr} chars</span>`;
   }else{$('msgToolbar').innerHTML=''}
   window._msgs=msgs;
 
@@ -2181,7 +2254,7 @@ function editTag(){
   if(!lastDetail||!lastDetail.session)return;
   const block=$('dTagBlock');if(!block)return;
   const tag=(lastDetail.session.tag||'').trim();
-  block.innerHTML=`<span class="d-tag-label">Tag:</span><input class="d-tag-input" id="dTagInput" type="text" placeholder="Add a note..." value="${escAttr(tag)}"><button class="d-tag-action primary" onclick="saveTag()">Save</button><button class="d-tag-action" onclick="cancelTag()">Cancel</button>`;
+  block.innerHTML=`<span class="d-tag-label">Tag:</span><input class="d-tag-input" id="dTagInput" type="text" placeholder="Add a note..." aria-label="Session tag" value="${escAttr(tag)}"><button class="d-tag-action primary" onclick="saveTag()">Save</button><button class="d-tag-action" onclick="cancelTag()">Cancel</button>`;
   const input=$('dTagInput');
   input.focus();input.select();
   input.onkeydown=e=>{
@@ -2269,7 +2342,19 @@ function renderAgentTree(agents){
   return agents.filter(isRoot).map(r=>node(r,0)).join('');
 }
 
-function goBack(){$('detail').classList.remove('show');$('overview').classList.remove('hide');detailSid=null;detailActive=false;history.pushState(null,null,'#');refresh()}
+function goBack(){
+  $('detail').classList.remove('show');$('overview').classList.remove('hide');
+  detailSid=null;detailActive=false;
+  history.pushState(null,null,'#');
+  // B1: re-render from cached state instead of refetching, then restore the
+  // saved scrollY so the list lands at the same row the user came from.
+  if(lastStats&&lastCosts)applyDashboardData(lastStats,lastCosts,allS,lastProjection);
+  else refresh();
+  try{
+    const y=parseInt(sessionStorage.getItem('tm-list-scroll')||'0',10);
+    if(y>0)window.scrollTo({top:y,behavior:'instant'});
+  }catch(e){}
+}
 $('backBtn').onclick=goBack;
 
 let lastDetail=null;
@@ -2398,7 +2483,16 @@ function applyDashboardData(stats,costs,sessions,projection,catalog){
     $('plats').innerHTML='';
   }
 
-  renderSessions(sessions);renderChart(costs.daily_costs);renderModels(costs.models);renderTools(stats.top_tools);
+  // A1: renderSessions stays synchronous because its layout shift is what
+  // dominates CLS; the three chart/table paints all defer to requestIdleCallback
+  // so they don't block the first contentful paint after a data refresh.
+  renderSessions(sessions);
+  const idle=window.requestIdleCallback||function(cb){return setTimeout(cb,16)};
+  idle(function(){
+    renderChart(costs.daily_costs);
+    renderModels(costs.models);
+    renderTools(stats.top_tools);
+  },{timeout:300});
   renderInteractiveCharts(costs.daily_costs,stats.top_tools,costs.models);
   renderCalendarHeatmap(costs.daily_costs,sessions);
   renderCostSunburst(sessions);
@@ -2848,7 +2942,47 @@ refresh();connectEvents();
 // PWA: register the service worker so the dashboard works offline and can be
 // installed to the home screen. Failures are non-fatal — page still works.
 if('serviceWorker' in navigator){
-  window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(err=>console.warn('SW register failed:',err))});
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('/sw.js').then(function(reg){
+      // Watch for a newer worker installing in the background. When it lands
+      // in "installed" state while the page is still controlled by the old
+      // SW, surface an opt-in update banner instead of force-reloading.
+      reg.addEventListener('updatefound',function(){
+        var nw=reg.installing;
+        if(!nw)return;
+        nw.addEventListener('statechange',function(){
+          if(nw.state==='installed'&&navigator.serviceWorker.controller){
+            showUpdateBanner(reg);
+          }
+        });
+      });
+    }).catch(function(err){console.warn('SW register failed:',err)});
+  });
+  // controllerchange fires after the new SW takes over via SKIP_WAITING; reload
+  // once so the page reflects the new bundle. Guard against double-reload by
+  // tracking a flag.
+  var _swReloading=false;
+  navigator.serviceWorker.addEventListener('controllerchange',function(){
+    if(_swReloading)return;
+    _swReloading=true;
+    window.location.reload();
+  });
+}
+function showUpdateBanner(reg){
+  if(document.getElementById('update-banner'))return; // dedupe on rapid update events
+  var b=document.createElement('div');
+  b.id='update-banner';
+  b.className='update-banner';
+  b.setAttribute('role','status');
+  b.setAttribute('aria-live','polite');
+  b.innerHTML='<span class="ub-msg">新版本可用</span>'+
+    '<button id="update-now" type="button">立即刷新</button>'+
+    '<button id="update-later" type="button" aria-label="Dismiss update notice">×</button>';
+  document.body.appendChild(b);
+  document.getElementById('update-now').onclick=function(){
+    if(reg&&reg.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'});
+  };
+  document.getElementById('update-later').onclick=function(){b.remove()};
 }
 // Surface network transitions so users know when they're seeing cached data.
 updateOfflineBadge();
@@ -2966,7 +3100,7 @@ function showTokenModal(){
     modal.innerHTML=`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px 28px;max-width:400px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,.15)" onclick="event.stopPropagation()">
       <h3 id="tokenModalTitle" style="font-size:15px;font-weight:700;color:var(--text-strong);margin-bottom:8px">Authentication Required</h3>
       <p style="font-size:13px;color:var(--text);margin-bottom:16px">Set your bearer token to access the dashboard.</p>
-      <input id="tokenInput" type="password" placeholder="Bearer token" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font:inherit;font-size:13px;color:var(--text-strong);outline:none;margin-bottom:12px" autocomplete="current-password">
+      <input id="tokenInput" type="password" placeholder="Bearer token" aria-label="Bearer token for API authentication" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font:inherit;font-size:13px;color:var(--text-strong);outline:none;margin-bottom:12px" autocomplete="current-password">
       <div style="display:flex;gap:8px">
         <button id="tokenSaveBtn" style="flex:1;background:var(--accent);border:1px solid var(--accent);color:#fff;border-radius:6px;padding:8px;font:inherit;font-size:12px;font-weight:600;cursor:pointer">Save token</button>
         <button id="tokenCancelBtn" style="flex:1;background:0;border:1px solid var(--border);border-radius:6px;padding:8px;font:inherit;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer">Cancel</button>
