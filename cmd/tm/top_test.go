@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,9 @@ func TestRunTopOnceProducesSnapshot(t *testing.T) {
 }
 
 func TestRunTopRespectsInterval(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("100ms interval timing is too tight for the Windows CI runner; the loop only fires once before the 260ms stop signal")
+	}
 	home := t.TempDir()
 	db := openHomeDB(t, home)
 	seedTopSnapshot(t, db)
@@ -103,8 +107,12 @@ func TestRunTopWithEmptyDB(t *testing.T) {
 func seedTopSnapshot(t *testing.T, db *storage.DB) {
 	t.Helper()
 	now := time.Now()
-	seedTopSession(t, db, "top-claude", event.PlatformClaude, "/work/agmon", "main", "claude-sonnet-4-6", 12.34, now.Add(-3*time.Hour))
-	seedTopSession(t, db, "top-codex", event.PlatformCodex, "/work/web", "feature", "gpt-5.5", 8.90, now.Add(-time.Hour))
+	// Anchor both seeds within the last few minutes so the test passes
+	// regardless of when the wall clock fires (previously now-3h / now-1h
+	// would slip into "yesterday" if invoked shortly after local midnight,
+	// breaking the "Top tools today" and "Models" sections).
+	seedTopSession(t, db, "top-claude", event.PlatformClaude, "/work/agmon", "main", "claude-sonnet-4-6", 12.34, now.Add(-2*time.Minute))
+	seedTopSession(t, db, "top-codex", event.PlatformCodex, "/work/web", "feature", "gpt-5.5", 8.90, now.Add(-time.Minute))
 }
 
 func seedTopSession(t *testing.T, db *storage.DB, sessionID string, platform event.Platform, cwd, branch, model string, cost float64, ts time.Time) {

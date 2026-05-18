@@ -127,8 +127,13 @@ func TestHandleCostsTodayIncludesLocalEarlyMorning(t *testing.T) {
 	// this is still 18:00 UTC of the previous calendar day.
 	earlyLocal := localMidnight.Add(2 * time.Hour)
 	if earlyLocal.After(now) {
-		// Test ran near midnight; pick a safe in-range time instead.
-		earlyLocal = now.Add(-30 * time.Minute)
+		// Test ran less than 2 hours into local-today. Anchor the row to
+		// just after local midnight so it still lands in the "today"
+		// bucket, but cap at `now` if we're literally at the boundary.
+		earlyLocal = localMidnight.Add(time.Second)
+		if earlyLocal.After(now) {
+			earlyLocal = now
+		}
 	}
 
 	if err := db.UpsertSession("tz-edge", event.PlatformClaude, earlyLocal); err != nil {

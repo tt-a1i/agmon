@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -89,13 +90,15 @@ func TestRunCostRejectsUnknownPeriod(t *testing.T) {
 
 func TestDefaultLogPath(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	got := defaultLogPath()
 	if got == "" {
 		t.Fatal("defaultLogPath returned empty")
 	}
-	// Should resolve under ~/.tokenmeter (current dir) since we're in a fresh HOME.
-	if want := home + "/.tokenmeter/tokenmeter.log"; got != want {
+	// Should resolve under ~/.tokenmeter (using filepath.Join so the
+	// separator matches the OS on Windows).
+	want := filepath.Join(home, ".tokenmeter", "tokenmeter.log")
+	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }

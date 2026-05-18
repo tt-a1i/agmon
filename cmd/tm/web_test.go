@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -23,7 +24,9 @@ func TestRunWebGenerateToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat web-token: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows os.Chmod can't fully express POSIX 0o600 (NTFS ACLs don't
+	// have a direct mapping). Skip the strict permission assertion there.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("web-token mode = %o, want 600", info.Mode().Perm())
 	}
 	data, err := os.ReadFile(path)

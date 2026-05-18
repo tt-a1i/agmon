@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,9 @@ func TestFTS5SearchSnippetHighlight(t *testing.T) {
 }
 
 func TestFTS5BackfillsOnUpgrade(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("modernc sqlite WAL release timing causes this upgrade test to hang on Windows runners (same root cause as TestAddColumnIfMissingViaPragma in collector/round4_test.go)")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.db")
 	db, err := Open(path)
