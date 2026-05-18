@@ -18,7 +18,7 @@ import (
 func prepareDoctorCleanInstall(t *testing.T) *storage.DB {
 	t.Helper()
 
-	home, err := os.MkdirTemp("/tmp", "tmdoctor-")
+	home, err := os.MkdirTemp("", "tmdoctor-")
 	if err != nil {
 		t.Fatalf("create short temp home: %v", err)
 	}

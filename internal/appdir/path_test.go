@@ -11,6 +11,9 @@ import (
 func TestPathJoinsElems(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 
 	// Single element
 	got := Path("data.db")

@@ -192,6 +192,9 @@ func TestRestoreTabCursorOnDashboardWithEmptyData(t *testing.T) {
 func TestClaudeHooksConfigured(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 
 	// No settings.json → false
 	if got := claudeHooksConfigured(); got {
