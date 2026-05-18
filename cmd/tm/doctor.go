@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/tt-a1i/tokenmeter/internal/appdir"
@@ -749,25 +748,6 @@ func runDoctorSetupQuiet() error {
 	defer func() { os.Stdout = prev }()
 	runSetup()
 	return nil
-}
-
-func daemonPIDRunning(path string) (bool, int) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, 0
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return false, 0
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false, 0
-	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		return false, pid
-	}
-	return true, pid
 }
 
 func doctorIcon(status string) string {

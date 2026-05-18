@@ -39,14 +39,19 @@ func captureStdout(t *testing.T, fn func()) string {
 	os.Stdout = w
 	t.Cleanup(func() { os.Stdout = prev })
 
-	fn()
+	// Drain the pipe concurrently so fn() never blocks when its writes
+	// exceed the pipe buffer. Windows anonymous pipes default to a
+	// smaller buffer than Unix, which caused runDoctor output (~22 long
+	// lines containing absolute paths) to deadlock on windows-latest CI.
+	done := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(r)
+		done <- data
+	}()
 
+	fn()
 	_ = w.Close()
-	data, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
-	}
-	return string(data)
+	return string(<-done)
 }
 
 func openHomeDB(t *testing.T, home string) *storage.DB {
