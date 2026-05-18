@@ -3,6 +3,44 @@
 All notable changes to TokenMeter are tracked here. Versions follow semver.
 The "Unreleased" section captures work merged but not yet tagged.
 
+## v0.8.1 — Fix Windows build
+
+- Split `cmd/tm/reload` into `reload_unix.go` (build tag `!windows`) and
+  a Windows stub returning a clear error. Restores cross-platform builds
+  for goreleaser windows_amd64 / arm64 and CI Vet on windows-latest.
+- No functional change on macOS / Linux versus v0.8.0.
+
+## v0.8.0 — Rename to tm with auto-setup; web flicker fix
+
+### Highlights
+- **Binary renamed** `tokenmeter` → `tm`. `cmd/tokenmeter/` moved to `cmd/tm/`
+  so `go install github.com/tt-a1i/tokenmeter/cmd/tm@latest` produces a
+  short `tm` binary directly.
+- **Auto-setup on first run** — `tm` / `tm daemon` / `tm web` silently
+  inject Claude Code hooks into `~/.claude/settings.json` on first
+  invocation. Manual `tm setup` retained for repair. Legacy
+  `tokenmeter emit` and `agmon emit` hook entries are detected as
+  already-installed; explicit `tm setup` rewrites them.
+- **Web dashboard flicker fixed** — full dashboard repaints (6 metric
+  cards, 3 Canvas charts, sessions list, sparkline) on every SSE
+  `token_usage` event are now coalesced into a 200ms window. In-memory
+  totals (allS / lastStats / lastCosts) still update synchronously so
+  optimistic state remains accurate.
+- **goreleaser v2 migration** — `archives.formats` (array form),
+  `homebrew_casks` replacing `brews`, `skip_upload` template
+  gracefully no-ops when `HOMEBREW_TAP_GITHUB_TOKEN` is absent.
+  Brew install command is now `brew install --cask tt-a1i/tap/tm` (cask
+  tap pending activation).
+- **CI / Docker / release pipelines** updated for renamed binary.
+
+### Preserved (no migration needed)
+- Module path `github.com/tt-a1i/tokenmeter`
+- Data paths `~/.tokenmeter/`, `tokenmeter.db`, `tokenmeter.sock`,
+  `tokenmeter.log`
+- Prometheus metric namespace `tokenmeter_*`
+- localStorage keys and Service Worker cache names — onboarding state
+  and offline cache survive the upgrade
+
 ## v0.7.0 — 2026-05-17
 
 This release rolls up a multi-round hardening pass covering security,

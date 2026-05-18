@@ -24,7 +24,7 @@ git push origin v0.2.0
 
 - GitHub release artifacts for `darwin`, `linux`, and `windows`
 - Checksums
-- Optional Homebrew formula publishing through GoReleaser
+- Optional Homebrew cask publishing through GoReleaser
 
 ## Homebrew Prerequisites
 
