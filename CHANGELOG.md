@@ -107,6 +107,22 @@ failing on duplicate goreleaser runs.
   `tokenmeter-static-v2` / `tokenmeter-api-v1` pools are auto-evicted on
   first `tm-v2-*` activation (no user action required).
 
+### Documentation fixes
+
+Audit-driven (`f8204f8`):
+
+- `tm web --help` no longer lists a non-existent `--host` flag and now
+  documents the real authentication flags (`--token`, `--no-auth`,
+  `--generate-token`).
+- `tm version --help` documents `--json` for machine-readable output.
+- `tm budget --help` includes a `tm budget delete <id>` example.
+- README.md / README_EN.md command tables: `tm cost [period]` lists the
+  six accepted values (today / week / month / 3month / year / all)
+  instead of the stale `[today|week]`.
+- README_EN.md gains rows for `tm web`, `tm report --weekly`, and
+  `tm report --monthly` (previously English readers couldn't discover
+  the web dashboard entry point or weekly/monthly reports).
+
 ## v0.8.1 — 2026-05-17 — Fix Windows build
 
 - Split `cmd/tm/reload` into `reload_unix.go` (build tag `!windows`) and
