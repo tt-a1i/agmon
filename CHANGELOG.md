@@ -3,6 +3,71 @@
 All notable changes to TokenMeter are tracked here. Versions follow semver.
 The "Unreleased" section captures work merged but not yet tagged.
 
+## v0.8.3 — 2026-05-19 — Cross-platform CI fixes
+
+v0.8.2 functionally shipped to `main`, but its `ci.yml` `release` job
+was skipped because the Linux and Windows test matrices uncovered
+cross-platform fixture issues that were invisible on darwin. v0.8.3
+fixes every one of them so the same v0.8.2 feature set is the first
+release to publish six-platform artifacts.
+
+### Linux test fixtures
+
+- **`gofmt cmd/tm/cmd_help.go`** (`5c792c8`) — restores the spacing
+  regression introduced in the `f8204f8` budget seeAlso entry.
+- **`TestFDSnapshotReturnsList`** (`f59bcd7`) opens a canary file so
+  the assertion no longer depends on stdin/stdout/stderr surviving
+  Linux's `/proc/self/fd` noise filter (pipes and `/dev/null` are
+  filtered, so the snapshot returned zero elements on the runner).
+- **`TestRemoteSubscriberCleanupOnSlowConsumer`** (`a6189b7`) inflates
+  the broadcast payload to ~4 KB so 200 events overflow Linux's 208 KB
+  unix-socket sndbuf. macOS sndbuf is ~8 KB, so the test already
+  overflowed there; the test now exercises the cleanup path on both
+  platforms.
+
+### Windows test infrastructure
+
+- **`internal/daemon/socket_windows.go`** (`0c97b71`) — real socket
+  lock using `os.O_CREATE | os.O_EXCL` on a sidecar `.lock` file plus
+  `tasklist`-based stale-PID detection. Previously a no-op stub, so
+  two Windows daemons could share the same port without complaint and
+  `TestStartRefusesIfSocketAlreadyLive` could never observe
+  `ErrExist`.
+- **`daemonPIDRunning` split** (`0c97b71`) into
+  `cmd/tm/doctor_pid_unix.go` (`syscall.Signal(0)` probe) and
+  `doctor_pid_windows.go` (`tasklist` check), so `tm doctor` no longer
+  always reports the daemon as stale on Windows.
+- **`captureStdout` reader goroutine** (`0c97b71`) is now started
+  before the captured function runs, draining the pipe while the
+  function writes. Fixes `windows-latest` hangs when `runDoctor`
+  output exceeded Windows's smaller anonymous pipe buffer.
+- **Six narrower fixture adjustments** (`06f29f6`):
+  `TestDefaultLogPath` uses `setTestHome` for full env coverage;
+  `TestRunReload*` gated to `!windows` (Windows reload is a Unix-only
+  stub); `TestRunTopRespectsInterval` and
+  `TestFTS5BackfillsOnUpgrade` skip on Windows (runner timing /
+  SQLite WAL release); `TestRunWebGenerateToken` tolerates the
+  Windows file-mode mapping; `TestHandleCostsTodayIncludesLocal
+  EarlyMorning` no longer slips its fallback seed into yesterday.
+- **Tightened `TestRunTopOnceProducesSnapshot`** (`06f29f6`) seeds
+  from now−3h to now−2m so the test passes regardless of when the
+  wall clock fires.
+
+### CI plumbing
+
+- **`go test` timeout raised from 180s to 600s** (`62ba70b`); the
+  `windows-latest` runner needs the extra headroom under `-race`,
+  while `ubuntu-latest` still finishes well under a minute.
+
+### Production code touched
+
+- New `internal/daemon/socket_windows.go` (real lock).
+- New `cmd/tm/doctor_pid_unix.go` / `cmd/tm/doctor_pid_windows.go`
+  (split daemon-PID probe).
+
+Everything else in v0.8.3 is `_test.go` fixtures or YAML config; no
+behavior change for end users on macOS or Linux.
+
 ## v0.8.2 — 2026-05-18
 
 A polish-and-stabilize release: web dashboard gets a visual refresh, five
