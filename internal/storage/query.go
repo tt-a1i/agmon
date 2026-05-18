@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -236,7 +237,7 @@ func (s *DB) ListSessionsByPlatform(platform string, limit int) ([]SessionRow, e
 // ListSessionsByWorkspace returns visible sessions whose cwd is exactly the
 // workspace path or a child directory of it.
 func (s *DB) ListSessionsByWorkspace(workspace string, limit int) ([]SessionRow, error) {
-	workspace = filepath.Clean(strings.TrimSpace(workspace))
+	workspace = path.Clean(strings.TrimSpace(workspace))
 	if workspace == "" || workspace == "." {
 		return s.ListSessionsLimit(limit)
 	}
