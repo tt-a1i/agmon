@@ -323,7 +323,7 @@ var cmdHelps = map[string]cmdHelp{
 			"tm budget usage 1",
 			"tm budget delete 1",
 		},
-		seeAlso:     []string{"doctor", "webhook"},
+		seeAlso: []string{"doctor", "webhook"},
 	},
 	"webhook": {
 		name:        "webhook",
