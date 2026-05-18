@@ -112,6 +112,7 @@ func NewServer(db *storage.DB, port string, opts ...ServerOption) *Server {
 	mux.HandleFunc("/api/session/", s.authMiddleware(gz(s.handleSessionDetail)))
 	mux.HandleFunc("/api/analytics", s.authMiddleware(gz(s.handleAnalytics)))
 	mux.HandleFunc("/api/insights", s.authMiddleware(gz(s.handleInsights)))
+	mux.HandleFunc("/api/forecast", s.authMiddleware(gz(s.handleForecast)))
 	mux.HandleFunc("/api/export-report", s.authMiddleware(gz(s.handleExportReport)))
 	mux.HandleFunc("/api/health", s.authMiddleware(gz(s.handleHealth)))
 	mux.HandleFunc("/metrics", s.authMiddleware(s.handleMetrics)) // metrics — no gzip
