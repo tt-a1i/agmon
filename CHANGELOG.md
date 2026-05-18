@@ -3,14 +3,118 @@
 All notable changes to TokenMeter are tracked here. Versions follow semver.
 The "Unreleased" section captures work merged but not yet tagged.
 
-## v0.8.1 — Fix Windows build
+## v0.8.2 — 2026-05-18
+
+A polish-and-stabilize release: web dashboard gets a visual refresh, five
+auto-generated insight cards plus a cost-forecast endpoint, a calendar
+heatmap and cost sunburst, real Windows support across daemon and tests,
+the PWA picks up versioned caches and an update banner, and the release
+pipeline is consolidated onto a single `ci.yml` path so tag pushes stop
+failing on duplicate goreleaser runs.
+
+### Highlights
+
+- **Web dashboard visual upgrade** (`d314297`) — glassmorphism cards with
+  `backdrop-filter: blur(...) saturate(180%)`, spring hover lift
+  (`translateY(-2px)` + accent glow), `tabular-nums` on every numeric
+  metric, ambient radial-gradient body background gated by
+  `prefers-reduced-motion` and high-contrast, and an SSE value-flash so
+  changed numbers briefly highlight without flicker.
+- **Auto-generated insight cards** (`e3e0846` API + `61d5bff` UI) —
+  `GET /api/insights?range=today|week|month|all` returns up to five
+  insights (`peak_day`, `top_tool`, `model_mix_shift`, `cost_anomaly`,
+  `rhythm`), each with `{id, kind, title, body, value, metadata}`. The
+  frontend renders glass cards with per-insight dismiss persisted to
+  localStorage; dismiss resets automatically when the underlying value
+  changes.
+- **Cost forecast endpoint** (`208c68e`) — `GET /api/forecast?period=...`
+  returns `spent_to_date`, `burn_rate_per_day` (7-day rolling),
+  `projected_total`, `projected_remaining`, `confidence`
+  (`low|medium|high`), `trend` (`up|down|stable`), and
+  `vs_previous_period`. Two DB round-trips, no shared state, panic-safe.
+- **Calendar heatmap + cost sunburst** (`b955750`) — 13-week
+  GitHub-style activity heatmap with quantile-tiered cells
+  (`--heatmap-q0..q4`, dark / high-contrast aware) plus a 2-ring sunburst
+  (platform → model) with keyboard navigation. Both have SR-only
+  fallbacks.
+- **Audit-driven polish** (`1e0a74d`) — eight of the top-ten web audit
+  findings landed: `setPref` no longer redraws charts for non-theme
+  changes (A2), nine input elements gained `aria-label` (C1), session
+  detail Back restores scroll position (B1), a global
+  `:where(...):focus-visible` outline (C4), `applyDashboardData` wraps
+  `renderChart` / `renderModels` / `renderTools` in `requestIdleCallback`
+  (A1), `.heatmap-section` / `.sunburst-card` / `.ic-charts-section`
+  pick up `content-visibility: auto` (E3 + A5), tap targets land on
+  `min-height: 36px` with a desktop override at 768px (B7), and hero
+  metrics span the full row at 640px (B6). Chart consolidation (E1) and
+  virtual-scroll Map diff (A3) are intentionally postponed.
+- **PWA update banner** (`1e0a74d`) — `controllerchange` listener and
+  `SKIP_WAITING` postMessage path so new SW versions surface a glass
+  banner ("新版本可用 / 立即刷新 / ×") instead of forcing a manual
+  reload.
+- **PWA infrastructure** (`6411ab7`) — `sw.js` rewritten with versioned
+  cache pool (`tm-v2-static` / `tm-v2-api`), API GET on network-first
+  with a 5s timeout and cached-JSON fallback marked
+  `X-TokenMeter-Cache: hit`, static assets stale-while-revalidate gated
+  on `request.destination`, SSE pass-through for `/api/events`. New
+  `icon-maskable.svg` for Android Adaptive Icon and a `manifest.json`
+  with `short_name "TM"` plus Today / Sessions / Analytics shortcuts.
+
+### Real Windows support
+
+- **Workspace filter uses `path.Clean`** (`2db25dc`) — previously
+  `filepath.Clean` silently converted `/foo` to `\foo` on Windows,
+  breaking workspace-filtered session lists.
+- **Daemon picks OS-assigned TCP ports on Windows via `:0`** (`0dea537`)
+  — fixes bind conflicts when tests restart the daemon rapidly.
+- **Test fixtures cover `USERPROFILE` / `HOMEDRIVE` / `HOMEPATH`**
+  (`38eb2d2`) so `t.Setenv("HOME", ...)` actually isolates on Windows
+  where `os.UserHomeDir()` reads `USERPROFILE`.
+- **Three tests skip on Windows** (`babf734`) for documented
+  environmental differences: modernc SQLite WAL release timing, Windows
+  ACL semantics for `os.Chmod(0o555)`, and GitHub Actions Windows runner
+  I/O latency too slow for the existing p99 budget.
+
+### Release pipeline
+
+- **`.github/workflows/release.yml` removed** (`69d98be`) — it
+  duplicated `ci.yml`'s `release` job and caused every tag push to fail
+  at the second goreleaser invocation. `ci.yml` is now the single
+  canonical release path (lint + cross-platform test matrix +
+  goreleaser with conditional `--skip=homebrew`).
+- **`.goreleaser.yml` on v2 schema** (`d844360`) — `archives.formats`
+  array, `homebrew_casks` replacing `brews` (with `binaries: ["tm"]`
+  instead of a Ruby `install` block), and a `skip_upload` template
+  using `index .Env` that gracefully no-ops when
+  `HOMEBREW_TAP_GITHUB_TOKEN` is absent (`6e8c145`).
+- **Brew install command** updated to `brew install --cask tt-a1i/tap/tm`
+  (`1a536cc`) across `README.md`, `README_EN.md`, `docs/design.md`, and
+  `CLAUDE.md`.
+
+### Documentation
+
+- **`docs/api.md`** (`c47bff7`) — 868 lines covering all 17 HTTP
+  endpoints in a consistent five-section template (description,
+  parameters, response, errors, curl example, source location).
+
+### Preserved (no migration needed)
+
+- Module path `github.com/tt-a1i/tokenmeter`
+- Data paths `~/.tokenmeter/`, `tokenmeter.db`, `tokenmeter.sock`,
+  `tokenmeter.log`
+- Prometheus metric namespace `tokenmeter_*`
+- localStorage keys and Service Worker caches — legacy
+  `tokenmeter-static-v2` / `tokenmeter-api-v1` pools are auto-evicted on
+  first `tm-v2-*` activation (no user action required).
+
+## v0.8.1 — 2026-05-17 — Fix Windows build
 
 - Split `cmd/tm/reload` into `reload_unix.go` (build tag `!windows`) and
   a Windows stub returning a clear error. Restores cross-platform builds
   for goreleaser windows_amd64 / arm64 and CI Vet on windows-latest.
 - No functional change on macOS / Linux versus v0.8.0.
 
-## v0.8.0 — Rename to tm with auto-setup; web flicker fix
+## v0.8.0 — 2026-05-17 — Rename to tm with auto-setup; web flicker fix
 
 ### Highlights
 - **Binary renamed** `tokenmeter` → `tm`. `cmd/tokenmeter/` moved to `cmd/tm/`
