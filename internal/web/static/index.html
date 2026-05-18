@@ -752,6 +752,62 @@ body.hide-workspace .workspace-bar{display:none}
 /* Pull-to-refresh progress bar */
 #ptr-bar{position:fixed;top:0;left:0;right:0;height:3px;background:var(--accent);transform:scaleX(0);transform-origin:left;z-index:200;display:none;transition:transform .15s}
 #ptr-bar.active{display:block}
+/* Calendar Heatmap — 13 weeks × 7 days. Tints use --heatmap-q0..q4 so dark
+   and high-contrast themes can override the palette without JS changes. */
+:root{
+  --heatmap-q0:#ebedf0;--heatmap-q1:#c7d2fe;--heatmap-q2:#a5b4fc;
+  --heatmap-q3:#818cf8;--heatmap-q4:#4f46e5;
+}
+[data-theme="dark"]{
+  --heatmap-q0:#1f1f23;--heatmap-q1:#312e81;--heatmap-q2:#4338ca;
+  --heatmap-q3:#6366f1;--heatmap-q4:#a5b4fc;
+}
+[data-theme="high-contrast"]{
+  --heatmap-q0:#1a1a1a;--heatmap-q1:#444400;--heatmap-q2:#888800;
+  --heatmap-q3:#cccc00;--heatmap-q4:#ffff00;
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){--heatmap-q0:#1f1f23;--heatmap-q1:#312e81;--heatmap-q2:#4338ca;--heatmap-q3:#6366f1;--heatmap-q4:#a5b4fc}}
+.heatmap-section{margin-bottom:24px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px 18px 14px;transition:background .2s,border-color .15s}
+.heatmap-section:hover{border-color:var(--border-hover)}
+.heatmap-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
+.heatmap-title{font-size:13px;font-weight:600;color:var(--text-strong)}
+.heatmap-sub{font-size:11px;color:var(--text-muted)}
+.heatmap-wrap{position:relative;overflow:visible;cursor:pointer}
+.heatmap-wrap canvas{display:block;max-width:100%}
+.heatmap-tip{position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--text-strong);font-weight:600;pointer-events:none;opacity:0;transition:opacity .1s;box-shadow:var(--card-shadow);z-index:6;white-space:nowrap;min-width:140px}
+.heatmap-tip .hm-tip-d{font-size:10px;color:var(--text-muted);font-weight:500;margin-bottom:2px}
+.heatmap-legend{display:flex;align-items:center;gap:4px;margin-top:8px;font-size:10px;color:var(--text-muted)}
+.heatmap-legend .hm-leg-label{margin:0 4px}
+.hm-swatch{width:11px;height:11px;border-radius:2px;display:inline-block}
+.hm-swatch-q0{background:var(--heatmap-q0)}
+.hm-swatch-q1{background:var(--heatmap-q1)}
+.hm-swatch-q2{background:var(--heatmap-q2)}
+.hm-swatch-q3{background:var(--heatmap-q3)}
+.hm-swatch-q4{background:var(--heatmap-q4)}
+/* CSS hook for cell-style hover scale used in spec — kept for future DOM cells
+   and to satisfy the documented contract that hover transforms cells. Canvas
+   cells redraw on hover via JS; this class applies if rendered as DOM later. */
+.heatmap-cell{transition:transform .1s ease}
+.heatmap-cell:hover{transform:scale(1.2)}
+@media(prefers-reduced-motion:reduce){.heatmap-cell:hover{transform:none}.heatmap-cell{transition:none}}
+
+/* Cost Sunburst — 2-ring nested doughnut. Square card; outer ring shows
+   model arcs colored from IC_COLORS palette, inner ring shows platform
+   colored from --badge-* tokens for visual brand parity. */
+.sunburst-section{margin-bottom:24px}
+.sunburst-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;transition:border-color .15s}
+.sunburst-card:hover{border-color:var(--border-hover)}
+.sunburst-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px}
+.sunburst-title{font-size:13px;font-weight:600;color:var(--text-strong)}
+.sunburst-sub{font-size:11px;color:var(--text-muted)}
+.sunburst-wrap{position:relative;display:flex;align-items:center;justify-content:center;min-height:240px}
+.sunburst-wrap canvas{display:block;outline:none}
+.sunburst-wrap canvas:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+.sunburst-center{position:absolute;text-align:center;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:2px}
+.sunburst-total{font-size:18px;font-weight:700;color:var(--text-strong);letter-spacing:-.3px}
+.sunburst-total-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px}
+.sunburst-tip{position:absolute;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--text-strong);font-weight:600;pointer-events:none;opacity:0;transition:opacity .1s;box-shadow:var(--card-shadow);z-index:6;white-space:nowrap}
+
 /* Interactive Charts */
 .ic-charts-section{margin-bottom:24px}
 .ic-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:14px}
@@ -874,6 +930,32 @@ body.hide-workspace .workspace-bar{display:none}
     <div class="chart-labels" id="chartLabels"></div>
   </div>
 
+  <!-- Calendar Heatmap — 13 weeks × 7 days, GitHub contribution style. Sun at top → Sat at bottom. -->
+  <section class="heatmap-section" aria-label="Cost heatmap">
+    <div class="heatmap-head">
+      <span class="heatmap-title">📅 Activity — last 13 weeks</span>
+      <span class="heatmap-sub" id="heatmapSub"></span>
+    </div>
+    <div class="heatmap-wrap" id="heatmapWrap">
+      <canvas id="heatmapCanvas" role="img" aria-label="Cost heatmap for last 13 weeks"></canvas>
+      <div class="heatmap-tip" id="heatmapTip"></div>
+    </div>
+    <div class="heatmap-legend" aria-hidden="true">
+      <span class="hm-leg-label">Less</span>
+      <span class="hm-swatch hm-swatch-q0"></span>
+      <span class="hm-swatch hm-swatch-q1"></span>
+      <span class="hm-swatch hm-swatch-q2"></span>
+      <span class="hm-swatch hm-swatch-q3"></span>
+      <span class="hm-swatch hm-swatch-q4"></span>
+      <span class="hm-leg-label">More</span>
+    </div>
+    <table class="sr-only" id="heatmapSrTable">
+      <caption>Cost heatmap for last 13 weeks — per-day cost and session count</caption>
+      <thead><tr><th scope="col">Date</th><th scope="col">Cost (USD)</th><th scope="col">Sessions</th></tr></thead>
+      <tbody id="heatmapSrBody"></tbody>
+    </table>
+  </section>
+
   <div class="g2">
     <div class="g2-card">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><span class="section-title">🏷 Models</span><span class="section-sub" id="mTot"></span></div>
@@ -942,6 +1024,28 @@ body.hide-workspace .workspace-bar{display:none}
           <thead><tr><th scope="col">Model</th><th scope="col">Input Tokens</th><th scope="col">Output Tokens</th></tr></thead>
           <tbody id="ic-model-tbody"></tbody>
         </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cost Sunburst — 2-ring nested arc chart. Inner=platform, outer=model. -->
+  <section class="sunburst-section" aria-label="Cost breakdown sunburst">
+    <div class="sunburst-card">
+      <div class="sunburst-head">
+        <span class="sunburst-title">💸 Cost breakdown</span>
+        <span class="sunburst-sub" id="sunburstSub"></span>
+      </div>
+      <div class="sunburst-wrap" id="sunburstWrap">
+        <canvas id="sunburstCanvas" role="img" aria-label="Cost breakdown sunburst by platform and model" tabindex="0"></canvas>
+        <div class="sunburst-center" id="sunburstCenter">
+          <span class="sunburst-total" id="sunburstTotal">—</span>
+          <span class="sunburst-total-label">total</span>
+        </div>
+        <div class="sunburst-tip" id="sunburstTip"></div>
+      </div>
+      <div class="sr-only">
+        <h3 id="sunburstSrTitle">Cost breakdown by platform and model</h3>
+        <dl id="sunburstSrList" aria-labelledby="sunburstSrTitle"></dl>
       </div>
     </div>
   </section>
@@ -2121,6 +2225,8 @@ function applyDashboardData(stats,costs,sessions,projection,catalog){
 
   renderSessions(sessions);renderChart(costs.daily_costs);renderModels(costs.models);renderTools(stats.top_tools);
   renderInteractiveCharts(costs.daily_costs,stats.top_tools,costs.models);
+  renderCalendarHeatmap(costs.daily_costs,sessions);
+  renderCostSunburst(sessions);
   // Sparklines in metric cards
   if(costs.daily_costs&&costs.daily_costs.length>1){const sparkData=costs.daily_costs.map(d=>d.Cost);(window.requestIdleCallback||setTimeout)(()=>drawSparkline('sparkCost',sparkData),{timeout:500})}
 }
@@ -3058,6 +3164,343 @@ function renderInteractiveCharts(days,tools,models){
     if(tools&&tools.length)drawToolDonutChart(tools);
     if(models&&models.length)drawModelBarChart(models);
   };
+  if(reduced){draw()}else{(window.requestIdleCallback||setTimeout)(draw,{timeout:400})}
+}
+
+// === Calendar Heatmap — 13 weeks × 7 days, GitHub contribution-graph style ===
+// Data: daily_costs from /api/costs (90-day rolling window built locally, missing
+// days padded with cost=0). Quantile tiers map non-zero costs to --heatmap-q1..q4;
+// zero-cost cells render --heatmap-q0. Hover/click handlers operate on cell
+// hit-boxes stored on each cell object during draw, so we never re-traverse the
+// canvas pixels.
+var _hmCells=null;
+function _hmZpad(n){return n<10?'0'+n:''+n}
+function _hmKey(d){return d.getFullYear()+'-'+_hmZpad(d.getMonth()+1)+'-'+_hmZpad(d.getDate())}
+function buildHeatmapCells(days,sessions){
+  var costByDate={},sessByDate={};
+  if(days)days.forEach(function(d){if(d&&d.Date)costByDate[d.Date]=Number(d.Cost)||0});
+  if(sessions)sessions.forEach(function(s){if(s&&s.start_time){var k=s.start_time.substring(0,10);sessByDate[k]=(sessByDate[k]||0)+1}});
+  var today=new Date();today.setHours(0,0,0,0);
+  var cells=[];
+  for(var i=90;i>=0;i--){
+    var dt=new Date(today.getTime()-i*86400000);
+    var k=_hmKey(dt);
+    cells.push({date:k,dateObj:dt,cost:costByDate[k]||0,sessions:sessByDate[k]||0});
+  }
+  return cells;
+}
+function _hmQuantileTier(value,sortedNonZero){
+  if(value<=0||!sortedNonZero.length)return 0;
+  // Quantile breakpoints 25/50/75/100 of non-zero costs map to tiers 1-4.
+  var breaks=[0.25,0.5,0.75];
+  var n=sortedNonZero.length;
+  for(var i=0;i<breaks.length;i++){
+    var idx=Math.max(0,Math.min(n-1,Math.floor(breaks[i]*n)-1));
+    if(value<=sortedNonZero[idx])return i+1;
+  }
+  return 4;
+}
+function drawCalendarHeatmap(days,sessions){
+  var canvas=document.getElementById('heatmapCanvas'),wrap=document.getElementById('heatmapWrap');
+  if(!canvas||!wrap)return;
+  var cells=buildHeatmapCells(days,sessions);
+  _hmCells=cells;
+  // Layout calc — Sun(0) top → Sat(6) bottom. Each column = 1 calendar week.
+  var rect=wrap.getBoundingClientRect();
+  var Wcss=Math.max(280,rect.width||520);
+  var gap=3,leftPad=24,labelH=18;
+  // Position cells by ISO calendar week relative to first Sunday on/before start
+  var firstSun=new Date(cells[0].dateObj.getTime());
+  firstSun.setDate(firstSun.getDate()-firstSun.getDay());
+  var maxCol=0;
+  cells.forEach(function(c){
+    var diff=Math.round((c.dateObj.getTime()-firstSun.getTime())/86400000);
+    c._col=Math.floor(diff/7);c._row=c.dateObj.getDay();
+    if(c._col>maxCol)maxCol=c._col;
+  });
+  var nCols=maxCol+1;
+  var available=Wcss-leftPad-4;
+  var cellSize=Math.max(10,Math.min(16,Math.floor((available-(nCols-1)*gap)/nCols)));
+  var gridW=leftPad+nCols*cellSize+(nCols-1)*gap+4;
+  var gridH=labelH+7*cellSize+6*gap;
+  var dpr=window.devicePixelRatio||1;
+  canvas.width=Math.round(gridW*dpr);canvas.height=Math.round(gridH*dpr);
+  canvas.style.width=gridW+'px';canvas.style.height=gridH+'px';
+  var ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,gridW,gridH);
+  // Read theme palette from CSS variables so dark/high-contrast follow automatically.
+  var qcols=[
+    icCssVar('--heatmap-q0')||'#ebedf0',
+    icCssVar('--heatmap-q1')||'#c7d2fe',
+    icCssVar('--heatmap-q2')||'#a5b4fc',
+    icCssVar('--heatmap-q3')||'#818cf8',
+    icCssVar('--heatmap-q4')||'#4f46e5'
+  ];
+  var tcol=icCssVar('--text-muted')||'#9ca3af';
+  // Build sorted non-zero cost list for quantile tiering.
+  var sorted=cells.map(function(c){return c.cost}).filter(function(c){return c>0}).sort(function(a,b){return a-b});
+  // Day-of-week labels on the left (Mon/Wed/Fri).
+  ctx.font='9px system-ui,sans-serif';ctx.fillStyle=tcol;ctx.textBaseline='middle';ctx.textAlign='left';
+  [['Mon',1],['Wed',3],['Fri',5]].forEach(function(p){
+    var y=labelH+p[1]*(cellSize+gap)+cellSize/2;
+    ctx.fillText(p[0],0,y);
+  });
+  // Month labels along the top — print the first time we see a new month in
+  // the first week of that month, anchored above its column.
+  var lastMonth=-1;
+  ctx.textBaseline='middle';
+  cells.forEach(function(c){
+    var m=c.dateObj.getMonth();
+    if(c.dateObj.getDate()<=7&&m!==lastMonth){
+      var x=leftPad+c._col*(cellSize+gap);
+      ctx.fillText(c.dateObj.toLocaleDateString('en',{month:'short'}),x,labelH/2);
+      lastMonth=m;
+    }
+  });
+  // Draw cells.
+  cells.forEach(function(c){
+    var x=leftPad+c._col*(cellSize+gap),y=labelH+c._row*(cellSize+gap);
+    var tier=_hmQuantileTier(c.cost,sorted);
+    ctx.fillStyle=qcols[tier];
+    var rad=2;
+    ctx.beginPath();
+    ctx.moveTo(x+rad,y);
+    ctx.lineTo(x+cellSize-rad,y);
+    ctx.quadraticCurveTo(x+cellSize,y,x+cellSize,y+rad);
+    ctx.lineTo(x+cellSize,y+cellSize-rad);
+    ctx.quadraticCurveTo(x+cellSize,y+cellSize,x+cellSize-rad,y+cellSize);
+    ctx.lineTo(x+rad,y+cellSize);
+    ctx.quadraticCurveTo(x,y+cellSize,x,y+cellSize-rad);
+    ctx.lineTo(x,y+rad);
+    ctx.quadraticCurveTo(x,y,x+rad,y);
+    ctx.closePath();ctx.fill();
+    c._x=x;c._y=y;c._size=cellSize;c._tier=tier;
+  });
+  // Sub label.
+  var totalCost=cells.reduce(function(s,c){return s+c.cost},0);
+  var activeDays=cells.filter(function(c){return c.cost>0}).length;
+  var subEl=document.getElementById('heatmapSub');
+  if(subEl)subEl.textContent=fc(totalCost)+' across '+activeDays+' active day'+(activeDays===1?'':'s');
+  // SR-only fallback table.
+  var tbody=document.getElementById('heatmapSrBody');
+  if(tbody)tbody.innerHTML=cells.map(function(c){return'<tr><td>'+escHtml(c.date)+'</td><td>$'+c.cost.toFixed(4)+'</td><td>'+c.sessions+'</td></tr>'}).join('');
+  // Hover tooltip.
+  var tip=document.getElementById('heatmapTip');
+  function showTipFor(c,rectRef){
+    if(!tip)return;
+    var label=new Date(c.date+'T12:00:00').toLocaleDateString('en',{weekday:'short',month:'short',day:'numeric'});
+    tip.innerHTML='<div class="hm-tip-d">'+escHtml(label)+'</div>'+fc(c.cost)+' · '+c.sessions+' session'+(c.sessions===1?'':'s');
+    tip.style.opacity='1';
+    var maxLeft=Math.max(0,(rectRef?rectRef.width:gridW)-180);
+    tip.style.left=Math.min(maxLeft,Math.max(0,c._x-50))+'px';
+    tip.style.top=Math.max(0,c._y-44)+'px';
+  }
+  function hitCell(mx,my){
+    for(var i=0;i<cells.length;i++){var c=cells[i];if(mx>=c._x&&mx<c._x+c._size&&my>=c._y&&my<c._y+c._size)return c}
+    return null;
+  }
+  wrap.onmousemove=function(e){
+    var rr=wrap.getBoundingClientRect(),c=hitCell(e.clientX-rr.left,e.clientY-rr.top);
+    if(!c){if(tip)tip.style.opacity='0';return}
+    showTipFor(c,rr);
+  };
+  wrap.onmouseleave=function(){if(tip)tip.style.opacity='0'};
+  wrap.onclick=function(e){
+    var rr=wrap.getBoundingClientRect(),c=hitCell(e.clientX-rr.left,e.clientY-rr.top);
+    if(!c)return;
+    // Reuse the existing daily-spend filter hook so clicking a cell narrows
+    // the session list to that day.
+    try{if(typeof dayFilter!=='undefined'){dayFilter=c.date;if(typeof renderSessions==='function'&&typeof allS!=='undefined')renderSessions(allS)}}catch(err){}
+    try{window.dispatchEvent(new CustomEvent('tm:dateClick',{detail:{date:c.date,cost:c.cost,sessions:c.sessions}}))}catch(err){}
+  };
+  // Touch — touchstart acts as hover.
+  wrap.ontouchstart=function(e){
+    if(!e.touches.length)return;
+    var rr=wrap.getBoundingClientRect(),t=e.touches[0],c=hitCell(t.clientX-rr.left,t.clientY-rr.top);
+    if(c)showTipFor(c,rr);
+  };
+}
+
+// === Cost Sunburst — 2-ring nested arc by platform → model ===
+// Inner ring: platform (Claude / Codex) using --badge-claude / --badge-codex.
+// Outer ring: model arcs colored from IC_COLORS palette.
+// Angle ∝ cost USD. Aggregation walks the sessions array so per-platform/
+// per-model attribution is exact (cost_usd + platform + model are session-
+// level fields). costs.models has no platform field, so sessions are
+// authoritative for the platform split.
+var _sbSegs=null;
+function buildSunburstData(sessions){
+  var byPlat={};
+  if(sessions)sessions.forEach(function(s){
+    if(!s)return;
+    var p=s.platform||'unknown',m=s.model||'unknown',c=Number(s.cost_usd)||0;
+    if(c<=0)return;
+    if(!byPlat[p])byPlat[p]={cost:0,models:{}};
+    byPlat[p].cost+=c;
+    byPlat[p].models[m]=(byPlat[p].models[m]||0)+c;
+  });
+  return byPlat;
+}
+function drawCostSunburst(sessions){
+  var canvas=document.getElementById('sunburstCanvas'),wrap=document.getElementById('sunburstWrap');
+  if(!canvas||!wrap)return;
+  var byPlat=buildSunburstData(sessions);
+  var platforms=Object.keys(byPlat).filter(function(p){return byPlat[p].cost>0});
+  if(!platforms.length){canvas.width=0;canvas.style.width='0';canvas.style.height='0';var totElEmpty=document.getElementById('sunburstTotal');if(totElEmpty)totElEmpty.textContent='—';return}
+  var total=platforms.reduce(function(s,p){return s+byPlat[p].cost},0)||1;
+  var platColors={
+    claude:icCssVar('--badge-claude')||'#ea580c',
+    codex:icCssVar('--badge-codex')||'#16a34a',
+    unknown:icCssVar('--text-muted')||'#9ca3af'
+  };
+  var modelPalette=(typeof IC_COLORS!=='undefined'&&IC_COLORS)||['#4f46e5','#06b6d4','#22c55e','#f97316','#ec4899','#8b5cf6'];
+  var inner=[],outer=[],ang=-Math.PI/2;
+  platforms.forEach(function(p,pi){
+    var pc=byPlat[p].cost,pSwp=(pc/total)*Math.PI*2;
+    inner.push({label:p,cost:pc,start:ang,end:ang+pSwp,color:platColors[p]||modelPalette[pi%modelPalette.length],kind:'platform'});
+    var models=Object.keys(byPlat[p].models).map(function(m){return{model:m,cost:byPlat[p].models[m]}}).sort(function(a,b){return b.cost-a.cost});
+    var mAng=ang;
+    models.forEach(function(m,mi){
+      var mSwp=(m.cost/total)*Math.PI*2;
+      outer.push({label:m.model,platform:p,cost:m.cost,start:mAng,end:mAng+mSwp,color:modelPalette[mi%modelPalette.length],kind:'model'});
+      mAng+=mSwp;
+    });
+    ang+=pSwp;
+  });
+  _sbSegs={inner:inner,outer:outer,total:total};
+  // Canvas geometry — square, scaled to wrap width but capped to keep arcs readable.
+  var rect=wrap.getBoundingClientRect();
+  var W=Math.max(220,Math.min(rect.width||320,340));
+  var H=W;
+  var dpr=window.devicePixelRatio||1;
+  canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);
+  canvas.style.width=W+'px';canvas.style.height=H+'px';
+  var ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
+  var cx=W/2,cy=H/2;
+  var outerR=Math.min(W,H)*0.46,innerR=outerR*0.62,coreR=innerR*0.55;
+  var stroke=icCssVar('--bg2')||'#fff';
+  // Outer ring (model arcs).
+  outer.forEach(function(seg){
+    ctx.beginPath();
+    ctx.arc(cx,cy,outerR,seg.start,seg.end);
+    ctx.arc(cx,cy,innerR,seg.end,seg.start,true);
+    ctx.closePath();
+    ctx.fillStyle=seg.color;ctx.fill();
+    ctx.strokeStyle=stroke;ctx.lineWidth=1.2;ctx.stroke();
+  });
+  // Inner ring (platform arcs).
+  inner.forEach(function(seg){
+    ctx.beginPath();
+    ctx.arc(cx,cy,innerR,seg.start,seg.end);
+    ctx.arc(cx,cy,coreR,seg.end,seg.start,true);
+    ctx.closePath();
+    ctx.fillStyle=seg.color;ctx.fill();
+    ctx.strokeStyle=stroke;ctx.lineWidth=1.2;ctx.stroke();
+  });
+  // Outer arc labels — skip when arc is too narrow to fit text.
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  outer.forEach(function(seg){
+    var sweep=seg.end-seg.start;
+    if(sweep<0.22)return;
+    var mid=(seg.start+seg.end)/2,lr=(innerR+outerR)/2;
+    var lx=cx+Math.cos(mid)*lr,ly=cy+Math.sin(mid)*lr;
+    var name=String(seg.label||'').replace(/^claude-/,'').replace(/^openai-/,'').replace('-20','').slice(0,12);
+    var pct=(seg.cost/total*100).toFixed(0)+'%';
+    ctx.fillStyle='#fff';
+    ctx.font='bold 9px system-ui,sans-serif';
+    ctx.fillText(name,lx,ly-5);
+    ctx.font='9px system-ui,sans-serif';
+    ctx.fillText(pct,lx,ly+6);
+  });
+  // Centre total.
+  var totEl=document.getElementById('sunburstTotal');if(totEl)totEl.textContent=fc(total);
+  var subEl=document.getElementById('sunburstSub');
+  if(subEl)subEl.textContent=platforms.length+' platform'+(platforms.length===1?'':'s')+' · '+outer.length+' model'+(outer.length===1?'':'s');
+  // SR-only dl/dt/dd list — total, then each platform, then each model line.
+  var sr=document.getElementById('sunburstSrList');
+  if(sr){
+    var html='<dt>Total cost</dt><dd>$'+total.toFixed(4)+'</dd>';
+    platforms.forEach(function(p){
+      var pc=byPlat[p].cost,ppct=(pc/total*100).toFixed(1);
+      html+='<dt>'+escHtml(p)+'</dt><dd>$'+pc.toFixed(4)+' ('+ppct+'%)</dd>';
+      var models=Object.keys(byPlat[p].models).sort(function(a,b){return byPlat[p].models[b]-byPlat[p].models[a]});
+      models.forEach(function(m){
+        var mc=byPlat[p].models[m],mpct=(mc/total*100).toFixed(1);
+        html+='<dt>'+escHtml(p)+' / '+escHtml(m)+'</dt><dd>$'+mc.toFixed(4)+' ('+mpct+'%)</dd>';
+      });
+    });
+    sr.innerHTML=html;
+  }
+  // Hover tooltip / click drill — same hit-test for both.
+  var tip=document.getElementById('sunburstTip');
+  function angleFor(px,py){
+    var a=Math.atan2(py,px);
+    while(a<-Math.PI/2)a+=Math.PI*2;
+    while(a>Math.PI*1.5)a-=Math.PI*2;
+    return a;
+  }
+  function hitSeg(mx,my){
+    var dx=mx-cx,dy=my-cy,d=Math.sqrt(dx*dx+dy*dy);
+    if(d<coreR||d>outerR)return null;
+    var ring=d<innerR?_sbSegs.inner:_sbSegs.outer,a=angleFor(dx,dy);
+    for(var i=0;i<ring.length;i++){var s=ring[i];if(a>=s.start&&a<=s.end)return s}
+    return null;
+  }
+  wrap.onmousemove=function(e){
+    if(!tip||!_sbSegs)return;
+    var rr=wrap.getBoundingClientRect();
+    var hit=hitSeg(e.clientX-rr.left,e.clientY-rr.top);
+    if(!hit){tip.style.opacity='0';return}
+    var pct=(hit.cost/_sbSegs.total*100).toFixed(1);
+    var prefix=hit.kind==='model'?(hit.platform+' / '):'';
+    tip.innerHTML='<span style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:'+hit.color+'"></span>'+escHtml(prefix+hit.label)+' · '+fc(hit.cost)+' ('+pct+'%)';
+    tip.style.opacity='1';
+    var bx=e.clientX-rr.left+12,by=e.clientY-rr.top+12;
+    tip.style.left=Math.min(rr.width-220,Math.max(0,bx))+'px';
+    tip.style.top=Math.min(rr.height-40,Math.max(0,by))+'px';
+  };
+  wrap.onmouseleave=function(){if(tip)tip.style.opacity='0'};
+  wrap.onclick=function(e){
+    if(!_sbSegs)return;
+    var rr=wrap.getBoundingClientRect();
+    var hit=hitSeg(e.clientX-rr.left,e.clientY-rr.top);
+    if(!hit)return;
+    try{window.dispatchEvent(new CustomEvent('tm:sunburstClick',{detail:{kind:hit.kind,label:hit.label,platform:hit.platform||hit.label,cost:hit.cost}}))}catch(err){}
+  };
+  // Keyboard navigation on the canvas — Tab to focus, arrows cycle outer ring,
+  // Enter fires the same drill event the mouse click does.
+  var kbIdx=-1;
+  canvas.onkeydown=function(e){
+    if(!_sbSegs||!_sbSegs.outer.length)return;
+    if(e.key==='ArrowRight'||e.key==='ArrowDown'){kbIdx=(kbIdx+1)%_sbSegs.outer.length;e.preventDefault()}
+    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){kbIdx=(kbIdx-1+_sbSegs.outer.length)%_sbSegs.outer.length;e.preventDefault()}
+    else if(e.key==='Enter'){if(kbIdx>=0){var s0=_sbSegs.outer[kbIdx];try{window.dispatchEvent(new CustomEvent('tm:sunburstClick',{detail:{kind:s0.kind,label:s0.label,platform:s0.platform,cost:s0.cost}}))}catch(err){}}return}
+    else if(e.key==='Escape'){if(tip)tip.style.opacity='0';kbIdx=-1;return}
+    else return;
+    var s=_sbSegs.outer[kbIdx];
+    if(tip){
+      var pct=(s.cost/_sbSegs.total*100).toFixed(1);
+      tip.innerHTML='<span style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:'+s.color+'"></span>'+escHtml(s.platform+' / '+s.label)+' · '+fc(s.cost)+' ('+pct+'%)';
+      tip.style.opacity='1';
+      var mid=(s.start+s.end)/2,lr=(innerR+outerR)/2;
+      tip.style.left=Math.min(W-220,Math.max(0,cx+Math.cos(mid)*lr-90))+'px';
+      tip.style.top=Math.min(H-40,Math.max(0,cy+Math.sin(mid)*lr-12))+'px';
+    }
+  };
+  canvas.onblur=function(){if(tip)tip.style.opacity='0';kbIdx=-1};
+}
+
+// Wrappers consistent with renderInteractiveCharts — respect showCharts pref and
+// prefers-reduced-motion. Both run in a single rIC slot to coalesce paints.
+function renderCalendarHeatmap(days,sessions){
+  if(getPref('showCharts')!=='1')return;
+  var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var draw=function(){drawCalendarHeatmap(days,sessions)};
+  if(reduced){draw()}else{(window.requestIdleCallback||setTimeout)(draw,{timeout:400})}
+}
+function renderCostSunburst(sessions){
+  if(getPref('showCharts')!=='1')return;
+  var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var draw=function(){drawCostSunburst(sessions)};
   if(reduced){draw()}else{(window.requestIdleCallback||setTimeout)(draw,{timeout:400})}
 }
 

@@ -1435,6 +1435,70 @@ func TestStaticIndexHasChartReducedMotion(t *testing.T) {
 	}
 }
 
+// ─── Calendar Heatmap + Cost Sunburst (波 1 吸睛图表) ─────────────────────────
+
+func TestStaticIndexHasCalendarHeatmap(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		`id="heatmapCanvas"`,
+		`aria-label="Cost heatmap for last 13 weeks"`,
+		"drawCalendarHeatmap",
+		"renderCalendarHeatmap",
+		"--heatmap-q0",
+		"--heatmap-q4",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing calendar heatmap marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasHeatmapSRFallback(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		`id="heatmapSrTable"`,
+		`id="heatmapSrBody"`,
+		"Cost heatmap for last 13 weeks",
+		`class="sr-only" id="heatmapSrTable"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing heatmap SR fallback: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasSunburstCanvas(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		`id="sunburstCanvas"`,
+		`aria-label="Cost breakdown sunburst by platform and model"`,
+		"drawCostSunburst",
+		"renderCostSunburst",
+		// arc render references — sunburst uses ctx.arc twice per ring
+		"ctx.arc(cx,cy,outerR",
+		"ctx.arc(cx,cy,innerR",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing sunburst canvas/render marker: %q", want)
+		}
+	}
+}
+
+func TestStaticIndexHasSunburstSRFallback(t *testing.T) {
+	body := getStaticIndex(t)
+	for _, want := range []string{
+		`id="sunburstSrList"`,
+		`<dl id="sunburstSrList"`,
+		"<dt>",
+		"<dd>",
+		"Cost breakdown by platform and model",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("index.html missing sunburst SR fallback: %q", want)
+		}
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestStaticIndexHasSessionDetailView(t *testing.T) {
