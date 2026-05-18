@@ -121,7 +121,7 @@ tm
 | `tm report --weekly` | 本周 Markdown 费用报告 |
 | `tm report --monthly` | 本月 Markdown 费用报告 |
 | `tm share [session]` | 生成可分享的 Markdown 会话战报 |
-| `tm cost [today\|week]` | Token 用量统计 |
+| `tm cost [period]` | Token 用量统计（period: today / week / month / 3month / year / all） |
 | `tm web [--port N]` | 启动 Web Dashboard（默认端口 8370） |
 | `tm clean [days]` | 清理 N 天前的历史数据（默认 7 天） |
 | `tm tag <id> [text]` | 给会话打标签（省略 text 则清除） |

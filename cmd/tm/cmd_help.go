@@ -80,9 +80,12 @@ var cmdHelps = map[string]cmdHelp{
 		short:       "Show version (and check for updates)",
 		usage:       "tm version [options]",
 		description: "Show the current TokenMeter version and optionally check GitHub for a newer release.",
-		options:     []optionHelp{{"--check", "check whether a newer release is available"}},
-		examples:    []string{"tm version", "tm version --check"},
-		seeAlso:     []string{"update"},
+		options: []optionHelp{
+			{"--check", "check whether a newer release is available"},
+			{"--json", "output machine-readable JSON"},
+		},
+		examples: []string{"tm version", "tm version --check", "tm version --check --json"},
+		seeAlso:  []string{"update"},
 	},
 	"help": {
 		name:        "help",
@@ -107,9 +110,11 @@ var cmdHelps = map[string]cmdHelp{
 		description: "Start the local web dashboard.",
 		options: []optionHelp{
 			{"--port N", "listen on port N (default: 8370)"},
-			{"--host HOST", "bind to HOST when supported"},
+			{"--token TOKEN", "require Bearer TOKEN on requests"},
+			{"--no-auth", "disable Bearer token authentication"},
+			{"--generate-token", "generate a new random Bearer token and exit"},
 		},
-		examples: []string{"tm web", "tm web --port 9000"},
+		examples: []string{"tm web", "tm web --port 9000", "tm web --generate-token"},
 		seeAlso:  []string{"top", "watch"},
 	},
 	"watch": {
@@ -312,7 +317,12 @@ var cmdHelps = map[string]cmdHelp{
 		usage:       "tm budget <list|set|delete|usage> [args]",
 		description: "Manage monthly budgets and inspect usage against configured limits.",
 		options:     []optionHelp{{"--platform PLATFORM", "for set: claude | codex"}},
-		examples:    []string{"tm budget list", `tm budget set "Monthly" 100 --platform claude`, "tm budget usage 1"},
+		examples: []string{
+			"tm budget list",
+			`tm budget set "Monthly" 100 --platform claude`,
+			"tm budget usage 1",
+			"tm budget delete 1",
+		},
 		seeAlso:     []string{"doctor", "webhook"},
 	},
 	"webhook": {

@@ -112,8 +112,11 @@ That's it. Use Claude Code or Codex normally — TokenMeter captures everything 
 | `tm daemon` | Start daemon only |
 | `tm status` | Quick session summary |
 | `tm report [session]` | Detailed text report |
+| `tm report --weekly` | Markdown weekly cost report |
+| `tm report --monthly` | Markdown monthly cost report |
 | `tm share [session]` | Shareable Markdown session recap |
-| `tm cost [today\|week]` | Token usage statistics |
+| `tm cost [period]` | Token usage statistics (period: today / week / month / 3month / year / all) |
+| `tm web [--port N]` | Start Web Dashboard (default port 8370) |
 | `tm clean [days]` | Remove sessions older than N days (default: 7) |
 | `tm tag <id> [text]` | Tag a session with a note (omit text to clear) |
 | `tm setup` | Configure Claude Code hooks |
