@@ -16,11 +16,11 @@ builds:
       - -s -w -X main.version={{ .Version }}
 
 archives:
-  - format: tar.gz
+  - formats: ["tar.gz"]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: ["zip"]
 
 checksum:
   name_template: "checksums.txt"
@@ -28,7 +28,7 @@ checksum:
 changelog:
   sort: asc
 
-brews:
+homebrew_casks:
   - repository:
       owner: tt-a1i
       name: homebrew-tap
@@ -36,5 +36,4 @@ brews:
     skip_upload: '{{ if not (index .Env "HOMEBREW_TAP_GITHUB_TOKEN") }}true{{ else }}false{{ end }}'
     homepage: "https://github.com/tt-a1i/tokenmeter"
     description: "Real-time observability for AI coding agents"
-    install: |
-      bin.install "tm"
+    binaries: ["tm"]
