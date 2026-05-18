@@ -109,10 +109,10 @@ tm uninstall          # clean up hooks and data
 - **Language:** Go
 - **TUI:** bubbletea + lipgloss + bubbles
 - **Storage:** SQLite (modernc.org/sqlite)
-- **Distribution:** goreleaser + Homebrew tap
+- **Distribution:** goreleaser + Homebrew Cask tap
 
 ## Distribution
 
 - GitHub Releases via goreleaser (darwin/linux × amd64/arm64)
-- Homebrew tap: `brew install tt-a1i/tap/tm`
+- Homebrew tap (coming soon): `brew install --cask tt-a1i/tap/tm`
 - Single binary, zero dependencies

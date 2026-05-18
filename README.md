@@ -76,14 +76,16 @@
 curl -sL https://raw.githubusercontent.com/tt-a1i/tokenmeter/main/install.sh | sh
 ```
 
-### Homebrew
+### Homebrew Cask
 
 仅当 release 流水线配置了 Homebrew tap 仓库和 `HOMEBREW_TAP_GITHUB_TOKEN` 时可用。
 发布细节见 [docs/release.md](docs/release.md)。
 
 ```bash
-brew install tt-a1i/tap/tm
+brew install --cask tt-a1i/tap/tm
 ```
+
+_Homebrew tap 仓库准备中；目前请用上面的一键安装脚本、`go install` 或 GitHub Releases 直装。_
 
 ### Go Install
 
