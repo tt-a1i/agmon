@@ -16,13 +16,27 @@ func TestFDSnapshotReturnsList(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("FD snapshot not supported on windows")
 	}
+	// Open a real file so we have at least one non-noisy FD even on Linux,
+	// where FDSnapshot's filter strips stdin/stdout/stderr (typically
+	// /dev/null and pipes under `go test` on CI). On macOS FDSnapshot
+	// reports "fd:N" for stdin/stdout/stderr without filtering, so this
+	// canary just adds one more entry there.
+	canary := filepath.Join(t.TempDir(), "fd-canary.txt")
+	if err := os.WriteFile(canary, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write canary: %v", err)
+	}
+	f, err := os.Open(canary)
+	if err != nil {
+		t.Fatalf("open canary: %v", err)
+	}
+	defer f.Close()
+
 	fds, err := testutil.FDSnapshot()
 	if err != nil {
 		t.Fatalf("FDSnapshot: %v", err)
 	}
-	// stdin (fd:0), stdout (fd:1), stderr (fd:2) must be open.
-	if len(fds) < 3 {
-		t.Errorf("FDSnapshot returned %d fds, expected at least 3:\n%s",
+	if len(fds) < 1 {
+		t.Errorf("FDSnapshot returned %d fds, expected at least 1 (the canary):\n%s",
 			len(fds), testutil.FormatFDs(fds))
 	}
 }
